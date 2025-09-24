@@ -10,46 +10,6 @@ from abc import abstractmethod
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
-class NoisyNeuronModel(eqx.Module):
-    N_neurons: int = eqx.field(static=True)
-    network: eqx.Module
-    noise_E: eqx.Module
-    noise_I: eqx.Module
-
-    def __init__(self, N_neurons: int = 10):
-        self.N_neurons = N_neurons
-        self.network = NeuronModel(N_neurons=N_neurons, num_inputs=0)
-        self.noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N_neurons)
-        self.noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N_neurons)
-
-    @property
-    def initial(self):
-        return (self.network.initial, self.noise_E.initial, self.noise_I.initial)
-    
-    def drift(self, t, x, args):
-        (V, conductances, spikes), noise_E_state, noise_I_state = x
-        args =  {'excitatory_noise': lambda t, x, args: noise_E_state, 'inhibitory_noise': lambda t, x, args: noise_I_state}
-        network_drift = self.network.drift(t, (V, conductances, spikes), args)
-        noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
-        noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
-        return (network_drift, noise_E_drift, noise_I_drift)
-    
-    def diffusion(self, t, x, args):
-        (V, conductances, spikes), noise_E_state, noise_I_state = x
-        network_diffusion = self.network.diffusion(t, (V, conductances, spikes), args)
-        noise_E_diffusion = self.noise_E.diffusion(t, noise_E_state, args)
-        noise_I_diffusion = self.noise_I.diffusion(t, noise_I_state, args)
-        return (network_diffusion, noise_E_diffusion, noise_I_diffusion)
-    
-    @property
-    def noise_shape(self):
-        return (self.network.noise_shape, self.noise_E.noise_shape, self.noise_I.noise_shape)
-    
-    def terms(self, key):
-        process_noise = dfx.UnsafeBrownianPath(shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea)
-        return dfx.MultiTerm(dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise))
-
-
 class OUP(eqx.Module):
     theta: float = 1.0
     noise_scale: float = 1.0
@@ -80,10 +40,12 @@ class NeuronModel(eqx.Module):
     resting_potential: float = -70.0 # mV
     connection_prob: float = 0.1
     reversal_potential_E: float = 0.0 # mV
-    reversal_potential_I: float = -80.0 # mV
-    tau_E: float = 5.0 # ms
-    tau_I: float = 10.0 # ms
-    synaptic_increment: float = 1.0 # nS
+    reversal_potential_I: float = 75.0 # mV
+    tau_E: float = 2.0 # ms
+    tau_I: float = 6.0 # ms
+    synaptic_increment: float = 1.0
+    firing_threshold: float = -50.0 # mV
+    V_reset: float = -60.0 # mV
     
     N_neurons: int = eqx.field(static=True)
     num_inputs: int = eqx.field(static=True)
@@ -124,10 +86,10 @@ class NeuronModel(eqx.Module):
         excitatory_conductances = jnp.sum(weighted_conductances * self.excitatory_mask, axis=1)
 
         # Get noise from args and add to total conductances
-        inhibitory_noise = args['inhibitory_noise'](t, x, args) if args and 'inhibitory_noise' in args else jnp.zeros((self.N_neurons,))
-        excitatory_noise = args['excitatory_noise'](t, x, args) if args and 'excitatory_noise' in args else jnp.zeros((self.N_neurons,))
-        inhibitory_conductances += inhibitory_noise
-        excitatory_conductances += excitatory_noise
+        if args and 'inhibitory_noise' in args:
+            inhibitory_conductances += args['inhibitory_noise'](t, x, args)
+        if args and 'excitatory_noise' in args:
+            excitatory_conductances += args['excitatory_noise'](t, x, args)
 
         # Compute total recurrent current
         recurrent_current = inhibitory_conductances * (self.reversal_potential_I - V) + excitatory_conductances * (self.reversal_potential_E - V)
@@ -152,3 +114,43 @@ class NeuronModel(eqx.Module):
     
     def terms(self, key):
         return dfx.MultiTerm(dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, dfx.UnsafeBrownianPath(shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea)))
+    
+
+class NoisyNeuronModel(eqx.Module):
+    N_neurons: int = eqx.field(static=True)
+    network: NeuronModel
+    noise_E: OUP
+    noise_I: OUP
+
+    def __init__(self,  N_neurons: int, neuron_model, noise_I_model, noise_E_model):
+        self.N_neurons = N_neurons
+        self.network = neuron_model
+        self.noise_E = noise_E_model
+        self.noise_I = noise_I_model
+
+    @property
+    def initial(self):
+        return (self.network.initial, self.noise_E.initial, self.noise_I.initial)
+    
+    def drift(self, t, x, args):
+        (V, conductances, spikes), noise_E_state, noise_I_state = x
+        args =  {'excitatory_noise': lambda t, x, args: noise_E_state, 'inhibitory_noise': lambda t, x, args: noise_I_state}
+        network_drift = self.network.drift(t, (V, conductances, spikes), args)
+        noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
+        noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
+        return (network_drift, noise_E_drift, noise_I_drift)
+    
+    def diffusion(self, t, x, args):
+        (V, conductances, spikes), noise_E_state, noise_I_state = x
+        network_diffusion = self.network.diffusion(t, (V, conductances, spikes), args)
+        noise_E_diffusion = self.noise_E.diffusion(t, noise_E_state, args)
+        noise_I_diffusion = self.noise_I.diffusion(t, noise_I_state, args)
+        return (network_diffusion, noise_E_diffusion, noise_I_diffusion)
+    
+    @property
+    def noise_shape(self):
+        return (self.network.noise_shape, self.noise_E.noise_shape, self.noise_I.noise_shape)
+    
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea)
+        return dfx.MultiTerm(dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise))
