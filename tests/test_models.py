@@ -2,6 +2,16 @@ from adaptive_SNN.models.models import NeuronModel, OUP
 import jax.random as jr
 import jax.numpy as jnp
 import diffrax as dfx
+from adaptive_SNN.models.models import NeuronModel, NoisyNeuronModel, OUP
+
+
+def _baseline_state(model: NeuronModel):
+    N = model.N_neurons
+    V = jnp.ones((N,)) * model.resting_potential  # set V = V_rest so leak = 0
+    G = jnp.zeros((N, N))
+    S = jnp.zeros((N,))
+    return (V, G, S)
+
 
 def test_parameter_shapes():
     N = 10
@@ -54,7 +64,8 @@ def test_drift_voltage_output():
     N = 10
     key = jr.PRNGKey(0)
     model = NeuronModel(N_neurons=N, num_inputs=3, key=key)
-    # Manually set initial state for predictable output
+
+    # Manually set initial state- V at zero, so leak current is predictable
     initial_state = jnp.zeros((N,)), jnp.zeros((N, N)), jnp.zeros((N,))
     drift = model.drift(0.0, initial_state, None)
     dv = drift[0]
@@ -66,7 +77,8 @@ def test_drift_conductance_output():
     N = 10
     key = jr.PRNGKey(0)
     model = NeuronModel(N_neurons=N, num_inputs=3, key=key)
-    # Manually set initial state for predictable output
+
+    # Manually set initial state- G at ones, so decay is predictable
     initial_state = jnp.zeros((N,)), jnp.ones((N, N)), jnp.zeros((N,))
     drift = model.drift(0.0, initial_state, None)
     dg = drift[1]
@@ -177,3 +189,117 @@ def test_OUP_zero_mean():
     x = sol.ys
     mean = jnp.mean(x, axis=0)
     assert jnp.all(jnp.abs(mean) < 1)  # Mean should be close to zero over long time
+
+
+def test_excitatory_noise_only_affects_voltage_correctly():
+    N = 7
+    key = jr.PRNGKey(0)
+    model = NeuronModel(N_neurons=N, key=key)
+
+    # Remove recurrent effects; isolate noise contribution
+    object.__setattr__(model, "recurrent_weights", jnp.zeros((N, N)))
+
+    state = _baseline_state(model)
+
+    # Excitatory noise vector (distinct values to avoid accidental symmetry)
+    noise_E = jnp.arange(N, dtype=state[0].dtype)
+    noise_I = jnp.zeros((N,), dtype=state[0].dtype)
+
+    args = {
+        "excitatory_noise": lambda t, x, a: noise_E,
+        "inhibitory_noise": lambda t, x, a: noise_I,
+    }
+
+    dv, dG, _ = model.drift(0.0, state, args)
+
+    expected = (noise_E * (model.reversal_potential_E - state[0])) / model.membrane_conductance
+
+    assert jnp.allclose(dv, expected)
+    assert jnp.all(dG == 0)
+
+
+def test_inhibitory_noise_only_affects_voltage_correctly():
+    N = 5
+    key = jr.PRNGKey(1)
+    model = NeuronModel(N_neurons=N, key=key)
+
+    object.__setattr__(model, "recurrent_weights", jnp.zeros((N, N)))
+    state = _baseline_state(model)
+
+    noise_E = jnp.zeros((N,), dtype=state[0].dtype)
+    noise_I = jnp.linspace(0.0, 1.0, N, dtype=state[0].dtype)
+
+    args = {
+        "excitatory_noise": lambda t, x, a: noise_E,
+        "inhibitory_noise": lambda t, x, a: noise_I,
+    }
+
+    dv, dG, _ = model.drift(0.0, state, args)
+
+    expected = (noise_I * (model.reversal_potential_I - state[0])) / model.membrane_conductance
+
+    assert jnp.allclose(dv, expected)
+    assert jnp.all(dG == 0)
+
+
+def test_both_noises_add_linearly():
+    N = 6
+    key = jr.PRNGKey(2)
+    model = NeuronModel(N_neurons=N, key=key)
+    object.__setattr__(model, "recurrent_weights", jnp.zeros((N, N)))
+    state = _baseline_state(model)
+
+    # Some distinct values to avoid accidental symmetry
+    noise_E = jnp.linspace(0.1, 2.5, N, dtype=state[0].dtype)
+    noise_I = jnp.linspace(0.0, 1.0, N, dtype=state[0].dtype)
+
+    args = {
+        "excitatory_noise": lambda t, x, a: noise_E,
+        "inhibitory_noise": lambda t, x, a: noise_I,
+    }
+
+    dv, _, _ = model.drift(0.0, state, args)
+
+    expected = (
+        noise_I * (model.reversal_potential_I - state[0])
+        + noise_E * (model.reversal_potential_E - state[0])
+    ) / model.membrane_conductance
+
+    assert jnp.allclose(dv, expected)
+
+
+def test_NoisyNeuronModel_forwards_noise_into_network_drift():
+    N = 5
+    key = jr.PRNGKey(4)
+    network = NeuronModel(N_neurons=N, key=key)
+    # Remove recurrent effects
+    object.__setattr__(network, "recurrent_weights", jnp.zeros((N, N)))
+
+    # Create OU processes for E/I noise with simple dynamics
+    noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
+    noise_I = OUP(theta=0.5, noise_scale=0.7, dim=N)
+
+    model = NoisyNeuronModel(N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E)
+
+    V, G, S = _baseline_state(network)
+    noise_E_state = jnp.arange(N, dtype=V.dtype)
+    noise_I_state = jnp.arange(N, dtype=V.dtype)[::-1]
+
+    # x packs (network_state, noise_E_state, noise_I_state)
+    x = ((V, G, S), noise_E_state, noise_I_state)
+
+    (dV, dG, _), d_E, d_I = model.drift(0.0, x, args=None)
+
+
+    expected_dv = (
+        noise_I_state * (network.reversal_potential_I - V)
+        + noise_E_state * (network.reversal_potential_E - V)
+    ) / network.membrane_conductance
+
+    # Network receives noise states through args and uses them
+    assert jnp.allclose(dV, expected_dv)
+    assert jnp.all(dG == 0)
+
+    # OU drifts are -theta * state
+    assert jnp.allclose(d_E, -noise_E.theta * noise_E_state)
+    assert jnp.allclose(d_I, -noise_I.theta * noise_I_state)
