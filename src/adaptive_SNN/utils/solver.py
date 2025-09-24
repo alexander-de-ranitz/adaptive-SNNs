@@ -35,22 +35,28 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
     Returns:
         Solution object containing times and states.
     """
-    # Set up solution parameters
-    times = jnp.arange(t0, t1, dt0)
-    n_saves = len(times) // save_every_n_steps + 1
-    ys = jax.tree.map(lambda x: jnp.empty(shape=(n_saves, *x.shape)), y0)
-    ts = [t0]
-    terms = model.terms(jrandom.PRNGKey(0))
-
-    # Spiking parameters from neuron model
-    V_threshold = model.network.firing_threshold
-    V_reset = model.network.V_reset
 
     # Helper function to add current state to ys
     def add_to_ys(ys, y, index):
-        return index+1, jax.tree.map(lambda arr, v: arr.at[index].set(v), ys, y)
+        return jax.tree.map(lambda arr, v: arr.at[index].set(v), ys, y)
     
-    save_index, ys = add_to_ys(ys, y0, 0)
+    # Set up solution parameters
+    times = jnp.arange(t0, t1, dt0)
+    if times[-1] < t1:
+        times = jnp.append(times, t1)  # Ensure t1 is included
+
+    n_saves = len(times) // save_every_n_steps
+    terms = model.terms(jrandom.PRNGKey(0))
+
+    # Set up storage for results
+    ys = jax.tree.map(lambda x: jnp.empty(shape=(n_saves, *x.shape)), y0)
+    spikes_hist = jnp.empty(shape=(n_saves, model.N_neurons))
+
+    # Set states for t=t0
+    ys = add_to_ys(ys, y0, index=0)
+    spikes_hist = spikes_hist.at[0].set(jnp.zeros((model.N_neurons,)))
+    
+    save_index = 1  # Start saving from the first index after initial
     step = 0
     y = y0
     for t in times:
@@ -59,17 +65,16 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
         
-        V = y[0][0] # y = ((V, conductances, spikes), noise_E, noise_I)
-        spikes = jnp.float32(V > V_threshold)
-        V_new = (1.0 - spikes) * V + spikes * V_reset
-        y = ((V_new, y[0][1], spikes), y[1], y[2]) # reset V and set spikes
-        
+        V_new, G_new, spikes = model.network.compute_spikes_and_update(t, y[0], args)
+        y = ((V_new, G_new), y[1], y[2])  # Update state with new network state
+
         # Save results if at the correct interval
         if step % save_every_n_steps == 0:
-            save_index, ys = add_to_ys(ys, y, save_index)
-            ts.append(t + dt0)
+            spikes_hist = spikes_hist.at[save_index].set(spikes)
+            ys = add_to_ys(ys, y, save_index)
+            save_index += 1
 
-    return Solution(t0=t0, t1=t1, ts=ts, ys=ys, interpolation=None, stats=None, result=RESULTS.successful, solver_state=None, controller_state=None, made_jump=None, event_mask=None)
+    return Solution(t0=t0, t1=t1, ts=times, ys=ys, interpolation=None, stats=None, result=RESULTS.successful, solver_state=None, controller_state=None, made_jump=None, event_mask=None), spikes_hist
     
 class SpikingEuler(Euler):
     """

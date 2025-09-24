@@ -32,7 +32,7 @@ class OUP(eqx.Module):
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea)
         return dfx.MultiTerm(dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise))
-
+    
 
 class NeuronModel(eqx.Module):
     leak_conductance: float = 16.7 # nS
@@ -68,11 +68,10 @@ class NeuronModel(eqx.Module):
     def initial(self):
         V_init = jnp.zeros((self.N_neurons,)) + self.resting_potential
         conductance_init = jnp.zeros((self.N_neurons, self.N_neurons))
-        spikes_init = jnp.zeros((self.N_neurons,))
-        return (V_init, conductance_init, spikes_init)
+        return (V_init, conductance_init)
     
     def drift(self, t, x, args):
-        V, conductances, spikes = x
+        V, conductances = x
 
         # TODO: add input current from args if provided
 
@@ -98,22 +97,28 @@ class NeuronModel(eqx.Module):
 
         dGdt = -1/self.synaptic_time_constants * conductances
 
-        return dVdt, dGdt, jnp.zeros_like(spikes)
+        return dVdt, dGdt
     
-
     def diffusion(self, t, x, args):
         #TODO: should this be None instead of zeros? Seems wasteful to compute zeros every time
-        return (jnp.zeros((self.N_neurons,)), jnp.ones((self.N_neurons, self.N_neurons)), jnp.zeros((self.N_neurons,)))
+        #TODO: update: this should be removed entirely, since the neuron model itself is deterministic
+        return (jnp.zeros((self.N_neurons,)), jnp.zeros((self.N_neurons, self.N_neurons)))
     
     @property
     def noise_shape(self):
         #TODO: same as above: should this be None instead of shapes of zeros?
         return (jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
-                jax.ShapeDtypeStruct(shape=(self.N_neurons, self.N_neurons), dtype=default_float),
-                jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float))
+                jax.ShapeDtypeStruct(shape=(self.N_neurons, self.N_neurons), dtype=default_float))
     
     def terms(self, key):
         return dfx.MultiTerm(dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, dfx.UnsafeBrownianPath(shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea)))
+    
+    def compute_spikes_and_update(self, t, x, args):
+        V, G = x
+        spikes = jnp.float32(V > self.firing_threshold)
+        V_new = (1.0 - spikes) * V + spikes * self.V_reset # Reset voltage
+        G_new = G + spikes[:, None] * self.synaptic_increment # increase conductance on spike
+        return V_new, G_new, spikes
     
 
 class NoisyNeuronModel(eqx.Module):
@@ -133,16 +138,16 @@ class NoisyNeuronModel(eqx.Module):
         return (self.network.initial, self.noise_E.initial, self.noise_I.initial)
     
     def drift(self, t, x, args):
-        (V, conductances, spikes), noise_E_state, noise_I_state = x
+        (V, conductances), noise_E_state, noise_I_state = x
         args =  {'excitatory_noise': lambda t, x, args: noise_E_state, 'inhibitory_noise': lambda t, x, args: noise_I_state}
-        network_drift = self.network.drift(t, (V, conductances, spikes), args)
+        network_drift = self.network.drift(t, (V, conductances), args)
         noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
         noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
         return (network_drift, noise_E_drift, noise_I_drift)
     
     def diffusion(self, t, x, args):
-        (V, conductances, spikes), noise_E_state, noise_I_state = x
-        network_diffusion = self.network.diffusion(t, (V, conductances, spikes), args)
+        (V, conductances), noise_E_state, noise_I_state = x
+        network_diffusion = self.network.diffusion(t, (V, conductances), args)
         noise_E_diffusion = self.noise_E.diffusion(t, noise_E_state, args)
         noise_I_diffusion = self.noise_I.diffusion(t, noise_I_state, args)
         return (network_diffusion, noise_E_diffusion, noise_I_diffusion)
