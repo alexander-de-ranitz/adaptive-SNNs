@@ -6,7 +6,6 @@ import equinox as eqx
 from dataclasses import field
 from jaxtyping import Array, PyTree, Shaped
 from typing import Callable
-from adaptive_SNN.utils.mixed_lin_operator import MixedLinearOperator
 from abc import abstractmethod
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
