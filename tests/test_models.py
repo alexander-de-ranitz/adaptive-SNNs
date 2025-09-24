@@ -9,8 +9,7 @@ def _baseline_state(model: NeuronModel):
     N = model.N_neurons
     V = jnp.ones((N,)) * model.resting_potential  # set V = V_rest so leak = 0
     G = jnp.zeros((N, N))
-    S = jnp.zeros((N,))
-    return (V, G, S)
+    return (V, G)
 
 
 def test_parameter_shapes():
@@ -31,7 +30,6 @@ def test_initial_state():
 
     assert initial_state[0].shape == (N,)
     assert initial_state[1].shape == (N, N)
-    assert initial_state[2].shape == (N,)
 
 def test_drift_diffusion_shapes():
     N = 10
@@ -44,11 +42,9 @@ def test_drift_diffusion_shapes():
 
     assert drift[0].shape == (N,)
     assert drift[1].shape == (N, N)
-    assert drift[2].shape == (N,)
 
     assert diffusion[0].shape == (N,)
     assert diffusion[1].shape == (N, N)
-    assert diffusion[2].shape == (N,)
 
 def test_noise_shape():
     N = 10
@@ -58,7 +54,6 @@ def test_noise_shape():
 
     assert noise_shape[0].shape == (N,)
     assert noise_shape[1].shape == (N, N)
-    assert noise_shape[2].shape == (N,)
 
 def test_drift_voltage_output():
     N = 10
@@ -66,7 +61,7 @@ def test_drift_voltage_output():
     model = NeuronModel(N_neurons=N, num_inputs=3, key=key)
 
     # Manually set initial state- V at zero, so leak current is predictable
-    initial_state = jnp.zeros((N,)), jnp.zeros((N, N)), jnp.zeros((N,))
+    initial_state = jnp.zeros((N,)), jnp.zeros((N, N))
     drift = model.drift(0.0, initial_state, None)
     dv = drift[0]
     expected_dv = 1/model.membrane_conductance * -model.leak_conductance * (initial_state[0] - model.resting_potential)
@@ -79,7 +74,7 @@ def test_drift_conductance_output():
     model = NeuronModel(N_neurons=N, num_inputs=3, key=key)
 
     # Manually set initial state- G at ones, so decay is predictable
-    initial_state = jnp.zeros((N,)), jnp.ones((N, N)), jnp.zeros((N,))
+    initial_state = jnp.zeros((N,)), jnp.ones((N, N))
     drift = model.drift(0.0, initial_state, None)
     dg = drift[1]
     expected_dg = -1/model.synaptic_time_constants * initial_state[1]
@@ -112,7 +107,7 @@ def test_recurrent_current():
         conductances = conductances.at[1, 0].set(0.5)  # set g_10 = 0.5
 
         # Initial state with all neurons at resting potential
-        initial_state = jnp.ones((N,)) * model.resting_potential, conductances, jnp.zeros((N,))
+        initial_state = jnp.ones((N,)) * model.resting_potential, conductances
 
         # Get output
         drift = model.drift(0.0, initial_state, None)
@@ -210,7 +205,7 @@ def test_excitatory_noise_only_affects_voltage_correctly():
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
 
-    dv, dG, _ = model.drift(0.0, state, args)
+    dv, dG = model.drift(0.0, state, args)
 
     expected = (noise_E * (model.reversal_potential_E - state[0])) / model.membrane_conductance
 
@@ -234,7 +229,7 @@ def test_inhibitory_noise_only_affects_voltage_correctly():
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
 
-    dv, dG, _ = model.drift(0.0, state, args)
+    dv, dG = model.drift(0.0, state, args)
 
     expected = (noise_I * (model.reversal_potential_I - state[0])) / model.membrane_conductance
 
@@ -258,7 +253,7 @@ def test_both_noises_add_linearly():
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
 
-    dv, _, _ = model.drift(0.0, state, args)
+    dv, _ = model.drift(0.0, state, args)
 
     expected = (
         noise_I * (model.reversal_potential_I - state[0])
@@ -281,14 +276,14 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
 
     model = NoisyNeuronModel(N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E)
 
-    V, G, S = _baseline_state(network)
+    V, G = _baseline_state(network)
     noise_E_state = jnp.arange(N, dtype=V.dtype)
     noise_I_state = jnp.arange(N, dtype=V.dtype)[::-1]
 
     # x packs (network_state, noise_E_state, noise_I_state)
-    x = ((V, G, S), noise_E_state, noise_I_state)
+    x = ((V, G), noise_E_state, noise_I_state)
 
-    (dV, dG, _), d_E, d_I = model.drift(0.0, x, args=None)
+    (dV, dG), d_E, d_I = model.drift(0.0, x, args=None)
 
 
     expected_dv = (
@@ -303,3 +298,24 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     # OU drifts are -theta * state
     assert jnp.allclose(d_E, -noise_E.theta * noise_E_state)
     assert jnp.allclose(d_I, -noise_I.theta * noise_I_state)
+
+def test_NoisyNeuronModel_diffusion():
+    N = 5
+    key = jr.PRNGKey(5)
+    network = NeuronModel(N_neurons=N, key=key)
+    noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
+    noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
+
+    model = NoisyNeuronModel(N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E)
+    V, G = _baseline_state(network)
+    noise_E_state = jnp.arange(N, dtype=V.dtype)
+    noise_I_state = jnp.arange(N, dtype=V.dtype)[::-1]
+    x = ((V, G), noise_E_state, noise_I_state)
+    (diff_V, diff_G), diff_E, diff_I = model.diffusion(0.0, x, args=None)
+
+    # Network diffusion is zero
+    assert jnp.allclose(diff_V, 0.0)
+    assert jnp.allclose(diff_G, 0.0)
+    # OU diffusions are identity * noise_scale
+    assert jnp.allclose(diff_E, jnp.eye(N) * noise_E.noise_scale)
+    assert jnp.allclose(diff_I, jnp.eye(N) * noise_I.noise_scale)
