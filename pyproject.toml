@@ -1,0 +1,14 @@
+[project]
+name = "thesis-code"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "diffrax==0.6.2",
+    "jax>=0.7.2",
+    "pytest>=8.4.2",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
