@@ -277,7 +277,7 @@ def test_excitatory_noise_only_affects_voltage_correctly():
     model = NeuronModel(N_neurons=N, key=key)
 
     # Remove recurrent effects; isolate noise contribution
-    object.__setattr__(model, "weighst", jnp.zeros((N, N + model.N_inputs)))
+    object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
 
     state = _baseline_state(model)
 
@@ -305,7 +305,7 @@ def test_inhibitory_noise_only_affects_voltage_correctly():
     key = jr.PRNGKey(1)
     model = NeuronModel(N_neurons=N, key=key)
 
-    object.__setattr__(model, "weighst", jnp.zeros((N, N + model.N_inputs)))
+    object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
     state = _baseline_state(model)
 
     noise_E = jnp.zeros((N,), dtype=state[0].dtype)
@@ -330,7 +330,7 @@ def test_both_noises_add_linearly():
     N = 6
     key = jr.PRNGKey(2)
     model = NeuronModel(N_neurons=N, key=key)
-    object.__setattr__(model, "weighst", jnp.zeros((N, N + model.N_inputs)))
+    object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
     state = _baseline_state(model)
 
     # Some distinct values to avoid accidental symmetry
@@ -352,12 +352,30 @@ def test_both_noises_add_linearly():
     assert jnp.allclose(dv, expected)
 
 
+def test_noise_is_unique():
+    N = 5
+    key = jr.PRNGKey(3)
+    network = NeuronModel(N_neurons=N, key=key)
+    noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
+    noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
+
+    model = NoisyNeuronModel(
+        N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
+    )
+    initial_state = model.initial
+    solver = dfx.EulerHeun()
+    terms = model.terms(jr.PRNGKey(0))
+    y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, None, None, False)
+    (V, G), noise_E_state, noise_I_state = y1
+    assert not jnp.all(noise_E_state == noise_I_state)
+
+
 def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     N = 5
     key = jr.PRNGKey(4)
     network = NeuronModel(N_neurons=N, key=key)
     # Remove recurrent effects
-    object.__setattr__(network, "weighst", jnp.zeros((N, N + network.N_inputs)))
+    object.__setattr__(network, "weights", jnp.zeros((N, N + network.N_inputs)))
 
     # Create OU processes for E/I noise with simple dynamics
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)

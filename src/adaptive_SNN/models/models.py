@@ -18,7 +18,7 @@ class OUP(eqx.Module):
 
     @property
     def initial(self):
-        return jnp.zeros((self.dim,))
+        return jnp.ones((self.dim,)) * self.mean
 
     def drift(self, t, x, args):
         return -self.theta * (x - self.mean)
@@ -45,7 +45,7 @@ class NeuronModel(eqx.Module):
     resting_potential: float = -70.0 * 1e-3  # mV
     connection_prob: float = 0.1
     reversal_potential_E: float = 0.0  # mV
-    reversal_potential_I: float = 75.0 * 1e-3  # mV
+    reversal_potential_I: float = -75.0 * 1e-3  # mV
     tau_E: float = 2.0 * 1e-3  # ms
     tau_I: float = 6.0 * 1e-3  # ms
     synaptic_increment: float = 1.0 * 1e-9  # nS
@@ -207,6 +207,16 @@ class NoisyNeuronModel(eqx.Module):
         self.network = neuron_model
         self.noise_E = noise_E_model
         self.noise_I = noise_I_model
+
+        assert self.network.N_neurons == self.N_neurons, (
+            "Number of neurons in network must match N_neurons"
+        )
+        assert self.noise_E.dim == self.N_neurons, (
+            "Dimension of excitatory noise must match number of neurons"
+        )
+        assert self.noise_I.dim == self.N_neurons, (
+            "Dimension of inhibitory noise must match number of neurons"
+        )
 
     @property
     def initial(self):

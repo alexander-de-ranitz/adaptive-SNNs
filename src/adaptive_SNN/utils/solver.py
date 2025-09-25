@@ -25,17 +25,12 @@ def run_SNN_simulation_cached(
     t1: float,
     dt0: float,
     y0: PyTree,
-    p: float,
     save_every_n_steps: int = 1,
+    args: PyTree = None,
 ):
     """
     Cached version of run_SNN_simulation to avoid recomputation for the same parameters.
     """
-    args = {
-        "input_spikes": lambda t, x, args: jr.bernoulli(
-            jr.PRNGKey(int(t / dt0)), p=p, shape=(model.network.N_inputs,)
-        )
-    }
     return run_SNN_simulation(model, solver, t0, t1, dt0, y0, save_every_n_steps, args)
 
 
@@ -91,10 +86,23 @@ def run_SNN_simulation(
         jnp.zeros((model.N_neurons + model.network.N_inputs,))
     )
 
+    # If args contains 'p', set up input spikes as Poisson process
+    # TODO: move this to a more sensible place and make input spikes more flexible
+    if args and "p" in args:
+        args["input_spikes"] = lambda t, x, args: jr.bernoulli(
+            jr.PRNGKey(int(t / dt0)), p=args["p"], shape=(model.network.N_inputs,)
+        )
+
     save_index = 1  # Start saving from the first index after initial
     step = 0
     y = y0
     for t in times:
+        # TODO: figure out when to save the state wrt spikes
+        # Ideally, we want:
+        # 1) At the spike time, V > V_threshold
+        # 2) At the next time step, V = V_reset (althrough this is debatable)
+        # Currently, 1) is satisfied, but 2) is not, since we perform an update to V after it is reset, before it is saved again
+
         y, _, _, _, result = solver.step(terms, t, t + dt0, y, args, None, False)
         if result != RESULTS.successful:
             raise RuntimeError(f"Solver step failed with result: {result}")
