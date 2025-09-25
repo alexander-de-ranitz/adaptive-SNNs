@@ -352,3 +352,50 @@ def test_NoisyNeuronModel_diffusion():
     assert jnp.allclose(diff_E, jnp.eye(N) * noise_E.noise_scale)
     assert jnp.allclose(diff_I, jnp.eye(N) * noise_I.noise_scale)
 
+
+def test_spike_generation():
+    N = 5
+    key = jr.PRNGKey(6)
+    model = NeuronModel(N_neurons=N, key=key)
+
+    V = jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0])  # Some above and some below threshold (-50mV)
+    G = jnp.zeros((N, N + model.N_inputs))
+    state = (V, G)
+
+
+    V_new, G_new, spikes = model.compute_spikes_and_update(0.0, state, args=None)
+
+    expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
+    expected_V_new = jnp.array([-50.0, -55.0, model.V_reset, -60.0, model.V_reset])
+
+    assert jnp.allclose(spikes, expected_spikes)
+    assert jnp.allclose(V_new, expected_V_new)
+
+    mask = jnp.array(expected_spikes, dtype=bool)
+    assert jnp.allclose(G_new[:, mask], 1.0)
+    assert jnp.allclose(G_new[:, jnp.invert(mask)], 0.0)
+
+def test_input_spikes():
+    N_neurons = 4
+    N_inputs = 3
+    key = jr.PRNGKey(7)
+    model = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
+
+    state = _baseline_state(model)
+
+    def input_spikes_fn(t, x, args):
+        return jnp.array([1.0, 0.0, 1.0])  # Input neurons 0 and 2 spike
+
+    args = {'input_spikes': input_spikes_fn}
+
+    V_new, G_new, spikes = model.compute_spikes_and_update(0.0, state, args=args)
+
+    expected_spikes = jnp.array([0.0, 0.0, 0.0, 0.0]) # No recurrent spikes
+    expected_V_new = state[0]  # No voltage change
+
+    assert jnp.allclose(spikes, expected_spikes)
+    assert jnp.allclose(V_new, expected_V_new)
+
+    mask = jnp.concatenate((expected_spikes, input_spikes_fn(None, None, None)), dtype=bool)  # Include input spikes
+    assert jnp.allclose(G_new[:, mask], 1.0)
+    assert jnp.allclose(G_new[:, jnp.invert(mask)], 0.0)
