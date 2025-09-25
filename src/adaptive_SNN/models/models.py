@@ -1,3 +1,5 @@
+import warnings
+
 import diffrax as dfx
 import equinox as eqx
 import jax
@@ -168,18 +170,21 @@ class NeuronModel(eqx.Module):
         # Add input spikes if provided in args
         if args and "input_spikes" in args:
             if self.N_inputs == 0:
-                raise RuntimeWarning(
-                    "Input spikes provided to neuron model with no inputs, ignoring input spikes."
+                warnings.warn(
+                    "Input spikes provided to neuron model with no inputs, ignoring input spikes.",
+                    stacklevel=3,
                 )
             if jnp.any(args["input_spikes"](t, x, args) > 1) or jnp.any(
                 args["input_spikes"](t, x, args) < 0
             ):
-                raise ValueError("Input spikes must be binary (0 or 1).")
+                warnings.warn("Input spikes must be binary (0 or 1).", stacklevel=3)
+
             spikes = jnp.concatenate((spikes, args["input_spikes"](t, x, args)))
         elif self.N_inputs > 0:
             spikes = jnp.concatenate((spikes, jnp.zeros((self.N_inputs,))))
-            raise RuntimeWarning(
-                "No input spikes provided to neuron model with inputs, assuming 0 input spikes."
+            warnings.warn(
+                "No input spikes provided to neuron model with inputs, assuming 0 input spikes.",
+                stacklevel=3,
             )
 
         G_new = (
