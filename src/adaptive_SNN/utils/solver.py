@@ -11,9 +11,24 @@ from diffrax import RESULTS, AbstractTerm, Solution
 from typing_extensions import TypeAlias
 from adaptive_SNN.models.models import NoisyNeuronModel
 
+memory = Memory(location="./.cache", verbose=0)
 
 _ErrorEstimate: TypeAlias  = None
 _SolverState: TypeAlias = None
+@memory.cache
+def run_SNN_simulation_cached(model: NoisyNeuronModel, solver: Euler, t0: float, t1: float, dt0: float, y0: PyTree, p: float, save_every_n_steps: int = 1):
+    """
+    Cached version of run_SNN_simulation to avoid recomputation for the same parameters.
+    """
+    args = {
+        'input_spikes': lambda t, x, args: jr.bernoulli(
+            jr.PRNGKey(int(t/dt0)),
+            p=p,
+            shape=(model.network.N_inputs,)
+        )
+    }
+    return run_SNN_simulation(model, solver, t0, t1, dt0, y0, save_every_n_steps, args)
+
 
 def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: float, dt0: float, y0: PyTree, save_every_n_steps: int = 1, args: PyTree = None):
     """
