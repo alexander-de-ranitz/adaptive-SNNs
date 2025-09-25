@@ -36,26 +36,27 @@ class DeterministicNoisyNeuronModel(NoisyNeuronModel):
         process_noise = dfx.VirtualBrownianTree(self.t0, self.t1, shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea, tol=1e-3)
         return dfx.MultiTerm(dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise))
     
-def _make_quiet_model(N: int, key: jr.PRNGKey) -> NoisyNeuronModel:
+def _make_quiet_model(N_neurons: int, N_inputs: int, key: jr.PRNGKey) -> NoisyNeuronModel:
 	"""Helper to build a NoisyNeuronModel with no recurrent coupling and no OU diffusion.
 
 	This keeps the dynamics simple/predictable for testing the solver wrapper.
 	"""
-	network = NeuronModel(N_neurons=N, key=key)
+	network = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 	# Remove recurrent effects so G-noise does not affect V
-	object.__setattr__(network, "recurrent_weights", jnp.zeros((N, N)))
+	object.__setattr__(network, "weights", jnp.zeros((N_neurons, N_neurons + network.N_inputs)))
 
 	# OU processes with zero diffusion so their states remain constant (deterministic)
-	noise_E = OUP(theta=1.0, noise_scale=0.0, dim=N)
-	noise_I = OUP(theta=1.0, noise_scale=0.0, dim=N)
+	noise_E = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
+	noise_I = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
 
-	return NoisyNeuronModel(N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E)
+	return NoisyNeuronModel(N_neurons=N_neurons, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E)
 
 
 def test_solver_timesteps():
-	N = 4
+	N_neurons = 4
+	N_inputs = 2
 	key = jr.PRNGKey(0)
-	model = _make_quiet_model(N, key)
+	model = _make_quiet_model(N_neurons, N_inputs, key)
 
 	t0, t1, dt0 = 0.0, 1.0, 0.1
 
@@ -82,9 +83,10 @@ def test_solver_timesteps():
 	assert jnp.allclose(sol_1_ts, sol_2_ts)
 
 def test_solver_output_noiseless():
-	N = 4
+	N_neurons = 4
+	N_inputs = 2
 	key = jr.PRNGKey(0)
-	model = _make_quiet_model(N, key)
+	model = _make_quiet_model(N_neurons, N_inputs, key)
       
 	t0, t1, dt0 = 0.0, 1.0, 0.1
 
@@ -111,12 +113,12 @@ def test_solver_output_noiseless():
 	noise_I2 = noise_I2[~jnp.isinf(sol_2.ts)]
 
 	# Check shapes
-	assert V.shape == V2.shape == (len(sol_1.ts), N)
-	assert G.shape == G2.shape == (len(sol_1.ts), N, N)
-	assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N)
-	assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N)
+	assert V.shape == V2.shape == (len(sol_1.ts), N_neurons)
+	assert G.shape == G2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
+	assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
+	assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
 	
-	assert spikes.shape == (len(sol_1.ts), N)
+	assert spikes.shape == (len(sol_1.ts), N_neurons)
 	assert jnp.allclose(spikes, 0.0)
 
 	# Check values are close
@@ -130,16 +132,17 @@ def test_solver_output_with_noise():
 	"""Tests that our custom solver function produces the same output as a direct diffrax call.
 	Note that this only works when our model does not spike, this is not implemented in the diffrax solver."""
 
-	N = 2
+	N_neurons = 3
+	N_inputs = 2
 	key = jr.PRNGKey(0)
 	t0, t1, dt0 = 0.0, 1.0, 0.1
 
-	network = NeuronModel(N_neurons=N, key=key)
+	network = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 
-	noise_E = DeterministicOUP(theta=1.0, noise_scale=1.0, dim=N, t0=t0, t1=t1+1e2)
-	noise_I = DeterministicOUP(theta=1.0, noise_scale=1.0, dim=N, t0=t0, t1=t1+1e2)
+	noise_E = DeterministicOUP(theta=1.0, noise_scale=1.0, dim=N_neurons, t0=t0, t1=t1+1e2)
+	noise_I = DeterministicOUP(theta=1.0, noise_scale=1.0, dim=N_neurons, t0=t0, t1=t1+1e2)
 
-	model = DeterministicNoisyNeuronModel(N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E, t0=t0, t1=t1+1e2)
+	model = DeterministicNoisyNeuronModel(N_neurons=N_neurons, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E, t0=t0, t1=t1+1e2)
 
 
 	# Prepare initial state from model
@@ -165,11 +168,11 @@ def test_solver_output_with_noise():
 	noise_I2 = noise_I2[~jnp.isinf(sol_2.ts)]
 
 	# Check shapes
-	assert V.shape == V2.shape == (len(sol_1.ts), N)
-	assert G.shape == G2.shape == (len(sol_1.ts), N, N)
-	assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N)
-	assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N)
-	assert spikes.shape == (len(sol_1.ts), N)
+	assert V.shape == V2.shape == (len(sol_1.ts), N_neurons)
+	assert G.shape == G2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
+	assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
+	assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
+	assert spikes.shape == (len(sol_1.ts), N_neurons)
       
 	# Check that we have some noise
 	assert not jnp.allclose(noise_E, 0.0)
