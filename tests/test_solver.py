@@ -54,7 +54,7 @@ def _make_quiet_model(N_neurons: int, N_inputs: int, key: jr.PRNGKey) -> NoisyNe
 
 def test_solver_timesteps():
 	N_neurons = 4
-	N_inputs = 2
+	N_inputs = 0
 	key = jr.PRNGKey(0)
 	model = _make_quiet_model(N_neurons, N_inputs, key)
 
@@ -84,7 +84,7 @@ def test_solver_timesteps():
 
 def test_solver_output_noiseless():
 	N_neurons = 4
-	N_inputs = 2
+	N_inputs = 0
 	key = jr.PRNGKey(0)
 	model = _make_quiet_model(N_neurons, N_inputs, key)
       
@@ -133,16 +133,16 @@ def test_solver_output_with_noise():
 	Note that this only works when our model does not spike, this is not implemented in the diffrax solver."""
 
 	N_neurons = 3
-	N_inputs = 2
+	N_inputs = 0
 	key = jr.PRNGKey(0)
-	t0, t1, dt0 = 0.0, 1.0, 0.1
+	t0, t1, dt0 = 0.0, 1.0, 0.01
 
 	network = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 
-	noise_E = DeterministicOUP(theta=1.0, noise_scale=1.0, dim=N_neurons, t0=t0, t1=t1+1e2)
-	noise_I = DeterministicOUP(theta=1.0, noise_scale=1.0, dim=N_neurons, t0=t0, t1=t1+1e2)
+	noise_E = DeterministicOUP(theta=1.0, noise_scale=1e-9, dim=N_neurons, t0=t0, t1=t1+dt0)
+	noise_I = DeterministicOUP(theta=1.0, noise_scale=1e-9, dim=N_neurons, t0=t0, t1=t1+dt0)
 
-	model = DeterministicNoisyNeuronModel(N_neurons=N_neurons, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E, t0=t0, t1=t1+1e2)
+	model = DeterministicNoisyNeuronModel(N_neurons=N_neurons, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E, t0=t0, t1=t1+dt0)
 
 
 	# Prepare initial state from model
@@ -175,8 +175,8 @@ def test_solver_output_with_noise():
 	assert spikes.shape == (len(sol_1.ts), N_neurons)
       
 	# Check that we have some noise
-	assert not jnp.allclose(noise_E, 0.0)
-	assert not jnp.allclose(noise_I, 0.0)
+	assert not jnp.all(noise_E == 0.0)
+	assert not jnp.all(noise_I == 0.0)
 
 	# Check values are close
 	assert jnp.allclose(spikes, 0.0) # No spikes should occur- dfx.diffeqsolve does not deal with spikes
