@@ -1,36 +1,54 @@
+from typing import Tuple
+
+import jax
 import jax.numpy as jnp
 import jax.random as jr
-import equinox as eqx
-import jax
-from joblib.memory import Memory
-from jaxtyping import Array, Bool, PyTree, Scalar
+from diffrax import RESULTS, AbstractTerm, Euler, Solution
 from diffrax._custom_types import DenseInfo
-from diffrax import Euler
-from typing import Tuple
-from diffrax import RESULTS, AbstractTerm, Solution
+from jaxtyping import Bool, PyTree, Scalar
+from joblib.memory import Memory
 from typing_extensions import TypeAlias
+
 from adaptive_SNN.models.models import NoisyNeuronModel
 
 memory = Memory(location="./.cache", verbose=0)
 
-_ErrorEstimate: TypeAlias  = None
+_ErrorEstimate: TypeAlias = None
 _SolverState: TypeAlias = None
 
+
 @memory.cache
-def run_SNN_simulation_cached(model: NoisyNeuronModel, solver: Euler, t0: float, t1: float, dt0: float, y0: PyTree, p: float, save_every_n_steps: int = 1):
+def run_SNN_simulation_cached(
+    model: NoisyNeuronModel,
+    solver: Euler,
+    t0: float,
+    t1: float,
+    dt0: float,
+    y0: PyTree,
+    p: float,
+    save_every_n_steps: int = 1,
+):
     """
     Cached version of run_SNN_simulation to avoid recomputation for the same parameters.
     """
     args = {
-        'input_spikes': lambda t, x, args: jr.bernoulli(
-            jr.PRNGKey(int(t/dt0)),
-            p=p,
-            shape=(model.network.N_inputs,)
+        "input_spikes": lambda t, x, args: jr.bernoulli(
+            jr.PRNGKey(int(t / dt0)), p=p, shape=(model.network.N_inputs,)
         )
     }
     return run_SNN_simulation(model, solver, t0, t1, dt0, y0, save_every_n_steps, args)
 
-def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: float, dt0: float, y0: PyTree, save_every_n_steps: int = 1, args: PyTree = None):
+
+def run_SNN_simulation(
+    model: NoisyNeuronModel,
+    solver: Euler,
+    t0: float,
+    t1: float,
+    dt0: float,
+    y0: PyTree,
+    save_every_n_steps: int = 1,
+    args: PyTree = None,
+):
     """
     Run a simulation using the specified solver and terms.
 
@@ -54,7 +72,7 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
     # Helper function to add current state to ys
     def add_to_ys(ys, y, index):
         return jax.tree.map(lambda arr, v: arr.at[index].set(v), ys, y)
-    
+
     # Set up solution parameters
     times = jnp.arange(t0, t1, dt0)
     if times[-1] < t1:
@@ -69,18 +87,19 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
 
     # Set states for t=t0
     ys = add_to_ys(ys, y0, index=0)
-    spikes_hist = spikes_hist.at[0].set(jnp.zeros((model.N_neurons + model.network.N_inputs,)))
-    
+    spikes_hist = spikes_hist.at[0].set(
+        jnp.zeros((model.N_neurons + model.network.N_inputs,))
+    )
+
     save_index = 1  # Start saving from the first index after initial
     step = 0
     y = y0
     for t in times:
-        y, _, _, _, result = solver.step(terms, t, t+dt0, y, args, None, False)
+        y, _, _, _, result = solver.step(terms, t, t + dt0, y, args, None, False)
         if result != RESULTS.successful:
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
-    
-        
+
         V_new, G_new, spikes = model.network.compute_spikes_and_update(t, y[0], args)
         y_new = ((V_new, G_new), y[1], y[2])  # Update state with new network state
 
@@ -89,12 +108,24 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
             spikes_hist = spikes_hist.at[save_index].set(spikes)
             ys = add_to_ys(ys, y, save_index)
             save_index += 1
-        
+
         y = y_new  # Update state for next iteration
 
+    return Solution(
+        t0=t0,
+        t1=t1,
+        ts=times,
+        ys=ys,
+        interpolation=None,
+        stats=None,
+        result=RESULTS.successful,
+        solver_state=None,
+        controller_state=None,
+        made_jump=None,
+        event_mask=None,
+    ), spikes_hist
 
-    return Solution(t0=t0, t1=t1, ts=times, ys=ys, interpolation=None, stats=None, result=RESULTS.successful, solver_state=None, controller_state=None, made_jump=None, event_mask=None), spikes_hist
-    
+
 class SpikingEuler(Euler):
     """
     Custom solver to solve spiking neuron models with firing thresholds.
@@ -116,13 +147,14 @@ class SpikingEuler(Euler):
         solver_state: _SolverState,
         made_jump: Bool,
     ) -> Tuple[PyTree, _ErrorEstimate, DenseInfo, _SolverState, RESULTS]:
-       
-        y1, _, dense_info, _, RESULTS.successful = super().step(terms, t0, t1, y0, args, solver_state, made_jump)
+        y1, _, dense_info, _, RESULTS.successful = super().step(
+            terms, t0, t1, y0, args, solver_state, made_jump
+        )
 
         V = y1[0]
 
         # membrane potential reset
         spikes = jnp.float32(V > self.V_threshold)
         Vnew = (1.0 - spikes) * V + spikes * self.V_reset
-    
+
         return (Vnew, spikes), None, dense_info, None, RESULTS.successful
