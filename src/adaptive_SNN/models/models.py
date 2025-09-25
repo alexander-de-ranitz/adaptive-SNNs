@@ -49,18 +49,18 @@ class NeuronModel(eqx.Module):
     
     N_neurons: int = eqx.field(static=True)
     N_inputs: int = eqx.field(static=True)
-    excitatory_mask: Array  # Vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
+    excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
     synaptic_time_constants: Array # Vector of size N_neurons with synaptic time constants (tau_E or tau_I)
     weights: Array # Shape (N_neurons, N_neurons + N_inputs)
     
     
-    def __init__(self, N_neurons: int, N_inputs: int = 10, key: jr.PRNGKey = jr.PRNGKey(0)):
+    def __init__(self, N_neurons: int, N_inputs: int = 0, key: jr.PRNGKey = jr.PRNGKey(0)):
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
         key, key_1, key_2, key_3 = jr.split(key, 4)
         self.weights = jr.normal(key_1, (N_neurons, N_neurons + N_inputs)) * jr.bernoulli(key_2, self.connection_prob, (N_neurons, N_neurons + N_inputs)) *0.1 # nS
-        neuron_types = jnp.where(jr.bernoulli(key_3, 0.8, (N_neurons,)), 1, 0) # 80% excitatory, 20% inhibitory
-        self.excitatory_mask = jnp.concatenate([neuron_types, jnp.ones((N_inputs,))]) # inputs are all excitatory
+        neuron_types = jnp.where(jr.bernoulli(key_3, 0.8, (N_neurons,)), True, False) # 80% excitatory, 20% inhibitory
+        self.excitatory_mask = jnp.concatenate([neuron_types, jnp.ones((N_inputs,))], dtype=bool) # inputs are all excitatory
         self.synaptic_time_constants = jnp.where(self.excitatory_mask, self.tau_E, self.tau_I)
     
     @property
@@ -77,8 +77,7 @@ class NeuronModel(eqx.Module):
 
         # Compute E/I currents from recurrent connections
         weighted_conductances = self.weights * conductances
-        inhibitory_mask = jnp.where(self.excitatory_mask, 0, 1)
-        inhibitory_conductances = jnp.sum(weighted_conductances * inhibitory_mask[None, :], axis=1)
+        inhibitory_conductances = jnp.sum(weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1)
         excitatory_conductances = jnp.sum(weighted_conductances * self.excitatory_mask[None, :], axis=1)
 
         # Get noise from args and add to total conductances
@@ -117,10 +116,16 @@ class NeuronModel(eqx.Module):
 
         # Add input spikes if provided in args
         if args and 'input_spikes' in args:
+            if self.N_inputs == 0:
+                raise RuntimeWarning("Input spikes provided to neuron model with no inputs, ignoring input spikes.")
+            if jnp.any(args['input_spikes'](t, x, args) > 1) or jnp.any(args['input_spikes'](t, x, args) < 0):
+                raise ValueError("Input spikes must be binary (0 or 1).")
             all_spikes = jnp.concatenate((spikes, args['input_spikes'](t, x, args)))
         elif self.N_inputs > 0:
             all_spikes = jnp.concatenate((spikes, jnp.zeros((self.N_inputs,))))
             raise RuntimeWarning("No input spikes provided to neuron model with inputs, assuming 0 input spikes.")
+        else: 
+            all_spikes = spikes
         
         G_new = G + all_spikes[None, :] * self.synaptic_increment # increase conductance on spike
 

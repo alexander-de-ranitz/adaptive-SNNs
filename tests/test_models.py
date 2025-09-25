@@ -84,6 +84,7 @@ def test_recurrent_current():
 
         # Set specific weights and conductances for testing
         excitatory_mask = jnp.ones((N + model.N_inputs,)) if type == 'excitatory' else  jnp.zeros((N + model.N_inputs,))
+        excitatory_mask = jnp.array(excitatory_mask, dtype=bool)
         object.__setattr__(model, 'excitatory_mask', excitatory_mask) # override neuron types for test
 
         # Set a few weights to non-zero values (only within recurrent part; first N columns)
