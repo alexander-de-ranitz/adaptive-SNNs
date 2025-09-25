@@ -1,55 +1,45 @@
+import diffrax as dfx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import equinox as eqx
-import diffrax as dfx
-from adaptive_SNN.models.models import NeuronModel, OUP, NoisyNeuronModel
-from adaptive_SNN.utils.solver import run_SNN_simulation
 from matplotlib import pyplot as plt
+
+from adaptive_SNN.models.models import OUP, NeuronModel, NoisyNeuronModel
+from adaptive_SNN.utils.plotting import plot_results
+from adaptive_SNN.utils.solver import run_SNN_simulation
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-def simulate_neurons():
-    t0=0
-    t1=1
-    dt0=0.01
-    model = NeuronModel(N_neurons=5, num_inputs=0, key=jr.PRNGKey(0))
-    solver = dfx.EulerHeun()
-    key = jr.PRNGKey(42)
-    terms = model.terms(key)
-    init_state = model.initial
-    saveat = dfx.SaveAt(steps=True)
-
-    sol = dfx.diffeqsolve(terms, solver, t0=t0, t1=t1, dt0=dt0, y0=init_state, saveat=saveat, adjoint=dfx.ForwardMode())
-    t = sol.ts
-    V, cond, spikes = sol.ys
-    print(V.shape)
-    for i in range(5):
-        plt.plot(t, V[:,i], label=f"Neuron {i+1}")
-    plt.legend()
-    plt.show()
-
 def simulate_OUP():
     key = jr.PRNGKey(0)
-    t0=0
-    t1=1000
-    dt0=0.5
+    t0 = 0
+    t1 = 1000
+    dt0 = 0.5
 
-    noise_model = OUP(theta=1, noise_scale=1, dim = 3)
+    noise_model = OUP(theta=1, noise_scale=1, dim=3)
     solver = dfx.EulerHeun()
     terms = noise_model.terms(key)
     init_state = noise_model.initial
     saveat = dfx.SaveAt(ts=jnp.linspace(t0, t1, 1000))
 
-    sol = dfx.diffeqsolve(terms, solver, t0=t0, t1=t1, dt0=dt0, y0=init_state, saveat=saveat, adjoint=dfx.ForwardMode(), max_steps=None)
+    sol = dfx.diffeqsolve(
+        terms,
+        solver,
+        t0=t0,
+        t1=t1,
+        dt0=dt0,
+        y0=init_state,
+        saveat=saveat,
+        adjoint=dfx.ForwardMode(),
+        max_steps=None,
+    )
     t = sol.ts
     x = sol.ys
 
     print(x.shape)
     print(type(x))
 
-    
     plt.plot(t, x)
     print(jnp.mean(x, axis=0))
     plt.legend()
@@ -60,33 +50,81 @@ def simulate_OUP():
 
 
 def simulate_noisy_neurons():
-    t0=0
-    t1=10
-    dt0=0.1
-    model = NoisyNeuronModel(N_neurons=1)
+    t0 = 0
+    t1 = 0.5
+    dt0 = 0.001
+    key = jr.PRNGKey(1)
+
+    N_neurons = 2
+    # Set up models
+    neuron_model = NeuronModel(
+        N_neurons=N_neurons, N_inputs=0, fully_connected_input=True, key=key
+    )
+    key, _ = jr.split(key)
+    noise_E_model = OUP(theta=50.0, noise_scale=50e-9, mean=25 * 1e-9, dim=N_neurons)
+    noise_I_model = OUP(theta=50.0, noise_scale=50e-9, mean=50 * 1e-9, dim=N_neurons)
+    model = NoisyNeuronModel(
+        N_neurons=N_neurons,
+        neuron_model=neuron_model,
+        noise_E_model=noise_E_model,
+        noise_I_model=noise_I_model,
+    )
+
+    # Run simulation
     solver = dfx.EulerHeun()
-    key = jr.PRNGKey(42)
-    terms = model.terms(key)
     init_state = model.initial
-    sol = run_SNN_simulation(terms, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=None)
-    t = sol.ts
 
-    (V, cond, spikes), noise_E, noise_I = sol.ys
+    # Input spikes: Poisson with rate 20 Hz
+    rate = 20  # firing rate in Hz
+    p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
+    args = {"p": p}  # p = probability of spike in each input neuron at each time step
 
-    # Plot membrane potentials and noise as two subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-    for i in range(model.N_neurons):
-        ax1.plot(t, V[:,i], label=f"Neuron {i+1} V")
-        ax2.plot(t, noise_E[:,i], label=f"Neuron {i+1} Noise E", c='r', linestyle='--')
-        ax2.plot(t, noise_I[:,i], label=f"Neuron {i+1} Noise I", c='b', linestyle=':')
-        ax2.plot(t, noise_E[:,i] + noise_I[:,i], c='k', label=f"Neuron {i+1} Total Noise")
+    sol, spikes = run_SNN_simulation(
+        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
+    )
 
-    plt.legend()
-    plt.xlabel("Time")
-    plt.ylabel("Membrane Potential")
-    plt.title("Noisy Neuron Model Simulation")
-    plt.show()
+    plot_results(sol, spikes, model, t0, t1, dt0)
+
+
+def simulate_input_neurons():
+    t0 = 0
+    t1 = 0.5
+    dt0 = 0.001
+    key = jr.PRNGKey(1)
+
+    N_neurons = 1
+    N_inputs = 3
+    # Set up models
+    neuron_model = NeuronModel(
+        N_neurons=N_neurons, N_inputs=N_inputs, fully_connected_input=True, key=key
+    )
+    key, _ = jr.split(key)
+    noise_E_model = OUP(theta=0.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
+    noise_I_model = OUP(theta=0.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
+    model = NoisyNeuronModel(
+        N_neurons=N_neurons,
+        neuron_model=neuron_model,
+        noise_E_model=noise_E_model,
+        noise_I_model=noise_I_model,
+    )
+
+    # Run simulation
+    solver = dfx.EulerHeun()
+    init_state = model.initial
+
+    # Input spikes: Poisson with rate 20 Hz
+    rate = 20  # firing rate in Hz
+    p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
+    args = {"p": p}  # p = probability of spike in each input neuron at each time step
+
+    sol, spikes = run_SNN_simulation(
+        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
+    )
+
+    plot_results(sol, spikes, model, t0, t1, dt0)
+
 
 if __name__ == "__main__":
-    simulate_noisy_neurons()
-    #simulate_OUP()
+    # simulate_noisy_neurons()
+    # simulate_OUP()
+    simulate_input_neurons()
