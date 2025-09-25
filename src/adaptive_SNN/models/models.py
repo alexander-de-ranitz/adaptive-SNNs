@@ -35,17 +35,18 @@ class OUP(eqx.Module):
     
 
 class NeuronModel(eqx.Module):
-    leak_conductance: float = 16.7 # nS
-    membrane_conductance: float = 250 # pF
-    resting_potential: float = -70.0 # mV
+    leak_conductance: float = 16.7 * 1e-9 # nS
+    membrane_conductance: float = 250 * 1e-12# pF
+    resting_potential: float = -70.0 * 1e-3# mV
     connection_prob: float = 0.1
     reversal_potential_E: float = 0.0 # mV
-    reversal_potential_I: float = 75.0 # mV
-    tau_E: float = 2.0 # ms
-    tau_I: float = 6.0 # ms
-    synaptic_increment: float = 1.0
-    firing_threshold: float = -50.0 # mV
-    V_reset: float = -60.0 # mV
+    reversal_potential_I: float = 75.0 * 1e-3 # mV
+    tau_E: float = 2.0 * 1e-3 # ms
+    tau_I: float = 6.0 * 1e-3 # ms
+    synaptic_increment: float = 1.0 * 1e-9# nS
+    firing_threshold: float = -50.0 * 1e-3# mV
+    V_reset: float = -60.0 * 1e-3 # mV
+    input_weight: float = 10.0 # Weight of input spikes
     
     N_neurons: int = eqx.field(static=True)
     N_inputs: int = eqx.field(static=True)
@@ -54,11 +55,17 @@ class NeuronModel(eqx.Module):
     weights: Array # Shape (N_neurons, N_neurons + N_inputs)
     
     
-    def __init__(self, N_neurons: int, N_inputs: int = 0, key: jr.PRNGKey = jr.PRNGKey(0)):
+    def __init__(self, N_neurons: int, N_inputs: int = 0, fully_connected_input: bool = True, key: jr.PRNGKey = jr.PRNGKey(0)):
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
         key, key_1, key_2, key_3 = jr.split(key, 4)
-        self.weights = jr.normal(key_1, (N_neurons, N_neurons + N_inputs)) * jr.bernoulli(key_2, self.connection_prob, (N_neurons, N_neurons + N_inputs)) *0.1 # nS
+        
+        # Set weights
+        self.weights = jr.normal(key_1, (N_neurons, N_neurons + N_inputs)) * jr.bernoulli(key_2, self.connection_prob, (N_neurons, N_neurons + N_inputs))
+        if fully_connected_input and N_inputs > 0: # Make all input connections fully connected
+            self.weights = self.weights.at[:, N_neurons:].set(jnp.ones(shape=(N_neurons, N_inputs)) * self.input_weight)
+        
+        # Set neuron types and time constants
         neuron_types = jnp.where(jr.bernoulli(key_3, 0.8, (N_neurons,)), True, False) # 80% excitatory, 20% inhibitory
         self.excitatory_mask = jnp.concatenate([neuron_types, jnp.ones((N_inputs,))], dtype=bool) # inputs are all excitatory
         self.synaptic_time_constants = jnp.where(self.excitatory_mask, self.tau_E, self.tau_I)
@@ -120,14 +127,12 @@ class NeuronModel(eqx.Module):
                 raise RuntimeWarning("Input spikes provided to neuron model with no inputs, ignoring input spikes.")
             if jnp.any(args['input_spikes'](t, x, args) > 1) or jnp.any(args['input_spikes'](t, x, args) < 0):
                 raise ValueError("Input spikes must be binary (0 or 1).")
-            all_spikes = jnp.concatenate((spikes, args['input_spikes'](t, x, args)))
+            spikes = jnp.concatenate((spikes, args['input_spikes'](t, x, args)))
         elif self.N_inputs > 0:
-            all_spikes = jnp.concatenate((spikes, jnp.zeros((self.N_inputs,))))
+            spikes = jnp.concatenate((spikes, jnp.zeros((self.N_inputs,))))
             raise RuntimeWarning("No input spikes provided to neuron model with inputs, assuming 0 input spikes.")
-        else: 
-            all_spikes = spikes
         
-        G_new = G + all_spikes[None, :] * self.synaptic_increment # increase conductance on spike
+        G_new = G + spikes[None, :] * self.synaptic_increment # increase conductance on spike
 
         return V_new, G_new, spikes
     

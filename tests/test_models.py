@@ -80,7 +80,7 @@ def test_recurrent_current():
     for type in ['excitatory', 'inhibitory']:
         N = 10
         key = jr.PRNGKey(0)
-        model = NeuronModel(N_neurons=N, N_inputs=3, key=key)
+        model = NeuronModel(N_neurons=N, N_inputs=0, key=key)
 
         # Set specific weights and conductances for testing
         excitatory_mask = jnp.ones((N + model.N_inputs,)) if type == 'excitatory' else  jnp.zeros((N + model.N_inputs,))
@@ -112,8 +112,8 @@ def test_recurrent_current():
         reversal_potential = model.reversal_potential_E if type == 'excitatory' else model.reversal_potential_I
         quantal_size = 1 * 1 * (reversal_potential - model.resting_potential) / model.membrane_conductance
 
-        assert dv[0] == 9 * quantal_size # 1*1 + 2*4 = 9
-        assert dv[1] == 0.5 * quantal_size # 1*0.5 = 0.5
+        assert jnp.allclose(dv[0], 9 * quantal_size) # 1*1 + 2*4 = 9
+        assert jnp.allclose(dv[1], 0.5 * quantal_size) # 1*0.5 = 0.5
         assert jnp.all(dv[2:] == 0)
 
 def test_input_current():
@@ -358,7 +358,7 @@ def test_spike_generation():
     key = jr.PRNGKey(6)
     model = NeuronModel(N_neurons=N, key=key)
 
-    V = jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0])  # Some above and some below threshold (-50mV)
+    V = jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3 # Some above and some below threshold (-50mV)
     G = jnp.zeros((N, N + model.N_inputs))
     state = (V, G)
 
@@ -366,36 +366,46 @@ def test_spike_generation():
     V_new, G_new, spikes = model.compute_spikes_and_update(0.0, state, args=None)
 
     expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
-    expected_V_new = jnp.array([-50.0, -55.0, model.V_reset, -60.0, model.V_reset])
+    expected_V_new = jnp.array([-50.0, -55.0, model.V_reset * 1e3, -60.0, model.V_reset * 1e3]) * 1e-3
 
     assert jnp.allclose(spikes, expected_spikes)
     assert jnp.allclose(V_new, expected_V_new)
 
     mask = jnp.array(expected_spikes, dtype=bool)
-    assert jnp.allclose(G_new[:, mask], 1.0)
+    assert jnp.allclose(G_new[:, mask], model.synaptic_increment)
     assert jnp.allclose(G_new[:, jnp.invert(mask)], 0.0)
 
-def test_input_spikes():
+
+def test_spike_generation_with_input():
     N_neurons = 4
     N_inputs = 3
     key = jr.PRNGKey(7)
     model = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 
-    state = _baseline_state(model)
+    V = jnp.array([-70.0, -70.0, -45.0, -60.0]) * 1e-3  # Neuron 2 will spike
+    G = jnp.zeros((N_neurons, N_neurons + N_inputs))
+    state = (V, G)
 
     def input_spikes_fn(t, x, args):
-        return jnp.array([1.0, 0.0, 1.0])  # Input neurons 0 and 2 spike
+        return jnp.array([1.0, 0.0, 0.0])  # Input neurons 0 spikes
 
     args = {'input_spikes': input_spikes_fn}
 
     V_new, G_new, spikes = model.compute_spikes_and_update(0.0, state, args=args)
+    state = (V_new, G_new)  # Update state to new state after spikes
 
-    expected_spikes = jnp.array([0.0, 0.0, 0.0, 0.0]) # No recurrent spikes
-    expected_V_new = state[0]  # No voltage change
+    expected_spikes = jnp.array([0, 0, 1, 0, 1, 0, 0], dtype=bool)  # Neuron 2 and input neuron 0 spike
+    expected_V_new = state[0].at[2].set(model.V_reset)  # Neuron 2 resets
 
     assert jnp.allclose(spikes, expected_spikes)
     assert jnp.allclose(V_new, expected_V_new)
 
-    mask = jnp.concatenate((expected_spikes, input_spikes_fn(None, None, None)), dtype=bool)  # Include input spikes
-    assert jnp.allclose(G_new[:, mask], 1.0)
-    assert jnp.allclose(G_new[:, jnp.invert(mask)], 0.0)
+    assert jnp.allclose(G_new[:, expected_spikes], model.synaptic_increment)
+    assert jnp.allclose(G_new[:, jnp.invert(expected_spikes)], 0.0)
+
+    # Check that conductance decays correctly after spike
+    dV, dG = model.drift(0.0, state, args)
+    assert jnp.all(dG[:, model.N_neurons + 0] < 0) # Conductance from input neuron 0 should decay
+    assert jnp.all(dG[:, model.N_neurons + 1:] == 0) # Conductance from other input neurons should not change
+    assert jnp.all(dG[:, 2] < 0)  # Conductance from spiking neuron 2 should decay
+    assert jnp.all(dG[:, jnp.array([0,1,3])] == 0) # Other neurons are at zero conductance, should not change
