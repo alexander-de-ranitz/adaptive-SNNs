@@ -3,7 +3,6 @@ import jax.random as jr
 import equinox as eqx
 import jax
 from joblib.memory import Memory
-from typing import Optional
 from jaxtyping import Array, Bool, PyTree, Scalar
 from diffrax._custom_types import DenseInfo
 from diffrax import Euler

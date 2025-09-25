@@ -3,10 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import diffrax as dfx
 import equinox as eqx
-from dataclasses import field
-from jaxtyping import Array, PyTree, Shaped
-from typing import Callable
-from abc import abstractmethod
+from jaxtyping import Array
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
