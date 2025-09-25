@@ -11,6 +11,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 class OUP(eqx.Module):
     theta: float = 1.0
     noise_scale: float = 1.0
+    mean: float = 0.0
     dim: int = 1
 
     @property
@@ -18,7 +19,7 @@ class OUP(eqx.Module):
         return jnp.zeros((self.dim,))
 
     def drift(self, t, x, args):
-        return -self.theta * x
+        return -self.theta * (x - self.mean)
 
     def diffusion(self, t, x, args):
         return jnp.eye(self.dim) * self.noise_scale
