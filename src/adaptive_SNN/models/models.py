@@ -48,41 +48,38 @@ class NeuronModel(eqx.Module):
     V_reset: float = -60.0 # mV
     
     N_neurons: int = eqx.field(static=True)
-    num_inputs: int = eqx.field(static=True)
-    excitatory_mask: Array  # Vector of size N_neurons with: 1 (excitatory) and 0 (inhibitory)
+    N_inputs: int = eqx.field(static=True)
+    excitatory_mask: Array  # Vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
     synaptic_time_constants: Array # Vector of size N_neurons with synaptic time constants (tau_E or tau_I)
-    input_weights: Array # Shape (N_neurons, num_inputs)
-    recurrent_weights: Array # Shape (N_neurons, N_neurons)
+    weights: Array # Shape (N_neurons, N_neurons + N_inputs)
     
     
-    def __init__(self, N_neurons: int, num_inputs: int = 10, key: jr.PRNGKey = jr.PRNGKey(0)):
+    def __init__(self, N_neurons: int, N_inputs: int = 10, key: jr.PRNGKey = jr.PRNGKey(0)):
         self.N_neurons = N_neurons
-        self.num_inputs = num_inputs
-        key, key_1, key_2, key_3, key_4 = jr.split(key, 5)
-        self.input_weights = jr.normal(key_1, (N_neurons, num_inputs)) * 0.1 # nS
-        self.recurrent_weights = jr.normal(key_2, (N_neurons, N_neurons)) * jr.bernoulli(key_3, self.connection_prob, (N_neurons, N_neurons)) *0.1 # nS
-        self.excitatory_mask = jnp.where(jr.bernoulli(key_4, 0.8, (N_neurons,)), 1, 0) # 80% excitatory, 20% inhibitory
+        self.N_inputs = N_inputs
+        key, key_1, key_2, key_3 = jr.split(key, 4)
+        self.weights = jr.normal(key_1, (N_neurons, N_neurons + N_inputs)) * jr.bernoulli(key_2, self.connection_prob, (N_neurons, N_neurons + N_inputs)) *0.1 # nS
+        neuron_types = jnp.where(jr.bernoulli(key_3, 0.8, (N_neurons,)), 1, 0) # 80% excitatory, 20% inhibitory
+        self.excitatory_mask = jnp.concatenate([neuron_types, jnp.ones((N_inputs,))]) # inputs are all excitatory
         self.synaptic_time_constants = jnp.where(self.excitatory_mask, self.tau_E, self.tau_I)
     
     @property
     def initial(self):
         V_init = jnp.zeros((self.N_neurons,)) + self.resting_potential
-        conductance_init = jnp.zeros((self.N_neurons, self.N_neurons))
+        conductance_init = jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs))
         return (V_init, conductance_init)
     
     def drift(self, t, x, args):
         V, conductances = x
 
-        # TODO: add input current from args if provided
-
         # Compute leak current
         leak_current = -self.leak_conductance * (V - self.resting_potential)
 
         # Compute E/I currents from recurrent connections
-        weighted_conductances = self.recurrent_weights * conductances
+        weighted_conductances = self.weights * conductances
         inhibitory_mask = jnp.where(self.excitatory_mask, 0, 1)
-        inhibitory_conductances = jnp.sum(weighted_conductances * inhibitory_mask, axis=1)
-        excitatory_conductances = jnp.sum(weighted_conductances * self.excitatory_mask, axis=1)
+        inhibitory_conductances = jnp.sum(weighted_conductances * inhibitory_mask[None, :], axis=1)
+        excitatory_conductances = jnp.sum(weighted_conductances * self.excitatory_mask[None, :], axis=1)
 
         # Get noise from args and add to total conductances
         if args and 'inhibitory_noise' in args:
@@ -102,13 +99,13 @@ class NeuronModel(eqx.Module):
     def diffusion(self, t, x, args):
         #TODO: should this be None instead of zeros? Seems wasteful to compute zeros every time
         #TODO: update: this should be removed entirely, since the neuron model itself is deterministic
-        return (jnp.zeros((self.N_neurons,)), jnp.zeros((self.N_neurons, self.N_neurons)))
+        return (jnp.zeros((self.N_neurons,)), jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)))
     
     @property
     def noise_shape(self):
         #TODO: same as above: should this be None instead of shapes of zeros?
         return (jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
-                jax.ShapeDtypeStruct(shape=(self.N_neurons, self.N_neurons), dtype=default_float))
+                jax.ShapeDtypeStruct(shape=(self.N_neurons, self.N_neurons + self.N_inputs), dtype=default_float))
     
     def terms(self, key):
         return dfx.MultiTerm(dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, dfx.UnsafeBrownianPath(shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea)))
@@ -117,12 +114,21 @@ class NeuronModel(eqx.Module):
         V, G = x
         spikes = jnp.float32(V > self.firing_threshold)
         V_new = (1.0 - spikes) * V + spikes * self.V_reset # Reset voltage
-        G_new = G + spikes[:, None] * self.synaptic_increment # increase conductance on spike
+
+        # Add input spikes if provided in args
+        if args and 'input_spikes' in args:
+            all_spikes = jnp.concatenate((spikes, args['input_spikes'](t, x, args)))
+        elif self.N_inputs > 0:
+            all_spikes = jnp.concatenate((spikes, jnp.zeros((self.N_inputs,))))
+            raise RuntimeWarning("No input spikes provided to neuron model with inputs, assuming 0 input spikes.")
+        
+        G_new = G + all_spikes[None, :] * self.synaptic_increment # increase conductance on spike
+
         return V_new, G_new, spikes
     
 
 class NoisyNeuronModel(eqx.Module):
-    N_neurons: int = eqx.field(static=True)
+    N_neurons: int = eqx.field(static=True) # TODO: this can be removed if we always get N_neurons from network
     network: NeuronModel
     noise_E: OUP
     noise_I: OUP

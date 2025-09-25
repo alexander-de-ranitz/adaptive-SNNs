@@ -65,6 +65,7 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
         
+        args = {'input_spikes' : lambda t, x, args: jnp.zeros((model.network.N_inputs,))} if model.network.N_inputs > 0 else None
         V_new, G_new, spikes = model.network.compute_spikes_and_update(t, y[0], args)
         y = ((V_new, G_new), y[1], y[2])  # Update state with new network state
 
