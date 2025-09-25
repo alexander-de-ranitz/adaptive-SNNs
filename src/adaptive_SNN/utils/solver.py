@@ -1,7 +1,8 @@
 import jax.numpy as jnp
-import jax.random as jrandom
+import jax.random as jr
 import equinox as eqx
 import jax
+from joblib.memory import Memory
 from typing import Optional
 from jaxtyping import Array, Bool, PyTree, Scalar
 from diffrax._custom_types import DenseInfo
@@ -15,6 +16,7 @@ memory = Memory(location="./.cache", verbose=0)
 
 _ErrorEstimate: TypeAlias  = None
 _SolverState: TypeAlias = None
+
 @memory.cache
 def run_SNN_simulation_cached(model: NoisyNeuronModel, solver: Euler, t0: float, t1: float, dt0: float, y0: PyTree, p: float, save_every_n_steps: int = 1):
     """
@@ -28,7 +30,6 @@ def run_SNN_simulation_cached(model: NoisyNeuronModel, solver: Euler, t0: float,
         )
     }
     return run_SNN_simulation(model, solver, t0, t1, dt0, y0, save_every_n_steps, args)
-
 
 def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: float, dt0: float, y0: PyTree, save_every_n_steps: int = 1, args: PyTree = None):
     """
@@ -61,15 +62,15 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
         times = jnp.append(times, t1)  # Ensure t1 is included
 
     n_saves = len(times) // save_every_n_steps
-    terms = model.terms(jrandom.PRNGKey(0))
+    terms = model.terms(jr.PRNGKey(0))
 
     # Set up storage for results
     ys = jax.tree.map(lambda x: jnp.empty(shape=(n_saves, *x.shape)), y0)
-    spikes_hist = jnp.empty(shape=(n_saves, model.N_neurons))
+    spikes_hist = jnp.empty(shape=(n_saves, model.N_neurons + model.network.N_inputs))
 
     # Set states for t=t0
     ys = add_to_ys(ys, y0, index=0)
-    spikes_hist = spikes_hist.at[0].set(jnp.zeros((model.N_neurons,)))
+    spikes_hist = spikes_hist.at[0].set(jnp.zeros((model.N_neurons + model.network.N_inputs,)))
     
     save_index = 1  # Start saving from the first index after initial
     step = 0
@@ -79,16 +80,19 @@ def run_SNN_simulation(model: NoisyNeuronModel, solver: Euler, t0: float, t1: fl
         if result != RESULTS.successful:
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
+    
         
-        args = {'input_spikes' : lambda t, x, args: jnp.zeros((model.network.N_inputs,))} if model.network.N_inputs > 0 else None
         V_new, G_new, spikes = model.network.compute_spikes_and_update(t, y[0], args)
-        y = ((V_new, G_new), y[1], y[2])  # Update state with new network state
+        y_new = ((V_new, G_new), y[1], y[2])  # Update state with new network state
 
         # Save results if at the correct interval
         if step % save_every_n_steps == 0:
             spikes_hist = spikes_hist.at[save_index].set(spikes)
             ys = add_to_ys(ys, y, save_index)
             save_index += 1
+        
+        y = y_new  # Update state for next iteration
+
 
     return Solution(t0=t0, t1=t1, ts=times, ys=ys, interpolation=None, stats=None, result=RESULTS.successful, solver_state=None, controller_state=None, made_jump=None, event_mask=None), spikes_hist
     
