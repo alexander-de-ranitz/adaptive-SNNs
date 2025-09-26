@@ -1,5 +1,8 @@
 import jax.numpy as jnp
+import matplotlib as mpl
 from matplotlib import pyplot as plt
+
+mpl.rcParams["savefig.directory"] = "../figures"
 
 
 def plot_results(sol, spikes, model, t0, t1, dt0):
@@ -45,6 +48,11 @@ def plot_results(sol, spikes, model, t0, t1, dt0):
     ax3.set_ylabel("Neuron")
     ax3.set_xlabel("Time (s)")
     ax3.set_title("Spike Raster Plot")
+
+    if model.network.N_inputs > 0:
+        # Shade background to distinguish input vs. main neurons
+        N_input = model.network.N_inputs
+        ax3.axhspan(-0.5, N_input - 0.5, facecolor="lightgray", alpha=0.3)
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  # 6 evenly spaced ticks
