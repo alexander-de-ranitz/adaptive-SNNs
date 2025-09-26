@@ -48,7 +48,7 @@ def run_SNN_simulation(
     Run a simulation using the specified solver and terms.
 
     Steps through the differential equation defined by `terms` from time `t0` to `t1` with increments of `dt0`.
-    y_0 is ((V, conductances, spikes), noise_E, noise_I).
+    y0 is ((V, W, G), noise_E, noise_I).
 
     Args:
         model (NoisyNeuronModel): The neuron model containing the terms.
@@ -109,8 +109,10 @@ def run_SNN_simulation(
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
 
-        V_new, G_new, spikes = model.network.compute_spikes_and_update(t, y[0], args)
-        y_new = ((V_new, G_new), y[1], y[2])  # Update state with new network state
+        new_network_state, spikes = model.network.compute_spikes_and_update(
+            t, y[0], args
+        )
+        y_new = (new_network_state, y[1], y[2])  # Update state with new network state
 
         # Save results if at the correct interval
         if step % save_every_n_steps == 0:

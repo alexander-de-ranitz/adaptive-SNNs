@@ -170,18 +170,20 @@ def test_solver_output_noiseless():
         adjoint=dfx.ForwardMode(),
     )
 
-    (V, G), noise_E, noise_I = sol_1.ys
-    (V2, G2), noise_E2, noise_I2 = sol_2.ys
+    (V, W, G), noise_E, noise_I = sol_1.ys
+    (V2, W2, G2), noise_E2, noise_I2 = sol_2.ys
 
     # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
     V2 = V2[~jnp.isinf(sol_2.ts)]
     G2 = G2[~jnp.isinf(sol_2.ts)]
+    W2 = W2[~jnp.isinf(sol_2.ts)]
     noise_E2 = noise_E2[~jnp.isinf(sol_2.ts)]
     noise_I2 = noise_I2[~jnp.isinf(sol_2.ts)]
 
     # Check shapes
     assert V.shape == V2.shape == (len(sol_1.ts), N_neurons)
     assert G.shape == G2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
+    assert W.shape == W2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
     assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
     assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
 
@@ -191,6 +193,7 @@ def test_solver_output_noiseless():
     # Check values are close
     assert jnp.allclose(V, V2)
     assert jnp.allclose(G, G2)
+    assert jnp.allclose(W, W2)
     assert jnp.allclose(noise_E, noise_E2)
     assert jnp.allclose(noise_I, noise_I2)
 
@@ -246,18 +249,20 @@ def test_solver_output_with_noise():
         adjoint=dfx.ForwardMode(),
     )
 
-    (V, G), noise_E, noise_I = sol_1.ys
-    (V2, G2), noise_E2, noise_I2 = sol_2.ys
+    (V, W, G), noise_E, noise_I = sol_1.ys
+    (V2, W2, G2), noise_E2, noise_I2 = sol_2.ys
 
     # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
     V2 = V2[~jnp.isinf(sol_2.ts)]
     G2 = G2[~jnp.isinf(sol_2.ts)]
+    W2 = W2[~jnp.isinf(sol_2.ts)]
     noise_E2 = noise_E2[~jnp.isinf(sol_2.ts)]
     noise_I2 = noise_I2[~jnp.isinf(sol_2.ts)]
 
     # Check shapes
     assert V.shape == V2.shape == (len(sol_1.ts), N_neurons)
     assert G.shape == G2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
+    assert W.shape == W2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
     assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
     assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
     assert spikes.shape == (len(sol_1.ts), N_neurons)
@@ -272,5 +277,6 @@ def test_solver_output_with_noise():
     )  # No spikes should occur- dfx.diffeqsolve does not deal with spikes
     assert jnp.allclose(V, V2)
     assert jnp.allclose(G, G2)
+    assert jnp.allclose(W, W2)
     assert jnp.allclose(noise_E, noise_E2)
     assert jnp.allclose(noise_I, noise_I2)

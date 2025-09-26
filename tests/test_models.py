@@ -9,37 +9,42 @@ def _baseline_state(model: LIFNetwork):
     N_neurons = model.N_neurons
     N_inputs = model.N_inputs
     V = jnp.ones((N_neurons,)) * model.resting_potential  # set V = V_rest so leak = 0
+    W = jnp.zeros((N_neurons, N_neurons + N_inputs))  # zero weights
     G = jnp.zeros((N_neurons, N_neurons + N_inputs))  # zero conductance
-    return (V, G)
+    return (V, W, G)
 
 
 def test_initial_state():
     N = 10
     key = jr.PRNGKey(0)
     model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
-    initial_state = model.initial
+    V_init, W_init, G_init = model.initial
 
-    assert model.weights.shape == (N, N + model.N_inputs)
+    assert W_init.shape == (N, N + model.N_inputs)
     assert model.excitatory_mask.shape == (N + model.N_inputs,)
     assert model.synaptic_time_constants.shape == (N + model.N_inputs,)
-    assert initial_state[0].shape == (N,)
-    assert initial_state[1].shape == (N, N + model.N_inputs)
+    assert V_init.shape == (N,)
+    assert G_init.shape == (N, N + model.N_inputs)
 
 
 def test_drift_diffusion_shapes():
     N = 10
     key = jr.PRNGKey(0)
     model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
-    initial_state = model.initial
+    state = model.initial
 
-    drift = model.drift(0.0, initial_state, None)
-    diffusion = model.diffusion(0.0, initial_state, None)
+    drift = model.drift(0.0, state, None)
+    diffusion = model.diffusion(0.0, state, None)
 
-    assert drift[0].shape == (N,)
-    assert drift[1].shape == (N, N + model.N_inputs)
+    dV, dW, dG = drift
+    diffV, diffW, diffG = diffusion
+    assert dV.shape == (N,)
+    assert dW.shape == (N, N + model.N_inputs)
+    assert dG.shape == (N, N + model.N_inputs)
 
-    assert diffusion[0].shape == (N,)
-    assert diffusion[1].shape == (N, N + model.N_inputs)
+    assert diffV.shape == (N,)
+    assert diffW.shape == (N, N + model.N_inputs)
+    assert diffG.shape == (N, N + model.N_inputs)
 
 
 def test_noise_shape():
@@ -50,6 +55,7 @@ def test_noise_shape():
 
     assert noise_shape[0].shape == (N,)
     assert noise_shape[1].shape == (N, N + model.N_inputs)
+    assert noise_shape[2].shape == (N, N + model.N_inputs)
 
 
 def test_drift_voltage_output():
@@ -58,9 +64,8 @@ def test_drift_voltage_output():
     model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
 
     # Manually set initial state- V at zero, so leak current is predictable
-    initial_state = jnp.zeros((N,)), jnp.zeros((N, N + model.N_inputs))
-    drift = model.drift(0.0, initial_state, None)
-    dv = drift[0]
+    initial_state = _baseline_state(model)
+    dv, _, _ = model.drift(0.0, initial_state, None)
     expected_dv = (
         1
         / model.membrane_conductance
@@ -77,10 +82,9 @@ def test_drift_conductance_output():
     model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
 
     # Manually set initial state- G at ones, so decay is predictable
-    initial_state = jnp.zeros((N,)), jnp.ones((N, N + model.N_inputs))
-    drift = model.drift(0.0, initial_state, None)
-    dg = drift[1]
-    expected_dg = -1 / model.synaptic_time_constants * initial_state[1]
+    initial_state = (jnp.zeros((N,)), model.weights, jnp.ones((N, N + model.N_inputs)))
+    _, _, dg = model.drift(0.0, initial_state, None)
+    expected_dg = -1 / model.synaptic_time_constants * initial_state[2]
 
     assert jnp.allclose(dg, expected_dg)
 
@@ -108,7 +112,6 @@ def test_recurrent_current():
         weights = weights.at[0, 1].set(1)  # set w_01 = 1
         weights = weights.at[0, 2].set(2)  # set w_02 = 2
         weights = weights.at[1, 0].set(1)  # set w_10 = 1
-        object.__setattr__(model, "weights", weights)  # override weights for test
 
         # Set conductance to non-zero where weights are non-zero (only within recurrent part)
         conductances = jnp.zeros((N, N + model.N_inputs))
@@ -117,11 +120,14 @@ def test_recurrent_current():
         conductances = conductances.at[1, 0].set(0.5)  # set g_10 = 0.5
 
         # Initial state with all neurons at resting potential
-        initial_state = jnp.ones((N,)) * model.resting_potential, conductances
+        initial_state = (
+            jnp.ones((N,)) * model.resting_potential,
+            weights,
+            conductances,
+        )
 
         # Get output
-        drift = model.drift(0.0, initial_state, None)
-        dv = drift[0]
+        dv, _, _ = model.drift(0.0, initial_state, None)
 
         # Calculate expected quantal size
         # Quantal size is the size of the voltage jump for a single synaptic event with conductance 1 and weight 1
@@ -157,7 +163,6 @@ def test_input_current():
     weights = weights.at[0, N_neurons + 0].set(1)  # set w_04 = 1
     weights = weights.at[0, N_neurons + 1].set(2)  # set w_05 = 2
     weights = weights.at[1, N_neurons + 2].set(3)  # set w_16 = 3
-    object.__setattr__(model, "weights", weights)  # override weights for test
 
     # Set conductance to non-zero where weights are non-zero (only within input part)
     conductances = jnp.zeros((N_neurons, N_neurons + N_inputs))
@@ -166,11 +171,14 @@ def test_input_current():
     conductances = conductances.at[1, N_neurons + 2].set(0.5)  # set g_16 = 0.5
 
     # Initial state with all neurons at resting potential
-    initial_state = jnp.ones((N_neurons,)) * model.resting_potential, conductances
+    initial_state = (
+        jnp.ones((N_neurons,)) * model.resting_potential,
+        weights,
+        conductances,
+    )
 
     # Get output
-    drift = model.drift(0.0, initial_state, None)
-    dv = drift[0]
+    dv, _, _ = model.drift(0.0, initial_state, None)
 
     # Calculate expected quantal size
     quantal_size = (
@@ -217,14 +225,16 @@ def test_OUP_diffusion():
 
 
 def test_OUP_convergence():
-    """Test that the OUP converges to zero mean over time."""
+    """Test that the OUP converges to mean over time."""
     key = jr.PRNGKey(0)
     t0 = 0
     t1 = 10
     dt0 = 0.1
-
+    mean = jnp.array([0.5, -0.5, 1.0])
     dim = 3
-    noise_model = OUP(theta=1, noise_scale=0, dim=dim)  # No noise, should decay to zero
+    noise_model = OUP(
+        theta=1, noise_scale=0, mean=mean, dim=dim
+    )  # No noise, should decay to mean
     solver = dfx.EulerHeun()
     terms = noise_model.terms(key)
     init_state = jnp.array([1.0, 2.0, -3.0])  # Set initial state away from zero
@@ -240,7 +250,7 @@ def test_OUP_convergence():
         max_steps=1000,
     )
     x = sol.ys
-    assert jnp.all(jnp.abs(x[-1, :]) < 0.01)  # Should be close to zero
+    assert jnp.all(jnp.abs(x[-1, :] - mean) < 0.01)  # Should be close to zero
 
 
 def test_OUP_zero_mean():
@@ -249,7 +259,7 @@ def test_OUP_zero_mean():
     t0 = 0
     t1 = 1000
     dt0 = 0.1
-
+    mean = 0
     dim = 3
     noise_model = OUP(theta=1, noise_scale=0.1, dim=dim)  # With noise
     solver = dfx.EulerHeun()
@@ -276,9 +286,6 @@ def test_excitatory_noise_only_affects_voltage_correctly():
     key = jr.PRNGKey(0)
     model = LIFNetwork(N_neurons=N, key=key)
 
-    # Remove recurrent effects; isolate noise contribution
-    object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
-
     state = _baseline_state(model)
 
     # Excitatory noise vector (distinct values to avoid accidental symmetry)
@@ -290,7 +297,7 @@ def test_excitatory_noise_only_affects_voltage_correctly():
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
 
-    dv, dG = model.drift(0.0, state, args)
+    dv, _, dG = model.drift(0.0, state, args)
 
     expected = (
         noise_E * (model.reversal_potential_E - state[0])
@@ -305,7 +312,6 @@ def test_inhibitory_noise_only_affects_voltage_correctly():
     key = jr.PRNGKey(1)
     model = LIFNetwork(N_neurons=N, key=key)
 
-    object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
     state = _baseline_state(model)
 
     noise_E = jnp.zeros((N,), dtype=state[0].dtype)
@@ -316,7 +322,7 @@ def test_inhibitory_noise_only_affects_voltage_correctly():
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
 
-    dv, dG = model.drift(0.0, state, args)
+    dv, _, dG = model.drift(0.0, state, args)
 
     expected = (
         noise_I * (model.reversal_potential_I - state[0])
@@ -330,7 +336,6 @@ def test_both_noises_add_linearly():
     N = 6
     key = jr.PRNGKey(2)
     model = LIFNetwork(N_neurons=N, key=key)
-    object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
     state = _baseline_state(model)
 
     # Some distinct values to avoid accidental symmetry
@@ -342,7 +347,7 @@ def test_both_noises_add_linearly():
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
 
-    dv, _ = model.drift(0.0, state, args)
+    dv, _, _ = model.drift(0.0, state, args)
 
     expected = (
         noise_I * (model.reversal_potential_I - state[0])
@@ -366,16 +371,18 @@ def test_noise_is_unique():
     solver = dfx.EulerHeun()
     terms = model.terms(jr.PRNGKey(0))
     y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, None, None, False)
-    (V, G), noise_E_state, noise_I_state = y1
+    (V, W, G), noise_E_state, noise_I_state = y1
     assert not jnp.all(noise_E_state == noise_I_state)
+    assert not jnp.all(noise_E_state == 0)
+    assert not jnp.all(noise_I_state == 0)
+    assert jnp.unique(noise_E_state).size > 1
+    assert jnp.unique(noise_I_state).size > 1
 
 
 def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     N = 5
     key = jr.PRNGKey(4)
     network = LIFNetwork(N_neurons=N, key=key)
-    # Remove recurrent effects
-    object.__setattr__(network, "weights", jnp.zeros((N, N + network.N_inputs)))
 
     # Create OU processes for E/I noise with simple dynamics
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
@@ -385,14 +392,14 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
 
-    V, G = _baseline_state(network)
+    V, W, G = _baseline_state(network)
     noise_E_state = jnp.arange(N, dtype=V.dtype)
     noise_I_state = jnp.arange(N, dtype=V.dtype)[::-1]
 
     # x packs (network_state, noise_E_state, noise_I_state)
-    x = ((V, G), noise_E_state, noise_I_state)
+    x = ((V, W, G), noise_E_state, noise_I_state)
 
-    (dV, dG), d_E, d_I = model.drift(0.0, x, args=None)
+    (dV, dW, dG), d_E, d_I = model.drift(0.0, x, args=None)
 
     expected_dv = (
         noise_I_state * (network.reversal_potential_I - V)
@@ -418,15 +425,16 @@ def test_NoisyNeuronModel_diffusion():
     model = NoisyLIFModel(
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
-    V, G = _baseline_state(network)
+    V, W, G = _baseline_state(network)
     noise_E_state = jnp.arange(N, dtype=V.dtype)
     noise_I_state = jnp.arange(N, dtype=V.dtype)[::-1]
-    x = ((V, G), noise_E_state, noise_I_state)
-    (diff_V, diff_G), diff_E, diff_I = model.diffusion(0.0, x, args=None)
+    x = ((V, W, G), noise_E_state, noise_I_state)
+    (diff_V, diff_W, diff_G), diff_E, diff_I = model.diffusion(0.0, x, args=None)
 
     # Network diffusion is zero
     assert jnp.allclose(diff_V, 0.0)
     assert jnp.allclose(diff_G, 0.0)
+    assert jnp.allclose(diff_W, 0.0)
     # OU diffusions are identity * noise_scale
     assert jnp.allclose(diff_E, jnp.eye(N) * noise_E.noise_scale)
     assert jnp.allclose(diff_I, jnp.eye(N) * noise_I.noise_scale)
@@ -441,9 +449,11 @@ def test_spike_generation():
         jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
     )  # Some above and some below threshold (-50mV)
     G = jnp.zeros((N, N + model.N_inputs))
-    state = (V, G)
+    state = (V, model.weights, G)
 
-    V_new, G_new, spikes = model.compute_spikes_and_update(0.0, state, args=None)
+    (V_new, W_new, G_new), spikes = model.compute_spikes_and_update(
+        0.0, state, args=None
+    )
 
     expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
     expected_V_new = (
@@ -457,6 +467,8 @@ def test_spike_generation():
     mask = jnp.array(expected_spikes, dtype=bool)
     assert jnp.allclose(G_new[:, mask], model.synaptic_increment)
     assert jnp.allclose(G_new[:, jnp.invert(mask)], 0.0)
+    # Weights unchanged
+    assert jnp.all(W_new == state[1])
 
 
 def test_spike_generation_with_input():
@@ -467,15 +479,17 @@ def test_spike_generation_with_input():
 
     V = jnp.array([-70.0, -70.0, -45.0, -60.0]) * 1e-3  # Neuron 2 will spike
     G = jnp.zeros((N_neurons, N_neurons + N_inputs))
-    state = (V, G)
+    state = (V, model.weights, G)
 
     def input_spikes_fn(t, x, args):
         return jnp.array([1.0, 0.0, 0.0])  # Input neurons 0 spikes
 
     args = {"input_spikes": input_spikes_fn}
 
-    V_new, G_new, spikes = model.compute_spikes_and_update(0.0, state, args=args)
-    state = (V_new, G_new)  # Update state to new state after spikes
+    (V_new, W_new, G_new), spikes = model.compute_spikes_and_update(
+        0.0, state, args=args
+    )
+    state = (V_new, W_new, G_new)  # Update state to new state after spikes
 
     expected_spikes = jnp.array(
         [0, 0, 1, 0, 1, 0, 0], dtype=bool
@@ -489,7 +503,7 @@ def test_spike_generation_with_input():
     assert jnp.allclose(G_new[:, jnp.invert(expected_spikes)], 0.0)
 
     # Check that conductance decays correctly after spike
-    dV, dG = model.drift(0.0, state, args)
+    dV, dW, dG = model.drift(0.0, state, args)
     assert jnp.all(
         dG[:, model.N_neurons + 0] < 0
     )  # Conductance from input neuron 0 should decay

@@ -5,8 +5,8 @@ from matplotlib import pyplot as plt
 def plot_results(sol, spikes, model, t0, t1, dt0):
     # Get results
     t = sol.ts
-    (V, G), noise_E, noise_I = sol.ys
-    print("No conductance" if jnp.all(G == 0.0) else "Conductance present")
+    (V, W, G), noise_E, noise_I = sol.ys
+
     G_inhibitory = (
         jnp.sum(G * jnp.invert(model.network.excitatory_mask[None, None, :]), axis=-1)
         + noise_I
@@ -22,16 +22,19 @@ def plot_results(sol, spikes, model, t0, t1, dt0):
         ax1.vlines(
             spike_times,
             V[:, i][spikes[:, i] > 0] * 1e3,
-            V[:, i][spikes[:, i] > 0] * 1e3 + 10,
+            -40,
         )
         ax1.plot(t, V[:, i] * 1e3, label=f"Neuron {i + 1} V")
     ax1.set_ylabel("Membrane Potential (mV)")
+    ax1.set_title("Neuron Membrane Potential")
 
-    print(G_excitatory.shape, G_inhibitory.shape)
     # Plot total conductance of neuron 0
-    ax2.plot(t, G_excitatory, label="Total E Conductance", color="g")
-    ax2.plot(t, G_inhibitory, label="Total I Conductance", color="r")
+    ax2.plot(t, G_excitatory[:, 0], label="Total E Conductance", color="g")
+    ax2.plot(t, G_inhibitory[:, 0], label="Total I Conductance", color="r")
+    ax2.plot(t, noise_E[:, 0], label="Noise E Conductance", color="g", linestyle="--")
+    ax2.legend(loc="upper right")
     ax2.set_ylabel("Total Conductance (S)")
+    ax2.set_title("Total Conductances")
 
     # Plot spikes as raster plot
     spike_times_per_neuron = [
@@ -40,6 +43,8 @@ def plot_results(sol, spikes, model, t0, t1, dt0):
     ax3.eventplot(spike_times_per_neuron, colors="black", linelengths=0.8)
     ax3.set_yticks(range(len(spike_times_per_neuron)))
     ax3.set_ylabel("Neuron")
+    ax3.set_xlabel("Time (s)")
+    ax3.set_title("Spike Raster Plot")
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  # 6 evenly spaced ticks
@@ -47,4 +52,7 @@ def plot_results(sol, spikes, model, t0, t1, dt0):
         ax.set_xlim(t0, t1)
         ax.set_xticks(xticks)
         ax.set_xticklabels([f"{x:.1f}" for x in xticks])
+        ax.label_outer()
+
+    plt.tight_layout()
     plt.show()
