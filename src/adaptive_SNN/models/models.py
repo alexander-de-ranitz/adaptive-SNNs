@@ -1,4 +1,5 @@
 import warnings
+from abc import ABC, abstractmethod
 
 import diffrax as dfx
 import equinox as eqx
@@ -7,7 +8,38 @@ import jax.numpy as jnp
 import jax.random as jr
 from jaxtyping import Array
 
+from adaptive_SNN.models.environment import EnvironmentModel
+from adaptive_SNN.models.reward import RewardModel
+
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
+
+class NeuronModel(ABC, eqx.Module):
+    @property
+    @abstractmethod
+    def initial(self):
+        pass
+
+    @abstractmethod
+    def drift(self, t, x, args):
+        pass
+
+    @abstractmethod
+    def diffusion(self, t, x, args):
+        pass
+
+    @property
+    @abstractmethod
+    def noise_shape(self):
+        pass
+
+    @abstractmethod
+    def terms(self, key):
+        pass
+
+    @abstractmethod
+    def compute_spikes_and_update(self, t, x, args):
+        pass
 
 
 class OUP(eqx.Module):
@@ -39,7 +71,7 @@ class OUP(eqx.Module):
         )
 
 
-class NeuronModel(eqx.Module):
+class LIFNetwork(NeuronModel):
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_conductance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
@@ -134,7 +166,6 @@ class NeuronModel(eqx.Module):
 
     def diffusion(self, t, x, args):
         # TODO: should this be None instead of zeros? Seems wasteful to compute zeros every time
-        # TODO: update: this should be removed entirely, since the neuron model itself is deterministic
         return (
             jnp.zeros((self.N_neurons,)),
             jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)),
@@ -194,12 +225,12 @@ class NeuronModel(eqx.Module):
         return V_new, G_new, spikes
 
 
-class NoisyNeuronModel(eqx.Module):
+class NoisyLIFModel(eqx.Module):
     N_neurons: int = eqx.field(
         static=True
     )  # TODO: this can be removed if we always get N_neurons from network
-    network: NeuronModel
-    noise_E: OUP
+    network: LIFNetwork
+    noise_E: OUP  # TODO: might be better to use a single OUP with 2 dimensions
     noise_I: OUP
 
     def __init__(self, N_neurons: int, neuron_model, noise_I_model, noise_E_model):
@@ -224,10 +255,12 @@ class NoisyNeuronModel(eqx.Module):
 
     def drift(self, t, x, args):
         (V, conductances), noise_E_state, noise_I_state = x
-        args = {
-            "excitatory_noise": lambda t, x, args: noise_E_state,
-            "inhibitory_noise": lambda t, x, args: noise_I_state,
-        }
+
+        if args is None:
+            args = {}
+        args["excitatory_noise"] = lambda t, x, args: noise_E_state
+        args["inhibitory_noise"] = lambda t, x, args: noise_I_state
+
         network_drift = self.network.drift(t, (V, conductances), args)
         noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
         noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
@@ -246,6 +279,76 @@ class NoisyNeuronModel(eqx.Module):
             self.network.noise_shape,
             self.noise_E.noise_shape,
             self.noise_I.noise_shape,
+        )
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )
+
+
+class LearningModel(eqx.Module):
+    neuron_model: NoisyLIFModel
+    reward_model: RewardModel
+    environment: EnvironmentModel
+    learning_rate: float = 1e-3
+
+    def __init__(
+        self,
+        neuron_model: NoisyLIFModel,
+        reward_model: RewardModel,
+        environment: EnvironmentModel,
+        learning_rate: float = 1e-3,
+    ):
+        self.neuron_model = neuron_model
+        self.reward_model = reward_model
+        self.environment = environment
+        self.learning_rate = learning_rate
+
+    @property
+    def initial(self):
+        return (
+            self.neuron_model.initial,
+            self.reward_model.initial,
+            self.environment.initial,
+        )
+
+    def drift(self, t, x, args):
+        (neuron_state, reward_state, env_state) = x
+        if args is None:
+            args = {}
+
+        # Compute network output, reward, and RPE
+        network_output = args["network_output"](t, neuron_state, args)
+        reward = args["compute_reward"](t, env_state, args)
+        RPE = reward - reward_state
+
+        # Add to args for use in models
+        args["env_input"] = lambda t, x, args: network_output
+        args["RPE"] = lambda t, x, args: RPE
+        args["reward"] = lambda t, x, args: reward
+
+        neuron_drift = self.neuron_model.drift(t, neuron_state, args)
+        reward_drift = self.reward_model.drift(t, reward_state, args)
+        env_drift = self.environment.drift(t, env_state, args)
+        return (neuron_drift, reward_drift, env_drift)
+
+    def diffusion(self, t, x, args):
+        (neuron_state, reward_state, env_state) = x
+        neuron_diffusion = self.neuron_model.diffusion(t, neuron_state, args)
+        reward_diffusion = self.reward_model.diffusion(t, reward_state, args)
+        env_diffusion = self.environment.diffusion(t, env_state, args)
+        return (neuron_diffusion, reward_diffusion, env_diffusion)
+
+    @property
+    def noise_shape(self):
+        return (
+            self.neuron_model.noise_shape,
+            self.reward_model.noise_shape,
+            self.environment.noise_shape,
         )
 
     def terms(self, key):

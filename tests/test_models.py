@@ -2,10 +2,10 @@ import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 
-from adaptive_SNN.models.models import OUP, NeuronModel, NoisyNeuronModel
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyLIFModel
 
 
-def _baseline_state(model: NeuronModel):
+def _baseline_state(model: LIFNetwork):
     N_neurons = model.N_neurons
     N_inputs = model.N_inputs
     V = jnp.ones((N_neurons,)) * model.resting_potential  # set V = V_rest so leak = 0
@@ -16,7 +16,7 @@ def _baseline_state(model: NeuronModel):
 def test_initial_state():
     N = 10
     key = jr.PRNGKey(0)
-    model = NeuronModel(N_neurons=N, N_inputs=3, key=key)
+    model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
     initial_state = model.initial
 
     assert model.weights.shape == (N, N + model.N_inputs)
@@ -29,7 +29,7 @@ def test_initial_state():
 def test_drift_diffusion_shapes():
     N = 10
     key = jr.PRNGKey(0)
-    model = NeuronModel(N_neurons=N, N_inputs=3, key=key)
+    model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
     initial_state = model.initial
 
     drift = model.drift(0.0, initial_state, None)
@@ -45,7 +45,7 @@ def test_drift_diffusion_shapes():
 def test_noise_shape():
     N = 10
     key = jr.PRNGKey(0)
-    model = NeuronModel(N_neurons=N, N_inputs=3, key=key)
+    model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
     noise_shape = model.noise_shape
 
     assert noise_shape[0].shape == (N,)
@@ -55,7 +55,7 @@ def test_noise_shape():
 def test_drift_voltage_output():
     N = 10
     key = jr.PRNGKey(0)
-    model = NeuronModel(N_neurons=N, N_inputs=3, key=key)
+    model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
 
     # Manually set initial state- V at zero, so leak current is predictable
     initial_state = jnp.zeros((N,)), jnp.zeros((N, N + model.N_inputs))
@@ -74,7 +74,7 @@ def test_drift_voltage_output():
 def test_drift_conductance_output():
     N = 10
     key = jr.PRNGKey(0)
-    model = NeuronModel(N_neurons=N, N_inputs=3, key=key)
+    model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
 
     # Manually set initial state- G at ones, so decay is predictable
     initial_state = jnp.zeros((N,)), jnp.ones((N, N + model.N_inputs))
@@ -90,7 +90,7 @@ def test_recurrent_current():
     for type in ["excitatory", "inhibitory"]:
         N = 10
         key = jr.PRNGKey(0)
-        model = NeuronModel(N_neurons=N, N_inputs=0, key=key)
+        model = LIFNetwork(N_neurons=N, N_inputs=0, key=key)
 
         # Set specific weights and conductances for testing
         excitatory_mask = (
@@ -146,7 +146,7 @@ def test_input_current():
     N_neurons = 4
     N_inputs = 3
     key = jr.PRNGKey(0)
-    model = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
+    model = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 
     assert jnp.all(
         model.excitatory_mask.at[-N_inputs:].get() == 1
@@ -274,7 +274,7 @@ def test_OUP_zero_mean():
 def test_excitatory_noise_only_affects_voltage_correctly():
     N = 7
     key = jr.PRNGKey(0)
-    model = NeuronModel(N_neurons=N, key=key)
+    model = LIFNetwork(N_neurons=N, key=key)
 
     # Remove recurrent effects; isolate noise contribution
     object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
@@ -303,7 +303,7 @@ def test_excitatory_noise_only_affects_voltage_correctly():
 def test_inhibitory_noise_only_affects_voltage_correctly():
     N = 5
     key = jr.PRNGKey(1)
-    model = NeuronModel(N_neurons=N, key=key)
+    model = LIFNetwork(N_neurons=N, key=key)
 
     object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
     state = _baseline_state(model)
@@ -329,7 +329,7 @@ def test_inhibitory_noise_only_affects_voltage_correctly():
 def test_both_noises_add_linearly():
     N = 6
     key = jr.PRNGKey(2)
-    model = NeuronModel(N_neurons=N, key=key)
+    model = LIFNetwork(N_neurons=N, key=key)
     object.__setattr__(model, "weights", jnp.zeros((N, N + model.N_inputs)))
     state = _baseline_state(model)
 
@@ -355,11 +355,11 @@ def test_both_noises_add_linearly():
 def test_noise_is_unique():
     N = 5
     key = jr.PRNGKey(3)
-    network = NeuronModel(N_neurons=N, key=key)
+    network = LIFNetwork(N_neurons=N, key=key)
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
     noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
 
-    model = NoisyNeuronModel(
+    model = NoisyLIFModel(
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
     initial_state = model.initial
@@ -373,7 +373,7 @@ def test_noise_is_unique():
 def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     N = 5
     key = jr.PRNGKey(4)
-    network = NeuronModel(N_neurons=N, key=key)
+    network = LIFNetwork(N_neurons=N, key=key)
     # Remove recurrent effects
     object.__setattr__(network, "weights", jnp.zeros((N, N + network.N_inputs)))
 
@@ -381,7 +381,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
     noise_I = OUP(theta=0.5, noise_scale=0.7, dim=N)
 
-    model = NoisyNeuronModel(
+    model = NoisyLIFModel(
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
 
@@ -411,11 +411,11 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
 def test_NoisyNeuronModel_diffusion():
     N = 5
     key = jr.PRNGKey(5)
-    network = NeuronModel(N_neurons=N, key=key)
+    network = LIFNetwork(N_neurons=N, key=key)
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
     noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
 
-    model = NoisyNeuronModel(
+    model = NoisyLIFModel(
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
     V, G = _baseline_state(network)
@@ -435,7 +435,7 @@ def test_NoisyNeuronModel_diffusion():
 def test_spike_generation():
     N = 5
     key = jr.PRNGKey(6)
-    model = NeuronModel(N_neurons=N, key=key)
+    model = LIFNetwork(N_neurons=N, key=key)
 
     V = (
         jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
@@ -463,7 +463,7 @@ def test_spike_generation_with_input():
     N_neurons = 4
     N_inputs = 3
     key = jr.PRNGKey(7)
-    model = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
+    model = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 
     V = jnp.array([-70.0, -70.0, -45.0, -60.0]) * 1e-3  # Neuron 2 will spike
     G = jnp.zeros((N_neurons, N_neurons + N_inputs))

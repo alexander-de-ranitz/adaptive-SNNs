@@ -9,7 +9,7 @@ from jaxtyping import Bool, PyTree, Scalar
 from joblib.memory import Memory
 from typing_extensions import TypeAlias
 
-from adaptive_SNN.models.models import NoisyNeuronModel
+from adaptive_SNN.models.models import NoisyLIFModel
 
 memory = Memory(location="./.cache", verbose=0)
 
@@ -19,7 +19,7 @@ _SolverState: TypeAlias = None
 
 @memory.cache
 def run_SNN_simulation_cached(
-    model: NoisyNeuronModel,
+    model: NoisyLIFModel,
     solver: Euler,
     t0: float,
     t1: float,
@@ -35,7 +35,7 @@ def run_SNN_simulation_cached(
 
 
 def run_SNN_simulation(
-    model: NoisyNeuronModel,
+    model: NoisyLIFModel,
     solver: Euler,
     t0: float,
     t1: float,
@@ -63,6 +63,7 @@ def run_SNN_simulation(
     Returns:
         Solution object containing times and states.
     """
+    # TODO: think about how to elegantly store and pass around the spikes. Should they be part of y?
 
     # Helper function to add current state to ys
     def add_to_ys(ys, y, index):

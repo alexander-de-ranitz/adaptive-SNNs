@@ -2,7 +2,7 @@ import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 
-from adaptive_SNN.models.models import OUP, NeuronModel, NoisyNeuronModel
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyLIFModel
 from adaptive_SNN.utils.solver import run_SNN_simulation
 
 
@@ -39,7 +39,7 @@ class DeterministicOUP(OUP):
         )
 
 
-class DeterministicNoisyNeuronModel(NoisyNeuronModel):
+class DeterministicNoisyNeuronModel(NoisyLIFModel):
     """This class is identical to NoisyNeuronModel, except it uses a VirtualBrownianTree for the noise terms.
     This makes the noise deterministic given the same key, which is useful for testing."""
 
@@ -73,14 +73,12 @@ class DeterministicNoisyNeuronModel(NoisyNeuronModel):
         )
 
 
-def _make_quiet_model(
-    N_neurons: int, N_inputs: int, key: jr.PRNGKey
-) -> NoisyNeuronModel:
+def _make_quiet_model(N_neurons: int, N_inputs: int, key: jr.PRNGKey) -> NoisyLIFModel:
     """Helper to build a NoisyNeuronModel with no recurrent coupling and no OU diffusion.
 
     This keeps the dynamics simple/predictable for testing the solver wrapper.
     """
-    network = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
+    network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
     # Remove recurrent effects so G-noise does not affect V
     object.__setattr__(
         network, "weights", jnp.zeros((N_neurons, N_neurons + network.N_inputs))
@@ -90,7 +88,7 @@ def _make_quiet_model(
     noise_E = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
     noise_I = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
 
-    return NoisyNeuronModel(
+    return NoisyLIFModel(
         N_neurons=N_neurons,
         neuron_model=network,
         noise_I_model=noise_I,
@@ -206,7 +204,7 @@ def test_solver_output_with_noise():
     key = jr.PRNGKey(0)
     t0, t1, dt0 = 0.0, 1.0, 0.01
 
-    network = NeuronModel(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
+    network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 
     noise_E = DeterministicOUP(
         theta=1.0, noise_scale=1e-9, dim=N_neurons, t0=t0, t1=t1 + dt0

@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import OUP, NeuronModel, NoisyNeuronModel
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyLIFModel
 from adaptive_SNN.utils.plotting import plot_results
 from adaptive_SNN.utils.solver import run_SNN_simulation
 
@@ -57,13 +57,13 @@ def simulate_noisy_neurons():
 
     N_neurons = 2
     # Set up models
-    neuron_model = NeuronModel(
+    neuron_model = LIFNetwork(
         N_neurons=N_neurons, N_inputs=0, fully_connected_input=True, key=key
     )
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=50.0, noise_scale=50e-9, mean=25 * 1e-9, dim=N_neurons)
     noise_I_model = OUP(theta=50.0, noise_scale=50e-9, mean=50 * 1e-9, dim=N_neurons)
-    model = NoisyNeuronModel(
+    model = NoisyLIFModel(
         N_neurons=N_neurons,
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,
@@ -95,13 +95,13 @@ def simulate_input_neurons():
     N_neurons = 1
     N_inputs = 3
     # Set up models
-    neuron_model = NeuronModel(
+    neuron_model = LIFNetwork(
         N_neurons=N_neurons, N_inputs=N_inputs, fully_connected_input=True, key=key
     )
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=0.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
     noise_I_model = OUP(theta=0.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
-    model = NoisyNeuronModel(
+    model = NoisyLIFModel(
         N_neurons=N_neurons,
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,
