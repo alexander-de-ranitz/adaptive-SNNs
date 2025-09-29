@@ -201,7 +201,20 @@ class LIFNetwork(NeuronModel):
         return dVdt, dW, dGdt
 
     def diffusion(self, t, x, args):
-        # Currently deterministic; return zeros for (V, W, G) components
+        # TODO: Fix this. See below
+        # The diffusion (vf) and noise term (control) are used as:
+        # jnp.tensordot(jnp.conj(vf), control, axes=jnp.ndim(control)),
+        # applied to each leaf of the pytree.
+        # See https://numpy.org/doc/stable/reference/generated/numpy.linalg.tensordot.html#numpy.linalg.tensordot
+        # With the values below, this tensordot returns a pytree with shapes: ((N_neurons,), (), ())
+        # this is then (presumably) broadcasted to the shapes of the state ((N_neurons,), (N_neurons, N_neurons + N_inputs), (N_neurons, N_neurons + N_inputs))
+        # As everything is zero, this does not cause issues, but it is not correct.
+        #
+        # What I would like to do is have the diffusion and noise term interact as matrix multiplication,
+        # which allows us to have a zero matrix of shape (N_neurons, N_neurons) for the weights and conductances.
+        # This can be done by using axes=1 in the tensordot, but this does not work with the current implementation of diffrax.
+        # Perhaps a custom Lineax operator could be used here? Investigate this further.
+
         return (
             jnp.zeros((self.N_neurons,)),
             jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)),  # dW noise
