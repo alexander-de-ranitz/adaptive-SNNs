@@ -96,27 +96,19 @@ def simulate_noisy_SNN(
     step = 0
     y = y0
     for t in times:
-        # TODO: figure out when to save the state wrt spikes
-        # Ideally, we want:
-        # 1) At the spike time, V > V_threshold
-        # 2) At the next time step, V = V_reset (althrough this is debatable)
-        # Currently, 1) is satisfied, but 2) is not, since we perform an update to V after it is reset, before it is saved again
-
         y, _, _, _, result = solver.step(terms, t, t + dt0, y, args, None, False)
         if result != RESULTS.successful:
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
 
         new_network_state, spikes = model.compute_spikes_and_update(t, y, args)
-        y_new = (new_network_state, y[1], y[2])  # Update state with new network state
+        y = (new_network_state, y[1], y[2])  # Update state with new network state
 
         # Save results if at the correct interval
         if step % save_every_n_steps == 0:
             spikes_hist = spikes_hist.at[save_index].set(spikes)
             ys = add_to_ys(ys, y, save_index)
             save_index += 1
-
-        y = y_new  # Update state for next iteration
 
     return Solution(
         t0=t0,
