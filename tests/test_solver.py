@@ -48,14 +48,13 @@ class DeterministicNoisyNeuronModel(NoisyNeuronModel):
 
     def __init__(
         self,
-        N_neurons: int,
         neuron_model,
         noise_I_model,
         noise_E_model,
         t0: float = 0.0,
         t1: float = 1.0,
     ):
-        super().__init__(N_neurons, neuron_model, noise_I_model, noise_E_model)
+        super().__init__(neuron_model, noise_I_model, noise_E_model)
         self.t0 = t0
         self.t1 = t1
 
@@ -91,7 +90,6 @@ def _make_quiet_model(
     noise_I = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
 
     return NoisyNeuronModel(
-        N_neurons=N_neurons,
         neuron_model=network,
         noise_I_model=noise_I,
         noise_E_model=noise_E,
@@ -219,7 +217,6 @@ def test_solver_output_with_noise():
     )
 
     model = DeterministicNoisyNeuronModel(
-        N_neurons=N_neurons,
         neuron_model=network,
         noise_I_model=noise_I,
         noise_E_model=noise_E,

@@ -416,7 +416,7 @@ def test_noise_is_unique():
     noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
 
     model = NoisyNeuronModel(
-        N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
+        neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
     initial_state = model.initial
     solver = dfx.EulerHeun()
@@ -440,7 +440,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     noise_I = OUP(theta=0.5, noise_scale=0.7, dim=N)
 
     model = NoisyNeuronModel(
-        N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
+        neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
 
     V, W, G = _baseline_state(network)
@@ -474,7 +474,7 @@ def test_NoisyNeuronModel_diffusion():
     noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
 
     model = NoisyNeuronModel(
-        N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
+        neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
     V, W, G = _baseline_state(network)
     noise_E_state = jnp.arange(N, dtype=V.dtype)

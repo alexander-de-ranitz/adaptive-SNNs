@@ -268,27 +268,25 @@ class LIFNetwork(NeuronModel):
 
 
 class NoisyNeuronModel(NeuronModel):
-    N_neurons: int = eqx.field(
-        static=True
-    )  # TODO: this can be removed if we always get N_neurons from network
-    network: LIFNetwork
+    network: NeuronModel
     noise_E: OUP  # TODO: might be better to use a single OUP with 2 dimensions
     noise_I: OUP
     # TODO: For generability, it would be better to allow any noise model. We would have an ABC NoiseModel that OUP inherits from.
 
-    def __init__(self, N_neurons: int, neuron_model, noise_I_model, noise_E_model):
-        self.N_neurons = N_neurons
+    def __init__(
+        self, neuron_model: NeuronModel, noise_I_model: OUP, noise_E_model: OUP
+    ):
         self.network = neuron_model
         self.noise_E = noise_E_model
         self.noise_I = noise_I_model
 
-        assert self.network.N_neurons == self.N_neurons, (
+        assert self.network.N_neurons == self.network.N_neurons, (
             "Number of neurons in network must match N_neurons"
         )
-        assert self.noise_E.dim == self.N_neurons, (
+        assert self.noise_E.dim == self.network.N_neurons, (
             "Dimension of excitatory noise must match number of neurons"
         )
-        assert self.noise_I.dim == self.N_neurons, (
+        assert self.noise_I.dim == self.network.N_neurons, (
             "Dimension of inhibitory noise must match number of neurons"
         )
 
@@ -343,7 +341,7 @@ class NoisyNeuronModel(NeuronModel):
 
 
 class LearningModel(eqx.Module):
-    neuron_model: NeuronModel
+    neuron_model: NoisyNeuronModel
     reward_model: RewardModel
     environment: EnvironmentModel
     learning_rate: float = 1e-3
