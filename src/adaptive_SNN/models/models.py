@@ -344,11 +344,8 @@ class NoisyNeuronModel(NeuronModel):
         )
 
     def compute_spikes_and_update(self, t, x, args):
-        (V, W, G), noise_E_state, noise_I_state = x
-        (new_network_state, spikes) = self.network.compute_spikes_and_update(
-            t, (V, W, G), args
-        )
-        return (new_network_state, noise_E_state, noise_I_state), spikes
+        network_state, noise_E_state, noise_I_state = x
+        return self.network.compute_spikes_and_update(t, network_state, args)
 
 
 class LearningModel(eqx.Module):

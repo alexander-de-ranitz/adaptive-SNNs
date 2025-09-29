@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNeuronModel
-from adaptive_SNN.utils.solver import run_SNN_simulation
+from adaptive_SNN.utils.solver import simulate_noisy_SNN
 
 
 class DeterministicOUP(OUP):
@@ -110,7 +110,7 @@ def test_solver_timesteps():
 
     # Our method
     save_every = 1
-    sol_1, _ = run_SNN_simulation(
+    sol_1, _ = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
     )
     sol_1_ts = sol_1.ts
@@ -152,7 +152,7 @@ def test_solver_output_noiseless():
 
     # Our method
     save_every = 1
-    sol_1, spikes = run_SNN_simulation(
+    sol_1, spikes = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
     )
 
@@ -230,7 +230,7 @@ def test_solver_output_with_noise():
 
     # Our method
     save_every = 1
-    sol_1, spikes = run_SNN_simulation(
+    sol_1, spikes = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
     )
 

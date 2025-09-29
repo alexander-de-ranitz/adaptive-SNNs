@@ -1,11 +1,8 @@
-from typing import Tuple
-
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from diffrax import RESULTS, AbstractTerm, Euler, Solution
-from diffrax._custom_types import DenseInfo
-from jaxtyping import Bool, PyTree, Scalar
+from diffrax import RESULTS, Euler, Solution
+from jaxtyping import PyTree
 from joblib.memory import Memory
 from typing_extensions import TypeAlias
 
@@ -31,11 +28,11 @@ def run_SNN_simulation_cached(
     """
     Cached version of run_SNN_simulation to avoid recomputation for the same parameters.
     """
-    return run_SNN_simulation(model, solver, t0, t1, dt0, y0, save_every_n_steps, args)
+    return simulate_noisy_SNN(model, solver, t0, t1, dt0, y0, save_every_n_steps, args)
 
 
-def run_SNN_simulation(
-    model: LearningModel | NoisyNeuronModel,
+def simulate_noisy_SNN(
+    model: NoisyNeuronModel,
     solver: Euler,
     t0: float,
     t1: float,
@@ -51,7 +48,7 @@ def run_SNN_simulation(
     y0 is ((V, W, G), noise_E, noise_I).
 
     Args:
-        model (LearningModel | NoisyNeuronModel: The neuron model containing the terms.
+        model (NoisyNeuronModel): The neuron model containing the terms.
         solver (Euler): The solver to use for integration.
         t0 (float): Initial time.
         t1 (float): Final time.
@@ -65,18 +62,8 @@ def run_SNN_simulation(
     """
     # TODO: think about how to elegantly store and pass around the spikes. Should they be part of y?
 
-    # Extract network parameters
-    # TODO: this might be a bit hacky, consider a cleaner design
-    if isinstance(model, NoisyNeuronModel):
-        network = model.network
-    elif isinstance(model, LearningModel):
-        network = model.neuron_model.network
-    else:
-        raise ValueError(
-            "Model must be an instance of NoisyNeuronModel or LearningModel."
-        )
-    N_neurons = network.N_neurons
-    N_inputs = network.N_inputs
+    N_neurons = model.network.N_neurons
+    N_inputs = model.network.N_inputs
 
     # Helper function to add current state to ys
     def add_to_ys(ys, y, index):
@@ -120,7 +107,7 @@ def run_SNN_simulation(
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
 
-        new_network_state, spikes = network.compute_spikes_and_update(t, y[0], args)
+        new_network_state, spikes = model.compute_spikes_and_update(t, y, args)
         y_new = (new_network_state, y[1], y[2])  # Update state with new network state
 
         # Save results if at the correct interval
@@ -146,35 +133,5 @@ def run_SNN_simulation(
     ), spikes_hist
 
 
-class SpikingEuler(Euler):
-    """
-    Custom solver to solve spiking neuron models with firing thresholds.
-
-    After each integration step, checks if the membrane potential exceeds the firing threshold (Vthresh).
-    If so, resets the membrane potential to the resting potential (EL). y is a tuple (V, spikes).
-    """
-
-    V_threshold: float
-    V_reset: float
-
-    def step(
-        self,
-        terms: AbstractTerm,
-        t0: Scalar,
-        t1: Scalar,
-        y0: PyTree,
-        args: PyTree,
-        solver_state: _SolverState,
-        made_jump: Bool,
-    ) -> Tuple[PyTree, _ErrorEstimate, DenseInfo, _SolverState, RESULTS]:
-        y1, _, dense_info, _, RESULTS.successful = super().step(
-            terms, t0, t1, y0, args, solver_state, made_jump
-        )
-
-        V = y1[0]
-
-        # membrane potential reset
-        spikes = jnp.float32(V > self.V_threshold)
-        Vnew = (1.0 - spikes) * V + spikes * self.V_reset
-
-        return (Vnew, spikes), None, dense_info, None, RESULTS.successful
+def run_learning_simulation():
+    pass  # TODO: implement learning simulation function

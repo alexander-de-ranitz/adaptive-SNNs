@@ -1,11 +1,22 @@
 import jax.numpy as jnp
 import matplotlib as mpl
+from diffrax import Solution
+from jaxtyping import Array
 from matplotlib import pyplot as plt
+
+from adaptive_SNN.models.models import NoisyNeuronModel
 
 mpl.rcParams["savefig.directory"] = "../figures"
 
 
-def plot_results(sol, spikes, model, t0, t1, dt0):
+def plot_simulate_noisy_SNN_results(
+    sol: Solution,
+    spikes: Array,
+    model: NoisyNeuronModel,
+    t0: float,
+    t1: float,
+    dt0: float,
+):
     # Get results
     t = sol.ts
     (V, W, G), noise_E, noise_I = sol.ys
@@ -20,7 +31,7 @@ def plot_results(sol, spikes, model, t0, t1, dt0):
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
 
     # Plot membrane potentials
-    for i in range(model.N_neurons):
+    for i in range(model.network.N_neurons):
         spike_times = t[spikes[:, i] > 0]
         ax1.vlines(
             spike_times,
