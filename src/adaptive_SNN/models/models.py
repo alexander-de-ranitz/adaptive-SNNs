@@ -374,9 +374,7 @@ class LearningModel(eqx.Module):
         # Compute network output, reward, and RPE
         network_output = args["network_output"](t, neuron_state, args)
         reward = args["compute_reward"](t, env_state, args)
-        RPE = (
-            reward - reward_state
-        )  # TODO: this should be a function that is passed by the user in the args
+        RPE = reward - reward_state
 
         # Add to args for use in models
         args["env_input"] = lambda t, x, args: network_output
