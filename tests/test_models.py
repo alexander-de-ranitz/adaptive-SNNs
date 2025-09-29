@@ -89,6 +89,29 @@ def test_drift_conductance_output():
     assert jnp.allclose(dg, expected_dg)
 
 
+def test_diffusion():
+    N = 10
+    key = jr.PRNGKey(0)
+    model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
+    state = _baseline_state(model)
+    terms = model.terms(key)
+    solver = dfx.EulerHeun()
+    sol = dfx.diffeqsolve(
+        terms=terms,
+        solver=solver,
+        t0=0.0,
+        t1=0.1,
+        dt0=0.01,
+        y0=state,
+        args=None,
+        adjoint=dfx.ForwardMode(),
+    )
+    final_state = sol.ys
+    assert jnp.allclose(final_state[0], state[0])
+    assert jnp.allclose(final_state[1], state[1])
+    assert jnp.allclose(final_state[2], state[2])
+
+
 def test_recurrent_current():
     """Test that the recurrent current is computed correctly for both excitatory and inhibitory neurons."""
     for type in ["excitatory", "inhibitory"]:
