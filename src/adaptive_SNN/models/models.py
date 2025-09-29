@@ -210,9 +210,7 @@ class LIFNetwork(NeuronModel):
         # this is then (presumably) broadcasted to the shapes of the state ((N_neurons,), (N_neurons, N_neurons + N_inputs), (N_neurons, N_neurons + N_inputs))
         # As everything is zero, this does not cause issues, but it is not correct.
         #
-        # What I would like to do is have the diffusion and noise term interact as matrix multiplication,
-        # which allows us to have a zero matrix of shape (N_neurons, N_neurons) for the weights and conductances.
-        # This can be done by using axes=1 in the tensordot, but this does not work with the current implementation of diffrax.
+        # I would probably like to do element-wise multiplication.
         # Perhaps a custom Lineax operator could be used here? Investigate this further.
 
         return (
