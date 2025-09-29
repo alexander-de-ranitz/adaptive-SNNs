@@ -4,7 +4,7 @@ import jax.numpy as jnp
 
 
 class RewardModel(eqx.Module):
-    reward_rate: float = 1.0  # Rate at which reward decays
+    reward_rate: float = 0.1  # Rate at which the reward is integrated
     dim: int = 1  # Dimension of the reward process
 
     @property
@@ -23,7 +23,7 @@ class RewardModel(eqx.Module):
             raise ValueError(
                 "RewardModel requires 'reward' in args for drift computation."
             )
-        return self.reward_rate * (args["reward"] - x)
+        return self.reward_rate * (args["reward"](t, x, args) - x)
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
