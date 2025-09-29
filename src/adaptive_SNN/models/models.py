@@ -380,12 +380,12 @@ class LearningModel(eqx.Module):
         )
 
     def drift(self, t, x, args):
-        (neuron_state, reward_state, env_state) = x
+        (network_state, reward_state, env_state) = x
         if args is None:
             args = {}
 
         # Compute network output, reward, and RPE
-        network_output = args["network_output"](t, neuron_state, args)
+        network_output = args["network_output"](t, network_state, args)
         reward = args["compute_reward"](t, env_state, args)
         RPE = reward - reward_state
 
@@ -394,7 +394,7 @@ class LearningModel(eqx.Module):
         args["RPE"] = lambda t, x, args: RPE
         args["reward"] = lambda t, x, args: reward
 
-        neuron_drift = self.neuron_model.drift(t, neuron_state, args)
+        neuron_drift = self.neuron_model.drift(t, network_state, args)
         reward_drift = self.reward_model.drift(t, reward_state, args)
         env_drift = self.environment.drift(t, env_state, args)
         return (neuron_drift, reward_drift, env_drift)
