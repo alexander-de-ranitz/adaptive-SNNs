@@ -89,6 +89,7 @@ class LIFNetwork(NeuronModel):
     firing_threshold: float = -50.0 * 1e-3  # mV
     V_reset: float = -60.0 * 1e-3  # mV
     input_weight: float = 10.0  # Weight of input spikes
+    learning_rate: float = 1e-3  # Learning rate for plasticity
 
     N_neurons: int = eqx.field(static=True)
     N_inputs: int = eqx.field(static=True)
@@ -146,14 +147,13 @@ class LIFNetwork(NeuronModel):
 
     def drift(self, t, x, args):
         # Unpack state (V, W, G)
-        V, W, conductances = x
+        V, W, G = x
 
         # Compute leak current
         leak_current = -self.leak_conductance * (V - self.resting_potential)
 
         # Compute E/I currents from recurrent connections
-        # Use dynamic weights W from state (instead of module attribute) to allow plasticity
-        weighted_conductances = W * conductances
+        weighted_conductances = W * G
         inhibitory_conductances = jnp.sum(
             weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
         )
@@ -175,11 +175,30 @@ class LIFNetwork(NeuronModel):
         dVdt = (leak_current + recurrent_current) / self.membrane_conductance
 
         # Compute synaptic conductance changes
-        dGdt = -1 / self.synaptic_time_constants * conductances
+        dGdt = -1 / self.synaptic_time_constants * G
 
         # Compute weight changes
-        # TODO: implement plasticity rule here
-        dW = jnp.zeros_like(W)  # Placeholder for plasticity rule
+        if args and "learning" in args:
+            if args["learning"] == False:
+                dW = jnp.zeros_like(W)  # No plasticity if learning is disabled
+            elif args["learning"] == True:
+                if "RPE" not in args:
+                    raise ValueError(
+                        "Learning is enabled but no RPE function provided."
+                    )
+                error_signal = self.learning_rate * args["RPE"](t, x, args)
+                E_noise = jnp.outer(
+                    args["excitatory_noise"](t, x, args), self.excitatory_mask
+                )
+                I_noise = jnp.outer(
+                    args["inhibitory_noise"](t, x, args),
+                    jnp.invert(self.excitatory_mask),
+                )
+                dW = error_signal * (E_noise + I_noise) * G
+        else:
+            raise ValueError(
+                "Learning flag not provided in args. Please set args['learning'] to True or False."
+            )
 
         return dVdt, dW, dGdt
 

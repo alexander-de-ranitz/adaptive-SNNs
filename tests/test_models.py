@@ -281,6 +281,57 @@ def test_OUP_zero_mean():
     assert jnp.all(jnp.abs(mean) < 1)  # Mean should be close to zero over long time
 
 
+def test_weight_plasticity():
+    """Test that dW is computed correctly when RPE and noises are provided.
+
+    dW_ij = lr * RPE * (E_noise_i * excitatory_mask_j + I_noise_i * inhibitory_mask_j)
+    where E_noise and I_noise are per-neuron noise vectors broadcast across synapses
+    according to the excitatory/inhibitory identity of the presynaptic unit j.
+    """
+    N = 4
+    key = jr.PRNGKey(123)
+    model = LIFNetwork(N_neurons=N, key=key)
+
+    # Manually set excitatory mask for test
+    excitatory_mask = jnp.array([True, False, True, False], dtype=bool)
+    object.__setattr__(model, "excitatory_mask", model.excitatory_mask)
+
+    # Manually set state
+    V, W, G = model.initial
+    G = jnp.zeros((N, N))
+    G.at[0, 1].set(1.0)
+    G.at[0, 2].set(0.5)
+    G.at[1, 0].set(2)
+    state = (V, W, G)
+
+    # Define deterministic noise and RPE
+    E_noise = jnp.arange(N, dtype=jnp.float32) + 1.0  # [1,2,3,4]
+    I_noise = jnp.arange(N, dtype=jnp.float32) + 0.5  # [0.5,1.5,2.5,3.5]
+    RPE_value = 2.0
+
+    args = {
+        "excitatory_noise": lambda t, x, a: E_noise,
+        "inhibitory_noise": lambda t, x, a: I_noise,
+        "RPE": lambda t, x, a: RPE_value,
+    }
+
+    _, dW, _ = model.drift(0.0, state, args)
+
+    excitatory_mask = model.excitatory_mask
+    inhibitory_mask = jnp.invert(excitatory_mask)
+
+    # Build expected dW using outer products replicating implementation
+    E_component = jnp.outer(E_noise, excitatory_mask)
+    I_component = jnp.outer(I_noise, inhibitory_mask)
+    expected_dW = model.learning_rate * RPE_value * (E_component + I_component) * G
+    assert jnp.allclose(dW, expected_dW)
+
+    # Manual sanity check
+    assert dW[0, 1] == model.learning_rate * RPE_value * I_noise[0] * G.at[0, 1].get()
+    assert dW[0, 2] == model.learning_rate * RPE_value * E_noise[0] * G.at[0, 2].get()
+    assert dW[1, 0] == model.learning_rate * RPE_value * E_noise[1] * G.at[1, 0].get()
+
+
 def test_excitatory_noise_only_affects_voltage_correctly():
     N = 7
     key = jr.PRNGKey(0)
