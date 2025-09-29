@@ -196,9 +196,7 @@ class LIFNetwork(NeuronModel):
                 )
                 dW = error_signal * (E_noise + I_noise) * G
         else:
-            raise ValueError(
-                "Learning flag not provided in args. Please set args['learning'] to True or False."
-            )
+            dW = jnp.zeros_like(W)  # No plasticity by default
 
         return dVdt, dW, dGdt
 
@@ -269,13 +267,14 @@ class LIFNetwork(NeuronModel):
         return (V_new, W, G_new), spikes
 
 
-class NoisyLIFModel(eqx.Module):
+class NoisyNeuronModel(NeuronModel):
     N_neurons: int = eqx.field(
         static=True
     )  # TODO: this can be removed if we always get N_neurons from network
     network: LIFNetwork
     noise_E: OUP  # TODO: might be better to use a single OUP with 2 dimensions
     noise_I: OUP
+    # TODO: For generability, it would be better to allow any noise model. We would have an ABC NoiseModel that OUP inherits from.
 
     def __init__(self, N_neurons: int, neuron_model, noise_I_model, noise_E_model):
         self.N_neurons = N_neurons
@@ -302,6 +301,8 @@ class NoisyLIFModel(eqx.Module):
 
         if args is None:
             args = {}
+
+        # TODO: As above, this could be made more general by allowing any noise model and just passing that
         args["excitatory_noise"] = lambda t, x, args: noise_E_state
         args["inhibitory_noise"] = lambda t, x, args: noise_I_state
 
@@ -333,16 +334,23 @@ class NoisyLIFModel(eqx.Module):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
+    def compute_spikes_and_update(self, t, x, args):
+        (V, W, G), noise_E_state, noise_I_state = x
+        (new_network_state, spikes) = self.network.compute_spikes_and_update(
+            t, (V, W, G), args
+        )
+        return (new_network_state, noise_E_state, noise_I_state), spikes
+
 
 class LearningModel(eqx.Module):
-    neuron_model: NoisyLIFModel
+    neuron_model: NeuronModel
     reward_model: RewardModel
     environment: EnvironmentModel
     learning_rate: float = 1e-3
 
     def __init__(
         self,
-        neuron_model: NoisyLIFModel,
+        neuron_model: NoisyNeuronModel,
         reward_model: RewardModel,
         environment: EnvironmentModel,
         learning_rate: float = 1e-3,
@@ -368,7 +376,9 @@ class LearningModel(eqx.Module):
         # Compute network output, reward, and RPE
         network_output = args["network_output"](t, neuron_state, args)
         reward = args["compute_reward"](t, env_state, args)
-        RPE = reward - reward_state
+        RPE = (
+            reward - reward_state
+        )  # TODO: this should be a function that is passed by the user in the args
 
         # Add to args for use in models
         args["env_input"] = lambda t, x, args: network_output

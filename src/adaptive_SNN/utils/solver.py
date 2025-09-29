@@ -9,7 +9,7 @@ from jaxtyping import Bool, PyTree, Scalar
 from joblib.memory import Memory
 from typing_extensions import TypeAlias
 
-from adaptive_SNN.models.models import NoisyLIFModel
+from adaptive_SNN.models.models import LearningModel, NoisyNeuronModel
 
 memory = Memory(location="./.cache", verbose=0)
 
@@ -19,7 +19,7 @@ _SolverState: TypeAlias = None
 
 @memory.cache
 def run_SNN_simulation_cached(
-    model: NoisyLIFModel,
+    model: LearningModel | NoisyNeuronModel,
     solver: Euler,
     t0: float,
     t1: float,
@@ -35,7 +35,7 @@ def run_SNN_simulation_cached(
 
 
 def run_SNN_simulation(
-    model: NoisyLIFModel,
+    model: LearningModel | NoisyNeuronModel,
     solver: Euler,
     t0: float,
     t1: float,
@@ -51,7 +51,7 @@ def run_SNN_simulation(
     y0 is ((V, W, G), noise_E, noise_I).
 
     Args:
-        model (NoisyNeuronModel): The neuron model containing the terms.
+        model (LearningModel | NoisyNeuronModel: The neuron model containing the terms.
         solver (Euler): The solver to use for integration.
         t0 (float): Initial time.
         t1 (float): Final time.
@@ -64,6 +64,19 @@ def run_SNN_simulation(
         Solution object containing times and states.
     """
     # TODO: think about how to elegantly store and pass around the spikes. Should they be part of y?
+
+    # Extract network parameters
+    # TODO: this might be a bit hacky, consider a cleaner design
+    if isinstance(model, NoisyNeuronModel):
+        network = model.network
+    elif isinstance(model, LearningModel):
+        network = model.neuron_model.network
+    else:
+        raise ValueError(
+            "Model must be an instance of NoisyNeuronModel or LearningModel."
+        )
+    N_neurons = network.N_neurons
+    N_inputs = network.N_inputs
 
     # Helper function to add current state to ys
     def add_to_ys(ys, y, index):
@@ -79,19 +92,17 @@ def run_SNN_simulation(
 
     # Set up storage for results
     ys = jax.tree.map(lambda x: jnp.empty(shape=(n_saves, *x.shape)), y0)
-    spikes_hist = jnp.empty(shape=(n_saves, model.N_neurons + model.network.N_inputs))
+    spikes_hist = jnp.empty(shape=(n_saves, N_neurons + N_inputs))
 
     # Set states for t=t0
     ys = add_to_ys(ys, y0, index=0)
-    spikes_hist = spikes_hist.at[0].set(
-        jnp.zeros((model.N_neurons + model.network.N_inputs,))
-    )
+    spikes_hist = spikes_hist.at[0].set(jnp.zeros((N_neurons + N_inputs,)))
 
     # If args contains 'p', set up input spikes as Poisson process
     # TODO: move this to a more sensible place and make input spikes more flexible
     if args and "p" in args:
         args["input_spikes"] = lambda t, x, args: jr.bernoulli(
-            jr.PRNGKey(int(t / dt0)), p=args["p"], shape=(model.network.N_inputs,)
+            jr.PRNGKey(int(t / dt0)), p=args["p"], shape=(N_inputs,)
         )
 
     save_index = 1  # Start saving from the first index after initial
@@ -109,9 +120,7 @@ def run_SNN_simulation(
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
 
-        new_network_state, spikes = model.network.compute_spikes_and_update(
-            t, y[0], args
-        )
+        new_network_state, spikes = network.compute_spikes_and_update(t, y[0], args)
         y_new = (new_network_state, y[1], y[2])  # Update state with new network state
 
         # Save results if at the correct interval

@@ -2,7 +2,7 @@ import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 
-from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyLIFModel
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNeuronModel
 
 
 def _baseline_state(model: LIFNetwork):
@@ -415,7 +415,7 @@ def test_noise_is_unique():
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
     noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
 
-    model = NoisyLIFModel(
+    model = NoisyNeuronModel(
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
     initial_state = model.initial
@@ -439,7 +439,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
     noise_I = OUP(theta=0.5, noise_scale=0.7, dim=N)
 
-    model = NoisyLIFModel(
+    model = NoisyNeuronModel(
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
 
@@ -473,7 +473,7 @@ def test_NoisyNeuronModel_diffusion():
     noise_E = OUP(theta=1.0, noise_scale=0.5, dim=N)
     noise_I = OUP(theta=1.0, noise_scale=0.5, dim=N)
 
-    model = NoisyLIFModel(
+    model = NoisyNeuronModel(
         N_neurons=N, neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
     V, W, G = _baseline_state(network)

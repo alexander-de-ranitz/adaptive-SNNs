@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyLIFModel
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNeuronModel
 from adaptive_SNN.utils.plotting import plot_results
 from adaptive_SNN.utils.solver import run_SNN_simulation
 
@@ -70,7 +70,7 @@ def simulate_noisy_neurons():
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=50.0, noise_scale=50e-9, mean=25 * 1e-9, dim=N_neurons)
     noise_I_model = OUP(theta=50.0, noise_scale=50e-9, mean=50 * 1e-9, dim=N_neurons)
-    model = NoisyLIFModel(
+    model = NoisyNeuronModel(
         N_neurons=N_neurons,
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,
@@ -95,15 +95,15 @@ def simulate_input_neurons():
     key = jr.PRNGKey(1)
 
     N_neurons = 1
-    N_inputs = 10
+    N_inputs = 50
     # Set up models
     neuron_model = LIFNetwork(
         N_neurons=N_neurons, N_inputs=N_inputs, fully_connected_input=True, key=key
     )
     key, _ = jr.split(key)
-    noise_E_model = OUP(theta=1.0, noise_scale=5e-9, mean=0.5e-9, dim=N_neurons)
+    noise_E_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
     noise_I_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
-    model = NoisyLIFModel(
+    model = NoisyNeuronModel(
         N_neurons=N_neurons,
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,
@@ -117,7 +117,10 @@ def simulate_input_neurons():
     # Input spikes: Poisson with rate 20 Hz
     rate = 20  # firing rate in Hz
     p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
-    args = {"p": p}  # p = probability of spike in each input neuron at each time step
+    args = {
+        "p": p,
+        "learning": False,
+    }  # p = probability of spike in each input neuron at each time step
 
     sol, spikes = run_SNN_simulation(
         model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
@@ -128,5 +131,5 @@ def simulate_input_neurons():
 
 if __name__ == "__main__":
     # simulate_noisy_neurons()
-    simulate_OUP()
-    # simulate_input_neurons()
+    # simulate_OUP()
+    simulate_input_neurons()

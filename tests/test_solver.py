@@ -2,7 +2,7 @@ import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 
-from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyLIFModel
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNeuronModel
 from adaptive_SNN.utils.solver import run_SNN_simulation
 
 
@@ -39,7 +39,7 @@ class DeterministicOUP(OUP):
         )
 
 
-class DeterministicNoisyNeuronModel(NoisyLIFModel):
+class DeterministicNoisyNeuronModel(NoisyNeuronModel):
     """This class is identical to NoisyNeuronModel, except it uses a VirtualBrownianTree for the noise terms.
     This makes the noise deterministic given the same key, which is useful for testing."""
 
@@ -73,7 +73,9 @@ class DeterministicNoisyNeuronModel(NoisyLIFModel):
         )
 
 
-def _make_quiet_model(N_neurons: int, N_inputs: int, key: jr.PRNGKey) -> NoisyLIFModel:
+def _make_quiet_model(
+    N_neurons: int, N_inputs: int, key: jr.PRNGKey
+) -> NoisyNeuronModel:
     """Helper to build a NoisyNeuronModel with no recurrent coupling and no OU diffusion.
 
     This keeps the dynamics simple/predictable for testing the solver wrapper.
@@ -88,7 +90,7 @@ def _make_quiet_model(N_neurons: int, N_inputs: int, key: jr.PRNGKey) -> NoisyLI
     noise_E = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
     noise_I = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
 
-    return NoisyLIFModel(
+    return NoisyNeuronModel(
         N_neurons=N_neurons,
         neuron_model=network,
         noise_I_model=noise_I,
