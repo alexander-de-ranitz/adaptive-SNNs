@@ -1,9 +1,27 @@
 import diffrax as dfx
+import jax
 import jax.numpy as jnp
 import jax.random as jr
+from diffrax import Solution
+from jaxtyping import PyTree
 
 from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNeuronModel
 from adaptive_SNN.utils.solver import simulate_noisy_SNN
+
+
+def get_non_inf_ts_ys(sol: Solution) -> tuple[PyTree, PyTree]:
+    """Get all non-inf values of ts and ys from a diffrax Solution."""
+    ts = sol.ts
+    ys = sol.ys
+    mask = ~jnp.isinf(ts)
+    ts_clean = ts[mask]
+    ys_clean = jax.tree.map(lambda y: y[mask], ys)
+    return ts_clean, ys_clean
+
+
+def allclose_pytree(x: PyTree, y: PyTree, atol=1e-6):
+    """Check if two PyTrees are allclose."""
+    return jax.tree.all(jax.tree.map(lambda a, b: jnp.allclose(a, b, atol=atol), x, y))
 
 
 class DeterministicOUP(OUP):
@@ -130,9 +148,7 @@ def test_solver_timesteps():
     )
 
     # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
-    sol_2_ts = sol_2.ts
-    mask = ~jnp.isinf(sol_2_ts)
-    sol_2_ts = sol_2_ts[mask]
+    sol_2_ts, _ = get_non_inf_ts_ys(sol_2)
 
     assert sol_1_ts.shape == sol_2_ts.shape
     assert jnp.allclose(sol_1_ts, sol_2_ts)
@@ -169,33 +185,10 @@ def test_solver_output_noiseless():
         saveat=saveat,
         adjoint=dfx.ForwardMode(),
     )
+    sol_2_ts, sol_2_ys = get_non_inf_ts_ys(sol_2)
 
-    (V, S, W, G), noise_E, noise_I = sol_1.ys
-    (V2, S2, W2, G2), noise_E2, noise_I2 = sol_2.ys
-
-    # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
-    V2 = V2[~jnp.isinf(sol_2.ts)]
-    S2 = S2[~jnp.isinf(sol_2.ts)]
-    G2 = G2[~jnp.isinf(sol_2.ts)]
-    W2 = W2[~jnp.isinf(sol_2.ts)]
-    noise_E2 = noise_E2[~jnp.isinf(sol_2.ts)]
-    noise_I2 = noise_I2[~jnp.isinf(sol_2.ts)]
-
-    # Check shapes
-    assert V.shape == V2.shape == (len(sol_1.ts), N_neurons)
-    assert G.shape == G2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
-    assert W.shape == W2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
-    assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
-    assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
-    assert S.shape == S2.shape == (len(sol_1.ts), N_neurons + N_inputs)
-    assert jnp.allclose(S, 0.0)
-
-    # Check values are close
-    assert jnp.allclose(V, V2)
-    assert jnp.allclose(G, G2)
-    assert jnp.allclose(W, W2)
-    assert jnp.allclose(noise_E, noise_E2)
-    assert jnp.allclose(noise_I, noise_I2)
+    assert jnp.allclose(sol_1.ts, sol_2_ts)
+    assert allclose_pytree(sol_1.ys, sol_2_ys)
 
 
 def test_solver_output_with_noise():
@@ -248,36 +241,7 @@ def test_solver_output_with_noise():
         adjoint=dfx.ForwardMode(),
     )
 
-    (V, S, W, G), noise_E, noise_I = sol_1.ys
-    (V2, S2, W2, G2), noise_E2, noise_I2 = sol_2.ys
+    sol_2_ts, sol_2_ys = get_non_inf_ts_ys(sol_2)
 
-    # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
-    V2 = V2[~jnp.isinf(sol_2.ts)]
-    S2 = S2[~jnp.isinf(sol_2.ts)]
-    G2 = G2[~jnp.isinf(sol_2.ts)]
-    W2 = W2[~jnp.isinf(sol_2.ts)]
-
-    noise_E2 = noise_E2[~jnp.isinf(sol_2.ts)]
-    noise_I2 = noise_I2[~jnp.isinf(sol_2.ts)]
-
-    # Check shapes
-    assert V.shape == V2.shape == (len(sol_1.ts), N_neurons)
-    assert G.shape == G2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
-    assert W.shape == W2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
-    assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
-    assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
-    assert S.shape == S2.shape == (len(sol_1.ts), N_neurons + N_inputs)
-
-    # Check that we have some noise
-    assert not jnp.all(noise_E == 0.0)
-    assert not jnp.all(noise_I == 0.0)
-
-    # Check values are close
-    assert jnp.allclose(
-        S, 0.0
-    )  # No spikes should occur- dfx.diffeqsolve does not deal with spikes
-    assert jnp.allclose(V, V2)
-    assert jnp.allclose(G, G2)
-    assert jnp.allclose(W, W2)
-    assert jnp.allclose(noise_E, noise_E2)
-    assert jnp.allclose(noise_I, noise_I2)
+    assert jnp.allclose(sol_1.ts, sol_2_ts)
+    assert allclose_pytree(sol_1.ys, sol_2_ys)
