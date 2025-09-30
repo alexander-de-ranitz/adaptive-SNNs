@@ -74,7 +74,7 @@ class OUP(eqx.Module):
 class LIFNetwork(NeuronModel):
     """Leaky Integrate-and-Fire (LIF) neuron network model with conductance-based synapses.
 
-    The state consists of the membrane potentials, weights, and synaptic conductances of all neurons.
+    The state consists of the membrane potentials, spikes, weights, and synaptic conductances of all neurons.
     """
 
     leak_conductance: float = 16.7 * 1e-9  # nS
@@ -138,16 +138,18 @@ class LIFNetwork(NeuronModel):
 
         State tuple ordering:
             V: Membrane potentials (N_neurons,)
+            S: Spikes (N_neurons + N_inputs,)
             W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs)
             G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
         """
         V_init = jnp.zeros((self.N_neurons,)) + self.resting_potential
         conductance_init = jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs))
-        return (V_init, self.weights, conductance_init)
+        spikes_init = jnp.zeros((self.N_neurons + self.N_inputs,))
+        return (V_init, spikes_init, self.weights, conductance_init)
 
     def drift(self, t, x, args):
-        # Unpack state (V, W, G)
-        V, W, G = x
+        # Unpack state (V, S, W, G)
+        V, S, W, G = x
 
         # Compute leak current
         leak_current = -self.leak_conductance * (V - self.resting_potential)
@@ -198,7 +200,9 @@ class LIFNetwork(NeuronModel):
         else:
             dW = jnp.zeros_like(W)  # No plasticity by default
 
-        return dVdt, dW, dGdt
+        dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
+
+        return dVdt, dS, dW, dGdt
 
     def diffusion(self, t, x, args):
         # TODO: Fix this. See below
@@ -214,7 +218,8 @@ class LIFNetwork(NeuronModel):
         # Perhaps a custom Lineax operator could be used here? Investigate this further.
 
         return (
-            jnp.zeros((self.N_neurons,)),
+            jnp.zeros((self.N_neurons,)),  # dV noise
+            jnp.zeros((self.N_neurons + self.N_inputs,)),  # dS noise
             jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)),  # dW noise
             jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)),  # dG noise
         )
@@ -224,6 +229,9 @@ class LIFNetwork(NeuronModel):
         # TODO: same as above: should this be None instead of shapes of zeros?
         return (
             jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
+            jax.ShapeDtypeStruct(
+                shape=(self.N_neurons + self.N_inputs,), dtype=default_float
+            ),
             jax.ShapeDtypeStruct(
                 shape=(self.N_neurons, self.N_neurons + self.N_inputs),
                 dtype=default_float,
@@ -246,7 +254,7 @@ class LIFNetwork(NeuronModel):
         )
 
     def compute_spikes_and_update(self, t, x, args):
-        V, W, G = x
+        V, _, W, G = x
         spikes = jnp.float32(V > self.firing_threshold)
         V_new = (1.0 - spikes) * V + spikes * self.V_reset  # Reset voltage
 
@@ -274,8 +282,7 @@ class LIFNetwork(NeuronModel):
             G + spikes[None, :] * self.synaptic_increment
         )  # increase conductance on spike
 
-        # Weights unchanged here (plasticity could be added later using spikes)
-        return (V_new, W, G_new), spikes
+        return V_new, spikes, W, G_new
 
 
 class NoisyNeuronModel(NeuronModel):
@@ -306,7 +313,7 @@ class NoisyNeuronModel(NeuronModel):
         return (self.network.initial, self.noise_E.initial, self.noise_I.initial)
 
     def drift(self, t, x, args):
-        (V, W, conductances), noise_E_state, noise_I_state = x
+        (V, S, W, conductances), noise_E_state, noise_I_state = x
 
         if args is None:
             args = {}
@@ -315,14 +322,14 @@ class NoisyNeuronModel(NeuronModel):
         args["excitatory_noise"] = lambda t, x, args: noise_E_state
         args["inhibitory_noise"] = lambda t, x, args: noise_I_state
 
-        network_drift = self.network.drift(t, (V, W, conductances), args)
+        network_drift = self.network.drift(t, (V, S, W, conductances), args)
         noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
         noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
         return (network_drift, noise_E_drift, noise_I_drift)
 
     def diffusion(self, t, x, args):
-        (V, W, conductances), noise_E_state, noise_I_state = x
-        network_diffusion = self.network.diffusion(t, (V, W, conductances), args)
+        (V, S, W, conductances), noise_E_state, noise_I_state = x
+        network_diffusion = self.network.diffusion(t, (V, S, W, conductances), args)
         noise_E_diffusion = self.noise_E.diffusion(t, noise_E_state, args)
         noise_I_diffusion = self.noise_I.diffusion(t, noise_I_state, args)
         return (network_diffusion, noise_E_diffusion, noise_I_diffusion)
@@ -345,7 +352,10 @@ class NoisyNeuronModel(NeuronModel):
 
     def compute_spikes_and_update(self, t, x, args):
         network_state, noise_E_state, noise_I_state = x
-        return self.network.compute_spikes_and_update(t, network_state, args)
+        new_network_state = self.network.compute_spikes_and_update(
+            t, network_state, args
+        )
+        return new_network_state, noise_E_state, noise_I_state
 
 
 class LearningModel(eqx.Module):

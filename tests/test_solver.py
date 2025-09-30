@@ -110,7 +110,7 @@ def test_solver_timesteps():
 
     # Our method
     save_every = 1
-    sol_1, _ = simulate_noisy_SNN(
+    sol_1 = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
     )
     sol_1_ts = sol_1.ts
@@ -152,7 +152,7 @@ def test_solver_output_noiseless():
 
     # Our method
     save_every = 1
-    sol_1, spikes = simulate_noisy_SNN(
+    sol_1 = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
     )
 
@@ -170,11 +170,12 @@ def test_solver_output_noiseless():
         adjoint=dfx.ForwardMode(),
     )
 
-    (V, W, G), noise_E, noise_I = sol_1.ys
-    (V2, W2, G2), noise_E2, noise_I2 = sol_2.ys
+    (V, S, W, G), noise_E, noise_I = sol_1.ys
+    (V2, S2, W2, G2), noise_E2, noise_I2 = sol_2.ys
 
     # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
     V2 = V2[~jnp.isinf(sol_2.ts)]
+    S2 = S2[~jnp.isinf(sol_2.ts)]
     G2 = G2[~jnp.isinf(sol_2.ts)]
     W2 = W2[~jnp.isinf(sol_2.ts)]
     noise_E2 = noise_E2[~jnp.isinf(sol_2.ts)]
@@ -186,9 +187,8 @@ def test_solver_output_noiseless():
     assert W.shape == W2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
     assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
     assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
-
-    assert spikes.shape == (len(sol_1.ts), N_neurons)
-    assert jnp.allclose(spikes, 0.0)
+    assert S.shape == S2.shape == (len(sol_1.ts), N_neurons + N_inputs)
+    assert jnp.allclose(S, 0.0)
 
     # Check values are close
     assert jnp.allclose(V, V2)
@@ -230,7 +230,7 @@ def test_solver_output_with_noise():
 
     # Our method
     save_every = 1
-    sol_1, spikes = simulate_noisy_SNN(
+    sol_1 = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
     )
 
@@ -248,13 +248,15 @@ def test_solver_output_with_noise():
         adjoint=dfx.ForwardMode(),
     )
 
-    (V, W, G), noise_E, noise_I = sol_1.ys
-    (V2, W2, G2), noise_E2, noise_I2 = sol_2.ys
+    (V, S, W, G), noise_E, noise_I = sol_1.ys
+    (V2, S2, W2, G2), noise_E2, noise_I2 = sol_2.ys
 
     # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
     V2 = V2[~jnp.isinf(sol_2.ts)]
+    S2 = S2[~jnp.isinf(sol_2.ts)]
     G2 = G2[~jnp.isinf(sol_2.ts)]
     W2 = W2[~jnp.isinf(sol_2.ts)]
+
     noise_E2 = noise_E2[~jnp.isinf(sol_2.ts)]
     noise_I2 = noise_I2[~jnp.isinf(sol_2.ts)]
 
@@ -264,7 +266,7 @@ def test_solver_output_with_noise():
     assert W.shape == W2.shape == (len(sol_1.ts), N_neurons, N_neurons + N_inputs)
     assert noise_E.shape == noise_E2.shape == (len(sol_1.ts), N_neurons)
     assert noise_I.shape == noise_I2.shape == (len(sol_1.ts), N_neurons)
-    assert spikes.shape == (len(sol_1.ts), N_neurons)
+    assert S.shape == S2.shape == (len(sol_1.ts), N_neurons + N_inputs)
 
     # Check that we have some noise
     assert not jnp.all(noise_E == 0.0)
@@ -272,7 +274,7 @@ def test_solver_output_with_noise():
 
     # Check values are close
     assert jnp.allclose(
-        spikes, 0.0
+        S, 0.0
     )  # No spikes should occur- dfx.diffeqsolve does not deal with spikes
     assert jnp.allclose(V, V2)
     assert jnp.allclose(G, G2)
