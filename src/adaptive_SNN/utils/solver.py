@@ -56,7 +56,6 @@ def simulate_noisy_SNN(
     Returns:
         Solution object containing times and states.
     """
-    # TODO: think about how to elegantly store and pass around the spikes. Should they be part of y?
 
     # Helper function to add current state to ys
     def add_to_ys(ys, y, index):
@@ -122,7 +121,7 @@ def simulate_learning_SNN(
     args: PyTree = None,
 ):
     """
-    Run a simulation of the LearningModel using the specified solver and terms.
+    Run a simulation of the LearningModel using the specified solver.
 
     Steps through the differential equation defined by `terms` of the model from time `t0` to `t1` with increments of `dt0`.
     y0 is the initial state of the model, which is (network_state, reward_state, environment_state).
@@ -140,4 +139,3 @@ def simulate_learning_SNN(
     Returns:
         Solution object containing times and states.
     """
-    pass
