@@ -1,7 +1,6 @@
 import jax.numpy as jnp
 import matplotlib as mpl
 from diffrax import Solution
-from jaxtyping import Array
 from matplotlib import pyplot as plt
 
 from adaptive_SNN.models.models import NoisyNeuronModel
@@ -11,7 +10,6 @@ mpl.rcParams["savefig.directory"] = "../figures"
 
 def plot_simulate_noisy_SNN_results(
     sol: Solution,
-    spikes: Array,
     model: NoisyNeuronModel,
     t0: float,
     t1: float,
@@ -19,7 +17,8 @@ def plot_simulate_noisy_SNN_results(
 ):
     # Get results
     t = sol.ts
-    (V, W, G), noise_E, noise_I = sol.ys
+    network_state, noise_E, noise_I = sol.ys
+    V, S, _, G = network_state.V, network_state.S, network_state.W, network_state.G
 
     G_inhibitory = (
         jnp.sum(G * jnp.invert(model.network.excitatory_mask[None, None, :]), axis=-1)
@@ -32,10 +31,10 @@ def plot_simulate_noisy_SNN_results(
 
     # Plot membrane potentials
     for i in range(model.network.N_neurons):
-        spike_times = t[spikes[:, i] > 0]
+        spike_times = t[S[:, i] > 0]
         ax1.vlines(
             spike_times,
-            V[:, i][spikes[:, i] > 0] * 1e3,
+            V[:, i][S[:, i] > 0] * 1e3,
             -40,
         )
         ax1.plot(t, V[:, i] * 1e3, label=f"Neuron {i + 1} V")
@@ -51,9 +50,9 @@ def plot_simulate_noisy_SNN_results(
     ax2.set_title("Total Conductances")
 
     # Plot spikes as raster plot
-    spike_times_per_neuron = [
-        jnp.nonzero(spikes[:, i])[0] * dt0 for i in range(spikes.shape[1])
-    ][::-1]
+    spike_times_per_neuron = [jnp.nonzero(S[:, i])[0] * dt0 for i in range(S.shape[1])][
+        ::-1
+    ]
     ax3.eventplot(spike_times_per_neuron, colors="black", linelengths=0.8)
     ax3.set_yticks(range(len(spike_times_per_neuron)))
     ax3.set_ylabel("Neuron")

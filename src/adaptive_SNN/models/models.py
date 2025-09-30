@@ -14,6 +14,22 @@ from adaptive_SNN.models.reward import RewardModel
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
+class LIFState(eqx.Module):
+    """State container for LIF network.
+
+    Attributes:
+        V: Membrane potentials (N_neurons,)
+        S: Spike vector (N_neurons + N_inputs,)
+        W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs)
+        G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
+    """
+
+    V: Array
+    S: Array
+    W: Array
+    G: Array
+
+
 class NeuronModel(ABC, eqx.Module):
     @property
     @abstractmethod
@@ -134,22 +150,31 @@ class LIFNetwork(NeuronModel):
 
     @property
     def initial(self):
-        """Return initial network state.
+        """Return initial network state as LIFState."""
+        V_init = (
+            jnp.zeros((self.N_neurons,), dtype=default_float) + self.resting_potential
+        )
+        conductance_init = jnp.zeros(
+            (self.N_neurons, self.N_neurons + self.N_inputs), dtype=default_float
+        )
+        spikes_init = jnp.zeros((self.N_neurons + self.N_inputs,), dtype=default_float)
+        return LIFState(V_init, spikes_init, self.weights, conductance_init)
 
-        State tuple ordering:
-            V: Membrane potentials (N_neurons,)
-            S: Spikes (N_neurons + N_inputs,)
-            W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs)
-            G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
+    def drift(self, t, state: LIFState, args) -> LIFState:
+        """Compute deterministic time derivatives for LIF state.
+
+        Args:
+            t: time (unused for autonomous dynamics)
+            state: LIFState current state
+            args: optional dict containing keys:
+                - inhibitory_noise(t, state, args) -> (N_neurons,)
+                - excitatory_noise(t, state, args) -> (N_neurons,)
+                - learning: bool
+                - RPE(t, state, args) -> scalar
+        Returns:
+            LIFState of derivatives (dV, dS, dW, dG)
         """
-        V_init = jnp.zeros((self.N_neurons,)) + self.resting_potential
-        conductance_init = jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs))
-        spikes_init = jnp.zeros((self.N_neurons + self.N_inputs,))
-        return (V_init, spikes_init, self.weights, conductance_init)
-
-    def drift(self, t, x, args):
-        # Unpack state (V, S, W, G)
-        V, S, W, G = x
+        V, S, W, G = state.V, state.S, state.W, state.G
 
         # Compute leak current
         leak_current = -self.leak_conductance * (V - self.resting_potential)
@@ -165,9 +190,9 @@ class LIFNetwork(NeuronModel):
 
         # Get noise from args and add to total conductances
         if args and "inhibitory_noise" in args:
-            inhibitory_conductances += args["inhibitory_noise"](t, x, args)
+            inhibitory_conductances += args["inhibitory_noise"](t, state, args)
         if args and "excitatory_noise" in args:
-            excitatory_conductances += args["excitatory_noise"](t, x, args)
+            excitatory_conductances += args["excitatory_noise"](t, state, args)
 
         # Compute total recurrent current
         recurrent_current = inhibitory_conductances * (
@@ -189,12 +214,12 @@ class LIFNetwork(NeuronModel):
                     raise ValueError(
                         "Learning is enabled but no RPE function provided."
                     )
-                error_signal = self.learning_rate * args["RPE"](t, x, args)
+                error_signal = self.learning_rate * args["RPE"](t, state, args)
                 E_noise = jnp.outer(
-                    args["excitatory_noise"](t, x, args), self.excitatory_mask
+                    args["excitatory_noise"](t, state, args), self.excitatory_mask
                 )
                 I_noise = jnp.outer(
-                    args["inhibitory_noise"](t, x, args),
+                    args["inhibitory_noise"](t, state, args),
                     jnp.invert(self.excitatory_mask),
                 )
                 dW = error_signal * (E_noise + I_noise) * G
@@ -203,9 +228,9 @@ class LIFNetwork(NeuronModel):
 
         dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
 
-        return dVdt, dS, dW, dGdt
+        return LIFState(dVdt, dS, dW, dGdt)
 
-    def diffusion(self, t, x, args):
+    def diffusion(self, t, state: LIFState, args) -> LIFState:
         # TODO: Fix this. See below
         # The diffusion (vf) and noise term (control) are used as:
         # jnp.tensordot(jnp.conj(vf), control, axes=jnp.ndim(control)),
@@ -218,17 +243,17 @@ class LIFNetwork(NeuronModel):
         # I would probably like to do element-wise multiplication.
         # Perhaps a custom Lineax operator could be used here? Investigate this further.
 
-        return (
-            jnp.zeros((self.N_neurons,)),  # dV noise
-            jnp.zeros((self.N_neurons + self.N_inputs,)),  # dS noise
-            jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)),  # dW noise
-            jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)),  # dG noise
+        return LIFState(
+            jnp.zeros_like(state.V, dtype=default_float),  # dV noise
+            jnp.zeros_like(state.S, dtype=default_float),  # dS noise
+            jnp.zeros_like(state.W, dtype=default_float),  # dW noise
+            jnp.zeros_like(state.G, dtype=default_float),  # dG noise
         )
 
     @property
     def noise_shape(self):
         # TODO: same as above: should this be None instead of shapes of zeros?
-        return (
+        return LIFState(
             jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
             jax.ShapeDtypeStruct(
                 shape=(self.N_neurons + self.N_inputs,), dtype=default_float
@@ -254,36 +279,37 @@ class LIFNetwork(NeuronModel):
             ),
         )
 
-    def compute_spikes_and_update(self, t, x, args):
-        V, _, W, G = x
-        spikes = jnp.array(V > self.firing_threshold, dtype=default_float)
-        V_new = (1.0 - spikes) * V + spikes * self.V_reset  # Reset voltage
+    def compute_spikes_and_update(self, t, state: LIFState, args):
+        V, _, W, G = state.V, state.S, state.W, state.G
+        spikes_neurons = (V > self.firing_threshold).astype(V.dtype)
+        V_new = (1.0 - spikes_neurons) * V + spikes_neurons * self.V_reset
 
-        # Add input spikes if provided in args
         if args and "input_spikes" in args:
+            input_sp = args["input_spikes"](t, state, args)
             if self.N_inputs == 0:
                 warnings.warn(
-                    "Input spikes provided to neuron model with no inputs, ignoring input spikes.",
+                    "Input spikes provided but model has no inputs; ignoring.",
                     stacklevel=3,
                 )
-            if jnp.any(args["input_spikes"](t, x, args) > 1) or jnp.any(
-                args["input_spikes"](t, x, args) < 0
-            ):
-                warnings.warn("Input spikes must be binary (0 or 1).", stacklevel=3)
+                spikes = spikes_neurons
+            else:
+                if jnp.any((input_sp > 1) | (input_sp < 0)):
+                    warnings.warn("Input spikes must be binary (0 or 1).", stacklevel=3)
+                spikes = jnp.concatenate((spikes_neurons, input_sp))
+        else:
+            if self.N_inputs > 0:
+                spikes = jnp.concatenate(
+                    (spikes_neurons, jnp.zeros((self.N_inputs,), dtype=V.dtype))
+                )
+                warnings.warn(
+                    "No input spikes provided; assuming zero input spikes.",
+                    stacklevel=3,
+                )
+            else:
+                spikes = spikes_neurons
 
-            spikes = jnp.concatenate((spikes, args["input_spikes"](t, x, args)))
-        elif self.N_inputs > 0:
-            spikes = jnp.concatenate((spikes, jnp.zeros((self.N_inputs,))))
-            warnings.warn(
-                "No input spikes provided to neuron model with inputs, assuming 0 input spikes.",
-                stacklevel=3,
-            )
-
-        G_new = (
-            G + spikes[None, :] * self.synaptic_increment
-        )  # increase conductance on spike
-
-        return V_new, spikes, W, G_new
+        G_new = G + spikes[None, :] * self.synaptic_increment
+        return LIFState(V_new, spikes, W, G_new)
 
 
 class NoisyNeuronModel(NeuronModel):
@@ -311,7 +337,7 @@ class NoisyNeuronModel(NeuronModel):
         return (self.network.initial, self.noise_E.initial, self.noise_I.initial)
 
     def drift(self, t, x, args):
-        (V, S, W, conductances), noise_E_state, noise_I_state = x
+        network_state, noise_E_state, noise_I_state = x
 
         if args is None:
             args = {}
@@ -323,14 +349,14 @@ class NoisyNeuronModel(NeuronModel):
             "inhibitory_noise": lambda t, x, args: noise_I_state,
         }
 
-        network_drift = self.network.drift(t, (V, S, W, conductances), network_args)
+        network_drift = self.network.drift(t, network_state, network_args)
         noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
         noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
         return (network_drift, noise_E_drift, noise_I_drift)
 
     def diffusion(self, t, x, args):
-        (V, S, W, conductances), noise_E_state, noise_I_state = x
-        network_diffusion = self.network.diffusion(t, (V, S, W, conductances), args)
+        network_state, noise_E_state, noise_I_state = x
+        network_diffusion = self.network.diffusion(t, network_state, args)
         noise_E_diffusion = self.noise_E.diffusion(t, noise_E_state, args)
         noise_I_diffusion = self.noise_I.diffusion(t, noise_I_state, args)
         return (network_diffusion, noise_E_diffusion, noise_I_diffusion)

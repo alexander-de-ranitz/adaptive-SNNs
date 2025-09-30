@@ -82,11 +82,11 @@ def simulate_noisy_neurons():
     solver = dfx.EulerHeun()
     init_state = model.initial
 
-    sol, spikes = simulate_noisy_SNN(
+    sol = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=None
     )
 
-    plot_simulate_noisy_SNN_results(sol, spikes, model, t0, t1, dt0)
+    plot_simulate_noisy_SNN_results(sol, model, t0, t1, dt0)
 
 
 def simulate_neuron_with_random_input():
@@ -122,11 +122,11 @@ def simulate_neuron_with_random_input():
         "learning": False,
     }  # p = probability of spike in each input neuron at each time step
 
-    sol, spikes = simulate_noisy_SNN(
+    sol = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
     )
 
-    plot_simulate_noisy_SNN_results(sol, spikes, model, t0, t1, dt0)
+    plot_simulate_noisy_SNN_results(sol, model, t0, t1, dt0)
 
 
 def train_SNN():
@@ -175,16 +175,10 @@ def train_SNN():
         ),  # Reward function
     }
 
-    sol, spikes = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
-    )
-
-    plot_simulate_noisy_SNN_results(sol, spikes, model, t0, t1, dt0)
-
 
 if __name__ == "__main__":
-    # simulate_noisy_neurons()
+    simulate_noisy_neurons()
     # simulate_OUP()
     # simulate_neuron_with_random_input()
-    train_SNN()
+    # train_SNN()
     pass
