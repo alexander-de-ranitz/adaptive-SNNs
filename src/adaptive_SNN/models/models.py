@@ -177,9 +177,10 @@ class LIFNetwork(NeuronModel):
         dVdt = (leak_current + recurrent_current) / self.membrane_conductance
 
         # Compute synaptic conductance changes
-        dGdt = -1 / self.synaptic_time_constants * G
+        dGdt = -1 / self.synaptic_time_constants[None, :] * G
 
         # Compute weight changes
+        # TODO: is this branching fine for Jax? Consider multiplying by 0/1 mask instead?
         if args and "learning" in args:
             if args["learning"] == False:
                 dW = jnp.zeros_like(W)  # No plasticity if learning is disabled
@@ -255,7 +256,7 @@ class LIFNetwork(NeuronModel):
 
     def compute_spikes_and_update(self, t, x, args):
         V, _, W, G = x
-        spikes = jnp.float32(V > self.firing_threshold)
+        spikes = jnp.array(V > self.firing_threshold, dtype=default_float)
         V_new = (1.0 - spikes) * V + spikes * self.V_reset  # Reset voltage
 
         # Add input spikes if provided in args
@@ -298,9 +299,6 @@ class NoisyNeuronModel(NeuronModel):
         self.noise_E = noise_E_model
         self.noise_I = noise_I_model
 
-        assert self.network.N_neurons == self.network.N_neurons, (
-            "Number of neurons in network must match N_neurons"
-        )
         assert self.noise_E.dim == self.network.N_neurons, (
             "Dimension of excitatory noise must match number of neurons"
         )
@@ -319,10 +317,13 @@ class NoisyNeuronModel(NeuronModel):
             args = {}
 
         # TODO: As above, this could be made more general by allowing any noise model and just passing that
-        args["excitatory_noise"] = lambda t, x, args: noise_E_state
-        args["inhibitory_noise"] = lambda t, x, args: noise_I_state
+        network_args = {
+            **args,
+            "excitatory_noise": lambda t, x, args: noise_E_state,
+            "inhibitory_noise": lambda t, x, args: noise_I_state,
+        }
 
-        network_drift = self.network.drift(t, (V, S, W, conductances), args)
+        network_drift = self.network.drift(t, (V, S, W, conductances), network_args)
         noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
         noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
         return (network_drift, noise_E_drift, noise_I_drift)
@@ -362,19 +363,16 @@ class LearningModel(eqx.Module):
     neuron_model: NoisyNeuronModel
     reward_model: RewardModel
     environment: EnvironmentModel
-    learning_rate: float = 1e-3
 
     def __init__(
         self,
         neuron_model: NoisyNeuronModel,
         reward_model: RewardModel,
         environment: EnvironmentModel,
-        learning_rate: float = 1e-3,
     ):
         self.neuron_model = neuron_model
         self.reward_model = reward_model
         self.environment = environment
-        self.learning_rate = learning_rate
 
     @property
     def initial(self):
@@ -386,8 +384,11 @@ class LearningModel(eqx.Module):
 
     def drift(self, t, x, args):
         (network_state, reward_state, env_state) = x
-        if args is None:
-            args = {}
+
+        if args is None or "network_output" not in args or "compute_reward" not in args:
+            raise ValueError(
+                "Args must contain 'network_output' and 'compute_reward' functions."
+            )
 
         # Compute network output, reward, and RPE
         network_output = args["network_output"](t, network_state, args)
@@ -395,9 +396,12 @@ class LearningModel(eqx.Module):
         RPE = reward - reward_state
 
         # Add to args for use in models
-        args["env_input"] = lambda t, x, args: network_output
-        args["RPE"] = lambda t, x, args: RPE
-        args["reward"] = lambda t, x, args: reward
+        args = {
+            **args,
+            "env_input": lambda t, x, args: network_output,
+            "RPE": lambda t, x, args: RPE,
+            "reward": lambda t, x, args: reward,
+        }
 
         neuron_drift = self.neuron_model.drift(t, network_state, args)
         reward_drift = self.reward_model.drift(t, reward_state, args)
