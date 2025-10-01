@@ -1,10 +1,13 @@
 import diffrax as dfx
 import equinox as eqx
+import jax
 import jax.numpy as jnp
+
+default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 class RewardModel(eqx.Module):
-    reward_rate: float = 0.1  # Rate at which the reward is integrated
+    reward_rate: float = 100  # Rate at which the reward is integrated
     dim: int = 1  # Dimension of the reward process
 
     @property
@@ -13,10 +16,10 @@ class RewardModel(eqx.Module):
 
     @property
     def noise_shape(self):
-        return None  # No noise in reward process
+        return jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float)
 
     def diffusion(self, t, x, args):
-        return None
+        return jnp.zeros((self.dim, self.dim))  # Zero diffusion for reward
 
     def drift(self, t, x, args):
         if args is None or "reward" not in args:
