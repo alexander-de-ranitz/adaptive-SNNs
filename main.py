@@ -5,9 +5,17 @@ import jax.random as jr
 from matplotlib import pyplot as plt
 
 from adaptive_SNN.models.environment import EnvironmentModel
-from adaptive_SNN.models.models import OUP, LearningModel, LIFNetwork, NoisyNeuronModel
+from adaptive_SNN.models.models import (
+    OUP,
+    LearningModel,
+    LIFNetwork,
+    NoisyNetwork,
+)
 from adaptive_SNN.models.reward import RewardModel
-from adaptive_SNN.utils.plotting import plot_simulate_noisy_SNN_results
+from adaptive_SNN.utils.plotting import (
+    plot_learning_results,
+    plot_simulate_noisy_SNN_results,
+)
 from adaptive_SNN.utils.solver import simulate_noisy_SNN
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -72,7 +80,7 @@ def simulate_noisy_neurons():
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=50.0, noise_scale=50e-9, mean=25 * 1e-9, dim=N_neurons)
     noise_I_model = OUP(theta=50.0, noise_scale=50e-9, mean=50 * 1e-9, dim=N_neurons)
-    model = NoisyNeuronModel(
+    model = NoisyNetwork(
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,
         noise_I_model=noise_I_model,
@@ -104,7 +112,7 @@ def simulate_neuron_with_random_input():
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
     noise_I_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
-    model = NoisyNeuronModel(
+    model = NoisyNetwork(
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,
         noise_I_model=noise_I_model,
@@ -144,7 +152,7 @@ def train_SNN():
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
     noise_I_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
-    network = NoisyNeuronModel(
+    network = NoisyNetwork(
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,
         noise_I_model=noise_I_model,
@@ -154,7 +162,6 @@ def train_SNN():
         neuron_model=network,
         reward_model=RewardModel(),
         environment=EnvironmentModel(),
-        learning_rate=1e-3,
     )
     # Run simulation
     solver = dfx.EulerHeun()
@@ -167,18 +174,23 @@ def train_SNN():
     args = {
         "p": p,
         "learning": False,
-        "network_output": lambda t,
-        x,
-        args: 0.0,  # Placeholder, will be updated in the loop
+        "network_output": lambda t, x, args: (0.01 / dt0) * jnp.sum(x[0].S[0]),
         "compute_reward": lambda t, x, args: -jnp.abs(
             jnp.sum(x[0]) - 5.0
         ),  # Reward function
+        "input_spikes": lambda t, x, args: jr.bernoulli(
+            jr.PRNGKey(int(t / dt0)), p=p, shape=(N_inputs,)
+        ),
     }
+    sol = simulate_noisy_SNN(
+        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
+    )
+    plot_learning_results(sol, model, t0, t1, dt0, args)
 
 
 if __name__ == "__main__":
-    simulate_noisy_neurons()
+    # simulate_noisy_neurons()
     # simulate_OUP()
     # simulate_neuron_with_random_input()
-    # train_SNN()
+    train_SNN()
     pass

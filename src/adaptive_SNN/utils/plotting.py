@@ -3,14 +3,14 @@ import matplotlib as mpl
 from diffrax import Solution
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import NoisyNeuronModel
+from adaptive_SNN.models.models import NoisyNetwork, LearningModel
 
 mpl.rcParams["savefig.directory"] = "../figures"
 
 
 def plot_simulate_noisy_SNN_results(
     sol: Solution,
-    model: NoisyNeuronModel,
+    model: NoisyNetwork,
     t0: float,
     t1: float,
     dt0: float,
@@ -21,16 +21,16 @@ def plot_simulate_noisy_SNN_results(
     V, S, _, G = network_state.V, network_state.S, network_state.W, network_state.G
 
     G_inhibitory = (
-        jnp.sum(G * jnp.invert(model.network.excitatory_mask[None, None, :]), axis=-1)
+        jnp.sum(G * jnp.invert(model.base_network.excitatory_mask[None, None, :]), axis=-1)
         + noise_I
     )
     G_excitatory = (
-        jnp.sum(G * model.network.excitatory_mask[None, None, :], axis=-1) + noise_E
+        jnp.sum(G * model.base_network.excitatory_mask[None, None, :], axis=-1) + noise_E
     )
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
 
     # Plot membrane potentials
-    for i in range(model.network.N_neurons):
+    for i in range(model.base_network.N_neurons):
         spike_times = t[S[:, i] > 0]
         ax1.vlines(
             spike_times,
@@ -59,9 +59,9 @@ def plot_simulate_noisy_SNN_results(
     ax3.set_xlabel("Time (s)")
     ax3.set_title("Spike Raster Plot")
 
-    if model.network.N_inputs > 0:
+    if model.base_network.N_inputs > 0:
         # Shade background to distinguish input vs. main neurons
-        N_input = model.network.N_inputs
+        N_input = model.base_network.N_inputs
         ax3.axhspan(-0.5, N_input - 0.5, facecolor="lightgray", alpha=0.3)
 
     # Set x-axis limits and ticks for all subplots
@@ -72,5 +72,69 @@ def plot_simulate_noisy_SNN_results(
         ax.set_xticklabels([f"{x:.1f}" for x in xticks])
         ax.label_outer()
 
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_learning_results(
+        sol: Solution,
+        model: LearningModel,
+        t0: float,
+        t1: float,
+        dt0: float,
+        args: dict = None,
+    ):
+    # Get results
+    t = sol.ts
+    network_state, reward_state, env_state = sol.ys
+
+    # Compute reward prediction error if possible
+    if args is not None and "compute_reward" in args:
+        rewards = jnp.array([args["compute_reward"](ti, env_state[i], args) for i, ti in enumerate(t)])
+        RPE = rewards - jnp.squeeze(reward_state)
+        print("RPE shape:", RPE.shape)
+        print("Rewards shape:", rewards.shape)
+        print("Reward state shape:", reward_state.shape)
+    else:
+        RPE = None
+
+    fig, axs = plt.subplots(4, 1, figsize=(10, 8))
+
+    axs[0].plot(t, reward_state, label="Reward State", color="b")
+    axs[0].set_title("Reward State Over Time")
+    axs[0].set_ylabel("Reward")
+
+    axs[1].plot(t, env_state, label="Environment State", color="m")
+    axs[1].set_title("Environment State Over Time")
+    axs[1].set_ylabel("Environment State")
+
+    if RPE is not None:
+        axs[2].plot(t, RPE, label="Reward Prediction Error", color="r")
+        axs[2].set_title("Reward Prediction Error Over Time")
+        axs[2].set_ylabel("RPE")
+
+     # Plot spikes as raster plot
+    spike_times_per_neuron = [jnp.nonzero(network_state[0].S[:, i])[0] * dt0 for i in range(network_state[0].S.shape[1])][
+        ::-1
+    ]
+    axs[3].eventplot(spike_times_per_neuron, colors="black", linelengths=0.8)
+    axs[3].set_yticks(range(len(spike_times_per_neuron)))
+    axs[3].set_ylabel("Neuron")
+    axs[3].set_xlabel("Time (s)")
+    axs[3].set_title("Spike Raster Plot")
+
+    if model.neuron_model.base_network.N_inputs > 0:
+        # Shade background to distinguish input vs. main neurons
+        N_input = model.neuron_model.base_network.N_inputs
+        axs[3].axhspan(-0.5, N_input - 0.5, facecolor="lightgray", alpha=0.3)
+
+    # Set x-axis limits and ticks for all subplots
+    xticks = jnp.linspace(t0, t1, 6)  #
+    for ax in axs:
+        ax.set_xlim(t0, t1)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels([f"{x:.1f}" for x in xticks])
+        ax.label_outer()
+    
     plt.tight_layout()
     plt.show()

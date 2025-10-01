@@ -94,7 +94,7 @@ class LIFNetwork(NeuronModel):
     """
 
     leak_conductance: float = 16.7 * 1e-9  # nS
-    membrane_conductance: float = 250 * 1e-12  # pF
+    membrane_capacitance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
     connection_prob: float = 0.1
     reversal_potential_E: float = 0.0  # mV
@@ -199,7 +199,7 @@ class LIFNetwork(NeuronModel):
             self.reversal_potential_I - V
         ) + excitatory_conductances * (self.reversal_potential_E - V)
 
-        dVdt = (leak_current + recurrent_current) / self.membrane_conductance
+        dVdt = (leak_current + recurrent_current) / self.membrane_capacitance
 
         # Compute synaptic conductance changes
         dGdt = -1 / self.synaptic_time_constants[None, :] * G
@@ -312,8 +312,14 @@ class LIFNetwork(NeuronModel):
         return LIFState(V_new, spikes, W, G_new)
 
 
-class NoisyNeuronModel(NeuronModel):
-    network: NeuronModel
+class NoisyNetworkState(eqx.Module):
+    network_state: LIFState
+    noise_E_state: Array  # (N_neurons,)
+    noise_I_state: Array  # (N_neurons,)
+
+
+class NoisyNetwork(NeuronModel):
+    base_network: NeuronModel
     noise_E: OUP  # TODO: might be better to use a single OUP with 2 dimensions
     noise_I: OUP
     # TODO: For generability, it would be better to allow any noise model. We would have an ABC NoiseModel that OUP inherits from.
@@ -321,23 +327,29 @@ class NoisyNeuronModel(NeuronModel):
     def __init__(
         self, neuron_model: NeuronModel, noise_I_model: OUP, noise_E_model: OUP
     ):
-        self.network = neuron_model
+        self.base_network = neuron_model
         self.noise_E = noise_E_model
         self.noise_I = noise_I_model
 
-        assert self.noise_E.dim == self.network.N_neurons, (
+        assert self.noise_E.dim == self.base_network.N_neurons, (
             "Dimension of excitatory noise must match number of neurons"
         )
-        assert self.noise_I.dim == self.network.N_neurons, (
+        assert self.noise_I.dim == self.base_network.N_neurons, (
             "Dimension of inhibitory noise must match number of neurons"
         )
 
     @property
     def initial(self):
-        return (self.network.initial, self.noise_E.initial, self.noise_I.initial)
+        return NoisyNetworkState(
+            self.base_network.initial, self.noise_E.initial, self.noise_I.initial
+        )
 
-    def drift(self, t, x, args):
-        network_state, noise_E_state, noise_I_state = x
+    def drift(self, t, state: NoisyNetworkState, args):
+        network_state, noise_E_state, noise_I_state = (
+            state.network_state,
+            state.noise_E_state,
+            state.noise_I_state,
+        )
 
         if args is None:
             args = {}
@@ -349,22 +361,28 @@ class NoisyNeuronModel(NeuronModel):
             "inhibitory_noise": lambda t, x, args: noise_I_state,
         }
 
-        network_drift = self.network.drift(t, network_state, network_args)
+        network_drift = self.base_network.drift(t, network_state, network_args)
         noise_E_drift = self.noise_E.drift(t, noise_E_state, args)
         noise_I_drift = self.noise_I.drift(t, noise_I_state, args)
-        return (network_drift, noise_E_drift, noise_I_drift)
+        return NoisyNetworkState(network_drift, noise_E_drift, noise_I_drift)
 
-    def diffusion(self, t, x, args):
-        network_state, noise_E_state, noise_I_state = x
-        network_diffusion = self.network.diffusion(t, network_state, args)
+    def diffusion(self, t, state: NoisyNetworkState, args):
+        network_state, noise_E_state, noise_I_state = (
+            state.network_state,
+            state.noise_E_state,
+            state.noise_I_state,
+        )
+        network_diffusion = self.base_network.diffusion(t, network_state, args)
         noise_E_diffusion = self.noise_E.diffusion(t, noise_E_state, args)
         noise_I_diffusion = self.noise_I.diffusion(t, noise_I_state, args)
-        return (network_diffusion, noise_E_diffusion, noise_I_diffusion)
+        return NoisyNetworkState(
+            network_diffusion, noise_E_diffusion, noise_I_diffusion
+        )
 
     @property
     def noise_shape(self):
-        return (
-            self.network.noise_shape,
+        return NoisyNetworkState(
+            self.base_network.noise_shape,
             self.noise_E.noise_shape,
             self.noise_I.noise_shape,
         )
@@ -377,38 +395,58 @@ class NoisyNeuronModel(NeuronModel):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def compute_spikes_and_update(self, t, x, args):
-        network_state, noise_E_state, noise_I_state = x
-        new_network_state = self.network.compute_spikes_and_update(
+    def compute_spikes_and_update(self, t, x: NoisyNetworkState, args):
+        network_state, noise_E_state, noise_I_state = (
+            x.network_state,
+            x.noise_E_state,
+            x.noise_I_state,
+        )
+        new_network_state = self.base_network.compute_spikes_and_update(
             t, network_state, args
         )
-        return new_network_state, noise_E_state, noise_I_state
+        return NoisyNetworkState(new_network_state, noise_E_state, noise_I_state)
 
 
-class LearningModel(eqx.Module):
-    neuron_model: NoisyNeuronModel
+class AgentSystem(eqx.Module):
+    noisy_network: NoisyNetwork
     reward_model: RewardModel
     environment: EnvironmentModel
 
     def __init__(
         self,
-        neuron_model: NoisyNeuronModel,
+        neuron_model: NoisyNetwork,
         reward_model: RewardModel,
         environment: EnvironmentModel,
     ):
-        self.neuron_model = neuron_model
+        self.noisy_network = neuron_model
         self.reward_model = reward_model
         self.environment = environment
 
     @property
     def initial(self):
         return (
-            self.neuron_model.initial,
+            self.noisy_network.initial,
             self.reward_model.initial,
             self.environment.initial,
         )
 
     def drift(self, t, x, args):
+        """Compute deterministic time derivatives for LearningModel state.
+
+        The state consists of (network_state, reward_state, environment_state). The args dict
+        must contain functions to compute the network output and reward, which are used to compute
+        the reward prediction error (RPE) for learning.
+
+        Args:
+            t: time
+            x: (network_state, reward_state, environment_state)
+            args: dict containing keys:
+                - network_output(t, network_state, args) -> scalar
+                - compute_reward(t, environment_state, args) -> scalar
+        Returns:
+            (d_network_state, d_reward_state, d_environment_state)
+        """
+
         (network_state, reward_state, env_state) = x
 
         if args is None or "network_output" not in args or "compute_reward" not in args:
@@ -429,14 +467,14 @@ class LearningModel(eqx.Module):
             "reward": lambda t, x, args: reward,
         }
 
-        neuron_drift = self.neuron_model.drift(t, network_state, args)
+        neuron_drift = self.noisy_network.drift(t, network_state, args)
         reward_drift = self.reward_model.drift(t, reward_state, args)
         env_drift = self.environment.drift(t, env_state, args)
         return (neuron_drift, reward_drift, env_drift)
 
     def diffusion(self, t, x, args):
         (neuron_state, reward_state, env_state) = x
-        neuron_diffusion = self.neuron_model.diffusion(t, neuron_state, args)
+        neuron_diffusion = self.noisy_network.diffusion(t, neuron_state, args)
         reward_diffusion = self.reward_model.diffusion(t, reward_state, args)
         env_diffusion = self.environment.diffusion(t, env_state, args)
         return (neuron_diffusion, reward_diffusion, env_diffusion)
@@ -444,7 +482,7 @@ class LearningModel(eqx.Module):
     @property
     def noise_shape(self):
         return (
-            self.neuron_model.noise_shape,
+            self.noisy_network.noise_shape,
             self.reward_model.noise_shape,
             self.environment.noise_shape,
         )
@@ -456,3 +494,10 @@ class LearningModel(eqx.Module):
         return dfx.MultiTerm(
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
+
+    def compute_spikes_and_update(self, t, x, args):
+        (network_state, reward_state, env_state) = x
+        new_network_state = self.noisy_network.compute_spikes_and_update(
+            t, network_state, args
+        )
+        return (new_network_state, reward_state, env_state)

@@ -5,30 +5,13 @@ from diffrax import RESULTS, Euler, Solution
 from jaxtyping import PyTree
 from joblib.memory import Memory
 
-from adaptive_SNN.models.models import LearningModel, NoisyNeuronModel
+from adaptive_SNN.models.models import AgentSystem, NoisyNetwork
 
 memory = Memory(location="./.cache", verbose=0)
 
 
-@memory.cache
-def run_SNN_simulation_cached(
-    model: NoisyNeuronModel,
-    solver: Euler,
-    t0: float,
-    t1: float,
-    dt0: float,
-    y0: PyTree,
-    save_every_n_steps: int = 1,
-    args: PyTree = None,
-):
-    """
-    Cached version of run_SNN_simulation to avoid recomputation for the same parameters.
-    """
-    return simulate_noisy_SNN(model, solver, t0, t1, dt0, y0, save_every_n_steps, args)
-
-
 def simulate_noisy_SNN(
-    model: NoisyNeuronModel,
+    model: NoisyNetwork | AgentSystem,
     solver: Euler,
     t0: float,
     t1: float,
@@ -41,7 +24,6 @@ def simulate_noisy_SNN(
     Run a simulation using the specified solver and terms.
 
     Steps through the differential equation defined by `terms` from time `t0` to `t1` with increments of `dt0`.
-    y0 is ((V, W, G), noise_E, noise_I).
 
     Args:
         model (NoisyNeuronModel): The neuron model containing the terms.
@@ -71,13 +53,6 @@ def simulate_noisy_SNN(
     ys = jax.tree.map(lambda x: jnp.empty(shape=(n_saves, *x.shape)), y0)
     ys = add_to_ys(ys, y0, index=0)
     save_index = 1
-
-    # If args contains 'p', set up input spikes as Poisson process
-    # TODO: move this to a more sensible place and make input spikes more flexible
-    if args and "p" in args:
-        args["input_spikes"] = lambda t, x, args: jr.bernoulli(
-            jr.PRNGKey(int(t / dt0)), p=args["p"], shape=(model.network.N_inputs,)
-        )
 
     step = 0
     y = y0
