@@ -13,6 +13,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 class EnvironmentModel(eqx.Module):
     dim: int = 1  # Dimension of the environment process
     target_state: Array  # Desired target state for the environment
+    rate: float = 100.0  # Rate at which the environment responds to input
 
     def __init__(self, target_state: Array = None, dim: int = 1):
         self.dim = dim
@@ -36,7 +37,9 @@ class EnvironmentModel(eqx.Module):
             raise ValueError(
                 "EnvironmentModel requires 'env_input' in args for drift computation."
             )
-        return args["env_input"](t, x, args) - x  # Simple dynamics towards input
+        return self.rate * (
+            args["env_input"](t, x, args) - x
+        )  # Simple dynamics towards input
 
     def diffusion(self, t, x, args):
         return jnp.zeros((self.dim, self.dim))
