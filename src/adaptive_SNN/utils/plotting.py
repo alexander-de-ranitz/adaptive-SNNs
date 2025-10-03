@@ -69,11 +69,17 @@ def plot_simulate_noisy_SNN_results(
 
     if model.base_network.N_inputs > 0:
         # Shade background to distinguish input vs. main neurons
-        N_input = model.base_network.N_inputs
-        N_exc_input = jnp.sum(model.base_network.excitatory_mask[:N_input])
-        ax3.axhspan(-0.5, N_input - N_exc_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
+        # This assumes that all exc/inh inputs are grouped toghether at the end of the neuron list
+        N_exc_input = jnp.sum(
+            model.base_network.excitatory_mask[model.base_network.N_neurons :]
+        )
+        N_inh_input = model.base_network.N_inputs - N_exc_input
+        ax3.axhspan(-0.5, N_inh_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
         ax3.axhspan(
-            N_input - N_exc_input - 0.5, N_input - 0.5, facecolor="#B5D6E8", alpha=0.3
+            N_inh_input - 0.5,
+            N_inh_input + N_exc_input - 0.5,
+            facecolor="#B5D6E8",
+            alpha=0.3,
         )
 
     # Set x-axis limits and ticks for all subplots
@@ -138,15 +144,19 @@ def plot_learning_results(
     axs[3].set_xlabel("Time (s)")
     axs[3].set_title("Spike Raster Plot")
 
-    N_input = model.noisy_network.base_network.N_inputs
-    if N_input > 0:
-        # Shade background to distinguish input vs. main neurons and excitatory vs. inhibitory
-        N_exc_input = jnp.sum(model.base_network.excitatory_mask[:N_input])
-        axs[3].axhspan(
-            -0.5, N_input - N_exc_input - 0.5, facecolor="#E8BFB5", alpha=0.3
+    if model.base_network.N_inputs > 0:
+        # Shade background to distinguish input vs. main neurons
+        # This assumes that all exc/inh inputs are grouped toghether at the end of the neuron list
+        N_exc_input = jnp.sum(
+            model.base_network.excitatory_mask[model.base_network.N_neurons :]
         )
+        N_inh_input = model.base_network.N_inputs - N_exc_input
+        axs[3].axhspan(-0.5, N_inh_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
         axs[3].axhspan(
-            N_input - N_exc_input - 0.5, N_input - 0.5, facecolor="#B5D6E8", alpha=0.3
+            N_inh_input - 0.5,
+            N_inh_input + N_exc_input - 0.5,
+            facecolor="#B5D6E8",
+            alpha=0.3,
         )
 
     # Set x-axis limits and ticks for all subplots
