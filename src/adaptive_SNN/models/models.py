@@ -340,16 +340,8 @@ class LIFNetwork(NeuronModel):
         inhibitory_weights = jnp.sum(
             weights * jnp.invert(self.excitatory_mask[None, :]), axis=1
         )
-        balance = (
-            inhibitory_weights
-            * self.tau_I
-            * jnp.abs(self.resting_potential - self.reversal_potential_I)
-            / (
-                excitatory_weights
-                * self.tau_E
-                * jnp.abs(self.resting_potential - self.reversal_potential_E)
-                + 1e-12
-            )
+        balance = inhibitory_weights / (
+            excitatory_weights + 1e-12
         )  # Avoid division by zero
         return balance
 
