@@ -191,16 +191,69 @@ def train_SNN():
 
 def simulate_balancing():
     t0 = 0
-    t1 = 0.5
+    t1 = 0.2
     dt0 = 0.0001
     key = jr.PRNGKey(1)
 
     N_neurons = 1
-    N_inputs = 50
+    N_inputs = 2
     input_types = jnp.concatenate(
         [jnp.ones((int(N_inputs * 0.8),)), jnp.zeros((int(N_inputs * 0.2),))], axis=0
     )  # First half excitatory, second half inhibitory
+    input_types = jnp.array([1, 0])  # First excitatory, second inhibitory
 
+    # Set up models
+    neuron_model = LIFNetwork(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        input_neuron_types=input_types,
+        fully_connected_input=True,
+        key=key,
+    )
+    key, _ = jr.split(key)
+    noise_E_model = OUP(theta=0.0, noise_scale=0e-8, mean=0e-8, dim=N_neurons)
+    noise_I_model = OUP(theta=0.0, noise_scale=0e-8, mean=0e-8, dim=N_neurons)
+    model = NoisyNetwork(
+        neuron_model=neuron_model,
+        noise_E_model=noise_E_model,
+        noise_I_model=noise_I_model,
+    )
+
+    # Run simulation
+    solver = dfx.EulerHeun()
+    init_state = model.initial
+
+    # Input spikes: Poisson with rate 20 Hz
+    rate = 1000  # firing rate in Hz
+    p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
+    args = {
+        "input_spikes": lambda t, x, args: jr.bernoulli(
+            jr.PRNGKey(int(t / dt0)), p=p, shape=(N_inputs,)
+        ),
+        "learning": lambda t, x, args: False,
+        "desired_balance": lambda t, x, args: 1,  # Desired I/E balance
+        "train_only_exc_synapses": lambda t, x, args: True,
+    }
+
+    sol = simulate_noisy_SNN(
+        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
+    )
+
+    plot_simulate_noisy_SNN_results(sol, model, t0, t1, dt0)
+
+
+def test_firing_rate():
+    t0 = 0
+    t1 = 0.2
+    dt0 = 0.0001
+    key = jr.PRNGKey(1)
+
+    N_neurons = 1
+    N_inputs = 2
+    # input_types =  jnp.concatenate(
+    #     [jnp.ones((int(N_inputs * 0.8),)), jnp.zeros((int(N_inputs * 0.2),))], axis=0
+    # )
+    input_types = jnp.array([1, 0])  # First excitatory, second inhibitory
     # Set up models
     neuron_model = LIFNetwork(
         N_neurons=N_neurons,
@@ -220,24 +273,51 @@ def simulate_balancing():
 
     # Run simulation
     solver = dfx.EulerHeun()
-    init_state = model.initial
 
-    # Input spikes: Poisson with rate 20 Hz
-    rate = 150  # firing rate in Hz
-    p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
-    args = {
-        "input_spikes": lambda t, x, args: jr.bernoulli(
-            jr.PRNGKey(int(t / dt0)), p=p, shape=(N_inputs,)
-        ),
-        "learning": lambda t, x, args: False,
-        "desired_balance": lambda t, x, args: 0.3,  # Desired E/I balance
-    }
+    weights = [0.1, 0.5, 1, 2]
+    for w in weights:
+        neuron_model = LIFNetwork(
+            N_neurons=N_neurons,
+            N_inputs=N_inputs,
+            input_neuron_types=input_types,
+            fully_connected_input=True,
+            key=key,
+        )
+        key, _ = jr.split(key)
+        noise_E_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
+        noise_I_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
+        model = NoisyNetwork(
+            neuron_model=neuron_model,
+            noise_E_model=noise_E_model,
+            noise_I_model=noise_I_model,
+        )
+        init_state = model.initial
+        object.__setattr__(
+            model.base_network, "weights", w * init_state.network_state.W
+        )
+        init_state = model.initial
 
-    sol = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
-    )
+        # Input spikes: Poisson with rate 20 Hz
+        rate = 500  # firing rate in Hz
+        p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
+        args = {
+            "input_spikes": lambda t, x, args: jr.bernoulli(
+                jr.PRNGKey(int(t / dt0)), p=p, shape=(N_inputs,)
+            ),
+            "learning": lambda t, x, args: False,
+            "desired_balance": lambda t, x, args: 1,  # Desired I/E balance
+            "train_only_exc_synapses": lambda t, x, args: True,
+        }
+        sol = simulate_noisy_SNN(
+            model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
+        )
 
-    plot_simulate_noisy_SNN_results(sol, model, t0, t1, dt0)
+        spikes = sol.ys.network_state.S
+        total_spikes = jnp.sum(spikes[:, 0])
+        sim_time = t1 - t0
+        firing_rate = total_spikes / (N_neurons * sim_time)
+        print(f"Total spikes: {total_spikes}, Firing rate: {firing_rate} Hz")
+        plot_simulate_noisy_SNN_results(sol, model, t0, t1, dt0)
 
 
 if __name__ == "__main__":
@@ -245,5 +325,7 @@ if __name__ == "__main__":
     # simulate_OUP()
     # simulate_neuron_with_random_input()
     # train_SNN()
-    simulate_balancing()
+    # simulate_balancing()
+    test_firing_rate()
+
     pass
