@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from adaptive_SNN.models.environment import EnvironmentModel
 from adaptive_SNN.models.models import (
     OUP,
-    LearningModel,
+    AgentSystem,
     LIFNetwork,
     NoisyNetwork,
 )
@@ -158,7 +158,7 @@ def train_SNN():
         noise_I_model=noise_I_model,
     )
 
-    model = LearningModel(
+    model = AgentSystem(
         neuron_model=network,
         reward_model=RewardModel(),
         environment=EnvironmentModel(),
@@ -172,8 +172,7 @@ def train_SNN():
     p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
 
     args = {
-        "p": p,
-        "learning": False,
+        "learning": lambda t, x, args: True,
         "network_output": lambda t, x, args: (0.01 / dt0) * jnp.sum(x[0].S[0]),
         "compute_reward": lambda t, x, args: -jnp.abs(
             jnp.sum(x[0]) - 5.0
@@ -181,16 +180,70 @@ def train_SNN():
         "input_spikes": lambda t, x, args: jr.bernoulli(
             jr.PRNGKey(int(t / dt0)), p=p, shape=(N_inputs,)
         ),
+        "desired_balance": lambda t, x, args: jnp.array([12.0]),  # Desired E/I balance
     }
+
     sol = simulate_noisy_SNN(
         model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
     )
     plot_learning_results(sol, model, t0, t1, dt0, args)
 
 
+def simulate_balancing():
+    t0 = 0
+    t1 = 0.5
+    dt0 = 0.0001
+    key = jr.PRNGKey(1)
+
+    N_neurons = 1
+    N_inputs = 50
+    input_types = jnp.concatenate(
+        [jnp.ones((int(N_inputs * 0.8),)), jnp.zeros((int(N_inputs * 0.2),))], axis=0
+    )  # First half excitatory, second half inhibitory
+
+    # Set up models
+    neuron_model = LIFNetwork(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        input_neuron_types=input_types,
+        fully_connected_input=True,
+        key=key,
+    )
+    key, _ = jr.split(key)
+    noise_E_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
+    noise_I_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
+    model = NoisyNetwork(
+        neuron_model=neuron_model,
+        noise_E_model=noise_E_model,
+        noise_I_model=noise_I_model,
+    )
+
+    # Run simulation
+    solver = dfx.EulerHeun()
+    init_state = model.initial
+
+    # Input spikes: Poisson with rate 20 Hz
+    rate = 150  # firing rate in Hz
+    p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
+    args = {
+        "input_spikes": lambda t, x, args: jr.bernoulli(
+            jr.PRNGKey(int(t / dt0)), p=p, shape=(N_inputs,)
+        ),
+        "learning": lambda t, x, args: False,
+        "desired_balance": lambda t, x, args: 0.3,  # Desired E/I balance
+    }
+
+    sol = simulate_noisy_SNN(
+        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
+    )
+
+    plot_simulate_noisy_SNN_results(sol, model, t0, t1, dt0)
+
+
 if __name__ == "__main__":
     # simulate_noisy_neurons()
     # simulate_OUP()
     # simulate_neuron_with_random_input()
-    train_SNN()
+    # train_SNN()
+    simulate_balancing()
     pass

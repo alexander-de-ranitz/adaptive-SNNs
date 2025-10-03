@@ -54,7 +54,8 @@ class NeuronModel(ABC, eqx.Module):
         pass
 
     @abstractmethod
-    def compute_spikes_and_update(self, t, x, args):
+    def update(self, t, x, args):
+        """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         pass
 
 
@@ -119,6 +120,7 @@ class LIFNetwork(NeuronModel):
         self,
         N_neurons: int,
         N_inputs: int = 0,
+        input_neuron_types: Array = None,  # Binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
         fully_connected_input: bool = True,
         key: jr.PRNGKey = jr.PRNGKey(0),
     ):
@@ -137,13 +139,16 @@ class LIFNetwork(NeuronModel):
                 jnp.ones(shape=(N_neurons, N_inputs)) * self.input_weight
             )
 
-        # Set neuron types and time constants
+        # Set neuron types
         neuron_types = jnp.where(
             jr.bernoulli(key_3, 0.8, (N_neurons,)), True, False
         )  # 80% excitatory, 20% inhibitory
+        # If no input neuron types provided, assume all input neurons are excitatory
+        if input_neuron_types is None:
+            input_neuron_types = jnp.ones((N_inputs,), dtype=bool)
         self.excitatory_mask = jnp.concatenate(
-            [neuron_types, jnp.ones((N_inputs,))], dtype=bool
-        )  # inputs are all excitatory
+            [neuron_types, input_neuron_types], dtype=bool
+        )
         self.synaptic_time_constants = jnp.where(
             self.excitatory_mask, self.tau_E, self.tau_I
         )
@@ -207,9 +212,9 @@ class LIFNetwork(NeuronModel):
         # Compute weight changes
         # TODO: is this branching fine for Jax? Consider multiplying by 0/1 mask instead?
         if args and "learning" in args:
-            if args["learning"] == False:
+            if args["learning"](t, state, args) == False:
                 dW = jnp.zeros_like(W)  # No plasticity if learning is disabled
-            elif args["learning"] == True:
+            elif args["learning"](t, state, args) == True:
                 if "RPE" not in args:
                     raise ValueError(
                         "Learning is enabled but no RPE function provided."
@@ -218,10 +223,16 @@ class LIFNetwork(NeuronModel):
                 E_noise = jnp.outer(
                     args["excitatory_noise"](t, state, args), self.excitatory_mask
                 )
-                I_noise = jnp.outer(
-                    args["inhibitory_noise"](t, state, args),
-                    jnp.invert(self.excitatory_mask),
-                )
+                if (
+                    "train_only_exc_synapses" in args
+                    and args["train_only_exc_synapses"](t, state, args) == True
+                ):
+                    I_noise = jnp.zeros_like(E_noise)
+                else:
+                    I_noise = jnp.outer(
+                        args["inhibitory_noise"](t, state, args),
+                        jnp.invert(self.excitatory_mask),
+                    )
                 dW = error_signal * (E_noise + I_noise) * G
         else:
             dW = jnp.zeros_like(W)  # No plasticity by default
@@ -279,7 +290,18 @@ class LIFNetwork(NeuronModel):
             ),
         )
 
-    def compute_spikes_and_update(self, t, state: LIFState, args):
+    def update(self, t, x, args):
+        """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
+        state = self.spike_and_reset(t, x, args)
+        if (
+            args
+            and "desired_balance" in args
+            and args["desired_balance"](t, state, args) is not None
+        ):
+            state = self.force_balanced_weights(t, state, args)
+        return state
+
+    def spike_and_reset(self, t, state: LIFState, args):
         V, _, W, G = state.V, state.S, state.W, state.G
         spikes_neurons = (V > self.firing_threshold).astype(V.dtype)
         V_new = (1.0 - spikes_neurons) * V + spikes_neurons * self.V_reset
@@ -310,6 +332,42 @@ class LIFNetwork(NeuronModel):
 
         G_new = G + spikes[None, :] * self.synaptic_increment
         return LIFState(V_new, spikes, W, G_new)
+
+    def compute_balance(self, t, state, args):
+        """Compute the ratio of total inhibitory to excitatory input weights for each neuron."""
+        weights = state.W
+        excitatory_weights = jnp.sum(weights * self.excitatory_mask[None, :], axis=1)
+        inhibitory_weights = jnp.sum(
+            weights * jnp.invert(self.excitatory_mask[None, :]), axis=1
+        )
+        balance = (
+            inhibitory_weights
+            * self.tau_I
+            * jnp.abs(self.resting_potential - self.reversal_potential_I)
+            / (
+                excitatory_weights
+                * self.tau_E
+                * jnp.abs(self.resting_potential - self.reversal_potential_E)
+                + 1e-12
+            )
+        )  # Avoid division by zero
+        return balance
+
+    def force_balanced_weights(self, t, state, args):
+        """Adjust weights to achieve a desired E/I balance for each neuron"""
+        if not args or "desired_balance" not in args:
+            raise ValueError(
+                "Args must contain 'desired_balance' for weight balancing."
+            )
+        desired_balance = args["desired_balance"](t, state, args)
+        current_balance = self.compute_balance(t, state, args)
+        adjust_ratio = desired_balance / current_balance
+        # Scale inhibitory weights to achieve desired balance
+        balanced_weights = state.W * (
+            jnp.outer(adjust_ratio, jnp.invert(self.excitatory_mask))
+            + jnp.outer(jnp.ones(self.N_neurons), self.excitatory_mask)
+        )
+        return LIFState(state.V, state.S, balanced_weights, state.G)
 
 
 class NoisyNetworkState(eqx.Module):
@@ -395,15 +453,13 @@ class NoisyNetwork(NeuronModel):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def compute_spikes_and_update(self, t, x: NoisyNetworkState, args):
+    def update(self, t, x: NoisyNetworkState, args):
         network_state, noise_E_state, noise_I_state = (
             x.network_state,
             x.noise_E_state,
             x.noise_I_state,
         )
-        new_network_state = self.base_network.compute_spikes_and_update(
-            t, network_state, args
-        )
+        new_network_state = self.base_network.update(t, network_state, args)
         return NoisyNetworkState(new_network_state, noise_E_state, noise_I_state)
 
 
@@ -495,9 +551,7 @@ class AgentSystem(eqx.Module):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def compute_spikes_and_update(self, t, x, args):
+    def update(self, t, x, args):
         (network_state, reward_state, env_state) = x
-        new_network_state = self.noisy_network.compute_spikes_and_update(
-            t, network_state, args
-        )
+        new_network_state = self.noisy_network.update(t, network_state, args)
         return (new_network_state, reward_state, env_state)

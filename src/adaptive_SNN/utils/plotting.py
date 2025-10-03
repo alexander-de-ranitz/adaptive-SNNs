@@ -3,7 +3,7 @@ import matplotlib as mpl
 from diffrax import Solution
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import NoisyNetwork, LearningModel
+from adaptive_SNN.models.models import AgentSystem, NoisyNetwork, NoisyNetworkState
 
 mpl.rcParams["savefig.directory"] = "../figures"
 
@@ -17,15 +17,23 @@ def plot_simulate_noisy_SNN_results(
 ):
     # Get results
     t = sol.ts
-    network_state, noise_E, noise_I = sol.ys
-    V, S, _, G = network_state.V, network_state.S, network_state.W, network_state.G
+    result: NoisyNetworkState = sol.ys
+    network_state, noise_E, noise_I = (
+        result.network_state,
+        result.noise_E_state,
+        result.noise_I_state,
+    )
 
-    G_inhibitory = (
-        jnp.sum(G * jnp.invert(model.base_network.excitatory_mask[None, None, :]), axis=-1)
+    V, S, W, G = network_state.V, network_state.S, network_state.W, network_state.G
+
+    weighed_G_inhibitory = (
+        jnp.sum(
+            W * G * jnp.invert(model.base_network.excitatory_mask[None, :]), axis=-1
+        )
         + noise_I
     )
-    G_excitatory = (
-        jnp.sum(G * model.base_network.excitatory_mask[None, None, :], axis=-1) + noise_E
+    weighed_G_excitatory = (
+        jnp.sum(W * G * model.base_network.excitatory_mask[None, :], axis=-1) + noise_E
     )
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
 
@@ -42,8 +50,8 @@ def plot_simulate_noisy_SNN_results(
     ax1.set_title("Neuron Membrane Potential")
 
     # Plot total conductance of neuron 0
-    ax2.plot(t, G_excitatory[:, 0], label="Total E Conductance", color="g")
-    ax2.plot(t, G_inhibitory[:, 0], label="Total I Conductance", color="r")
+    ax2.plot(t, weighed_G_excitatory[:, 0], label="Total E Conductance", color="g")
+    ax2.plot(t, weighed_G_inhibitory[:, 0], label="Total I Conductance", color="r")
     ax2.plot(t, noise_E[:, 0], label="Noise E Conductance", color="g", linestyle="--")
     ax2.legend(loc="upper right")
     ax2.set_ylabel("Total Conductance (S)")
@@ -62,7 +70,11 @@ def plot_simulate_noisy_SNN_results(
     if model.base_network.N_inputs > 0:
         # Shade background to distinguish input vs. main neurons
         N_input = model.base_network.N_inputs
-        ax3.axhspan(-0.5, N_input - 0.5, facecolor="lightgray", alpha=0.3)
+        N_exc_input = jnp.sum(model.base_network.excitatory_mask[:N_input])
+        ax3.axhspan(-0.5, N_input - N_exc_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
+        ax3.axhspan(
+            N_input - N_exc_input - 0.5, N_input - 0.5, facecolor="#B5D6E8", alpha=0.3
+        )
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  # 6 evenly spaced ticks
@@ -77,20 +89,22 @@ def plot_simulate_noisy_SNN_results(
 
 
 def plot_learning_results(
-        sol: Solution,
-        model: LearningModel,
-        t0: float,
-        t1: float,
-        dt0: float,
-        args: dict = None,
-    ):
+    sol: Solution,
+    model: AgentSystem,
+    t0: float,
+    t1: float,
+    dt0: float,
+    args: dict = None,
+):
     # Get results
     t = sol.ts
     network_state, reward_state, env_state = sol.ys
 
     # Compute reward prediction error if possible
     if args is not None and "compute_reward" in args:
-        rewards = jnp.array([args["compute_reward"](ti, env_state[i], args) for i, ti in enumerate(t)])
+        rewards = jnp.array(
+            [args["compute_reward"](ti, env_state[i], args) for i, ti in enumerate(t)]
+        )
         RPE = rewards - jnp.squeeze(reward_state)
         print("RPE shape:", RPE.shape)
         print("Rewards shape:", rewards.shape)
@@ -113,20 +127,27 @@ def plot_learning_results(
         axs[2].set_title("Reward Prediction Error Over Time")
         axs[2].set_ylabel("RPE")
 
-     # Plot spikes as raster plot
-    spike_times_per_neuron = [jnp.nonzero(network_state[0].S[:, i])[0] * dt0 for i in range(network_state[0].S.shape[1])][
-        ::-1
-    ]
+    # Plot spikes as raster plot
+    spike_times_per_neuron = [
+        jnp.nonzero(network_state[0].S[:, i])[0] * dt0
+        for i in range(network_state[0].S.shape[1])
+    ][::-1]
     axs[3].eventplot(spike_times_per_neuron, colors="black", linelengths=0.8)
     axs[3].set_yticks(range(len(spike_times_per_neuron)))
     axs[3].set_ylabel("Neuron")
     axs[3].set_xlabel("Time (s)")
     axs[3].set_title("Spike Raster Plot")
 
-    if model.neuron_model.base_network.N_inputs > 0:
-        # Shade background to distinguish input vs. main neurons
-        N_input = model.neuron_model.base_network.N_inputs
-        axs[3].axhspan(-0.5, N_input - 0.5, facecolor="lightgray", alpha=0.3)
+    N_input = model.noisy_network.base_network.N_inputs
+    if N_input > 0:
+        # Shade background to distinguish input vs. main neurons and excitatory vs. inhibitory
+        N_exc_input = jnp.sum(model.base_network.excitatory_mask[:N_input])
+        axs[3].axhspan(
+            -0.5, N_input - N_exc_input - 0.5, facecolor="#E8BFB5", alpha=0.3
+        )
+        axs[3].axhspan(
+            N_input - N_exc_input - 0.5, N_input - 0.5, facecolor="#B5D6E8", alpha=0.3
+        )
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  #
@@ -135,6 +156,6 @@ def plot_learning_results(
         ax.set_xticks(xticks)
         ax.set_xticklabels([f"{x:.1f}" for x in xticks])
         ax.label_outer()
-    
+
     plt.tight_layout()
     plt.show()

@@ -63,7 +63,7 @@ def simulate_noisy_SNN(
             raise RuntimeError(f"Solver step failed with result: {result}")
         step += 1
 
-        y = model.compute_spikes_and_update(t, y, args)
+        y = model.update(t, y, args)
 
         # Save results if at the correct interval
         if step % save_every_n_steps == 0:

@@ -362,9 +362,9 @@ def test_weight_plasticity():
         "excitatory_noise": lambda t, x, a: E_noise,
         "inhibitory_noise": lambda t, x, a: I_noise,
         "RPE": lambda t, x, a: RPE_value,
+        "learning": lambda t, x, a: True,
     }
 
-    args["learning"] = True
     derivs = model.drift(0.0, state, args)
     dW = derivs.W
 
@@ -574,7 +574,7 @@ def test_spike_generation():
     G = jnp.zeros((N, N + model.N_inputs))
     state = LIFState(V, S, model.weights, G)
 
-    new_state = model.compute_spikes_and_update(0.0, state, args=None)
+    new_state = model.update(0.0, state, args=None)
 
     expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
     expected_V_new = (
@@ -608,7 +608,7 @@ def test_spike_generation_with_input():
 
     args = {"input_spikes": input_spikes_fn}
 
-    new_state = model.compute_spikes_and_update(0.0, state, args=args)
+    new_state = model.update(0.0, state, args=args)
     V_new, spikes, W_new, G_new = new_state.V, new_state.S, new_state.W, new_state.G
     state = new_state
 
@@ -637,3 +637,26 @@ def test_spike_generation_with_input():
     assert jnp.all(
         dG[:, jnp.array([0, 1, 3])] == 0
     )  # Other neurons are at zero conductance, should not change
+
+
+def test_force_balance():
+    N_neurons = 2
+    N_inputs = 3
+    key = jr.PRNGKey(7)
+    input_types = jnp.array(
+        [1, 0, 1]
+    )  # Input neuron 0 excitatory, 1 inhibitory, 2 excitatory
+    args = {
+        "desired_balance": lambda t, x, args: jnp.array([10.0]),  # Desired E/I balance
+    }
+    t = 0.0
+    model = LIFNetwork(
+        N_neurons=N_neurons, N_inputs=N_inputs, input_neuron_types=input_types, key=key
+    )
+    state = model.initial
+
+    balance = model.compute_balance(0, state, args)
+    assert balance.shape == (N_neurons,)
+    state = model.force_balanced_weights(0, model.initial, args=args)
+    balance_after = model.compute_balance(0, state, args=args)
+    assert jnp.allclose(balance_after, args["desired_balance"](0, state, args))
