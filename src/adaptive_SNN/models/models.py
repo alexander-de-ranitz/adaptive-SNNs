@@ -94,6 +94,8 @@ class LIFNetwork(NeuronModel):
     The state consists of the membrane potentials, spikes, weights, and synaptic conductances of all neurons.
     """
 
+    # TODO: Add refractory period and synaptic delays
+
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_capacitance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
@@ -129,6 +131,7 @@ class LIFNetwork(NeuronModel):
         key, key_1, key_2, key_3 = jr.split(key, 4)
 
         # Set weights
+        # TODO: move this to initial state, the weights should be part of the state and not a class attribute
         self.weights = jr.normal(
             key_1, (N_neurons, N_neurons + N_inputs)
         ) * jr.bernoulli(key_2, self.connection_prob, (N_neurons, N_neurons + N_inputs))
