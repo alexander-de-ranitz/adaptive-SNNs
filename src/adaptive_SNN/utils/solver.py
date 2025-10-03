@@ -86,7 +86,7 @@ def simulate_noisy_SNN(
 
 
 def simulate_learning_SNN(
-    model: LearningModel,
+    model: AgentSystem,
     solver: Euler,
     t0: float,
     t1: float,
