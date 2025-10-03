@@ -1,4 +1,3 @@
-import warnings
 from abc import ABC, abstractmethod
 
 import diffrax as dfx
@@ -73,7 +72,7 @@ class OUP(eqx.Module):
         return -self.theta * (x - self.mean)
 
     def diffusion(self, t, x, args):
-        return jnp.eye(self.dim) * self.noise_scale
+        return jnp.eye(x.shape[0]) * self.noise_scale
 
     @property
     def noise_shape(self):
@@ -174,10 +173,10 @@ class LIFNetwork(NeuronModel):
         Args:
             t: time (unused for autonomous dynamics)
             state: LIFState current state
-            args: optional dict containing keys:
+            args: dict containing keys:
                 - inhibitory_noise(t, state, args) -> (N_neurons,)
                 - excitatory_noise(t, state, args) -> (N_neurons,)
-                - learning: bool
+                - learning_rate(t, state, args) -> scalar
                 - RPE(t, state, args) -> scalar
         Returns:
             LIFState of derivatives (dV, dS, dW, dG)
@@ -197,10 +196,8 @@ class LIFNetwork(NeuronModel):
         )
 
         # Get noise from args and add to total conductances
-        if args and "inhibitory_noise" in args:
-            inhibitory_conductances += args["inhibitory_noise"](t, state, args)
-        if args and "excitatory_noise" in args:
-            excitatory_conductances += args["excitatory_noise"](t, state, args)
+        inhibitory_conductances += args["inhibitory_noise"](t, state, args)
+        excitatory_conductances += args["excitatory_noise"](t, state, args)
 
         # Compute total recurrent current
         recurrent_current = inhibitory_conductances * (
@@ -213,32 +210,20 @@ class LIFNetwork(NeuronModel):
         dGdt = -1 / self.synaptic_time_constants[None, :] * G
 
         # Compute weight changes
-        # TODO: is this branching fine for Jax? Consider multiplying by 0/1 mask instead?
-        if args and "learning" in args:
-            if args["learning"](t, state, args) == False:
-                dW = jnp.zeros_like(W)  # No plasticity if learning is disabled
-            elif args["learning"](t, state, args) == True:
-                if "RPE" not in args:
-                    raise ValueError(
-                        "Learning is enabled but no RPE function provided."
-                    )
-                error_signal = self.learning_rate * args["RPE"](t, state, args)
-                E_noise = jnp.outer(
-                    args["excitatory_noise"](t, state, args), self.excitatory_mask
-                )
-                if (
-                    "train_only_exc_synapses" in args
-                    and args["train_only_exc_synapses"](t, state, args) == True
-                ):
-                    I_noise = jnp.zeros_like(E_noise)
-                else:
-                    I_noise = jnp.outer(
-                        args["inhibitory_noise"](t, state, args),
-                        jnp.invert(self.excitatory_mask),
-                    )
-                dW = error_signal * (E_noise + I_noise) * G
-        else:
-            dW = jnp.zeros_like(W)  # No plasticity by default
+        learning_rate = args["learning_rate"](t, state, args)
+        RPE = args["RPE"](t, state, args)
+        E_noise = jnp.outer(
+            args["excitatory_noise"](t, state, args), self.excitatory_mask
+        )
+
+        # No learning of inhibitory weights for now
+        # TODO: If desired, implement inhibitory weight learning
+        # I_noise = jnp.outer(
+        #                 args["inhibitory_noise"](t, state, args),
+        #                 jnp.invert(self.excitatory_mask),
+        #             )
+
+        dW = learning_rate * RPE * (E_noise) * G
 
         dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
 
@@ -296,43 +281,16 @@ class LIFNetwork(NeuronModel):
     def update(self, t, x, args):
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         state = self.spike_and_reset(t, x, args)
-        if (
-            args
-            and "desired_balance" in args
-            and args["desired_balance"](t, state, args) is not None
-        ):
-            state = self.force_balanced_weights(t, state, args)
+        state = self.force_balanced_weights(t, state, args)
         return state
 
     def spike_and_reset(self, t, state: LIFState, args):
         V, _, W, G = state.V, state.S, state.W, state.G
-        spikes_neurons = (V > self.firing_threshold).astype(V.dtype)
-        V_new = (1.0 - spikes_neurons) * V + spikes_neurons * self.V_reset
+        recurrent_spikes = (V > self.firing_threshold).astype(V.dtype)
+        V_new = (1.0 - recurrent_spikes) * V + recurrent_spikes * self.V_reset
 
-        if args and "input_spikes" in args:
-            input_sp = args["input_spikes"](t, state, args)
-            if self.N_inputs == 0:
-                warnings.warn(
-                    "Input spikes provided but model has no inputs; ignoring.",
-                    stacklevel=3,
-                )
-                spikes = spikes_neurons
-            else:
-                if jnp.any((input_sp > 1) | (input_sp < 0)):
-                    warnings.warn("Input spikes must be binary (0 or 1).", stacklevel=3)
-                spikes = jnp.concatenate((spikes_neurons, input_sp))
-        else:
-            if self.N_inputs > 0:
-                spikes = jnp.concatenate(
-                    (spikes_neurons, jnp.zeros((self.N_inputs,), dtype=V.dtype))
-                )
-                warnings.warn(
-                    "No input spikes provided; assuming zero input spikes.",
-                    stacklevel=3,
-                )
-            else:
-                spikes = spikes_neurons
-
+        input_sp = args["input_spikes"](t, state, args)
+        spikes = jnp.concatenate((recurrent_spikes, input_sp))
         G_new = G + spikes[None, :] * self.synaptic_increment
         return LIFState(V_new, spikes, W, G_new)
 
@@ -350,13 +308,17 @@ class LIFNetwork(NeuronModel):
 
     def force_balanced_weights(self, t, state, args):
         """Adjust weights to achieve a desired E/I balance for each neuron"""
-        if not args or "desired_balance" not in args:
-            raise ValueError(
-                "Args must contain 'desired_balance' for weight balancing."
-            )
         desired_balance = args["desired_balance"](t, state, args)
         current_balance = self.compute_balance(t, state, args)
         adjust_ratio = desired_balance / current_balance
+
+        # If desired_balance is 0, do not adjust anything
+        adjust_ratio = jnp.where(
+            adjust_ratio == 0.0, jnp.ones_like(state.V), adjust_ratio
+        )
+        adjust_ratio = jnp.clip(
+            adjust_ratio, 0.01, 100.0
+        )  # For safety, do not allow too large adjustments
         # Scale inhibitory weights to achieve desired balance
         balanced_weights = state.W * (
             jnp.outer(adjust_ratio, jnp.invert(self.excitatory_mask))
@@ -404,10 +366,8 @@ class NoisyNetwork(NeuronModel):
             state.noise_I_state,
         )
 
-        if args is None:
-            args = {}
-
         # TODO: As above, this could be made more general by allowing any noise model and just passing that
+        # TODO: Move this so args are not changed in an inner function for JIT compatibility
         network_args = {
             **args,
             "excitatory_noise": lambda t, x, args: noise_E_state,
@@ -508,7 +468,7 @@ class AgentSystem(eqx.Module):
         # Compute network output, reward, and RPE
         network_output = args["network_output"](t, network_state, args)
         reward = args["compute_reward"](t, env_state, args)
-        RPE = reward - reward_state
+        RPE = jnp.asarray(reward - reward_state)
 
         # Add to args for use in models
         args = {

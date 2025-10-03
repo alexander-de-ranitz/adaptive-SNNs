@@ -5,8 +5,19 @@ import jax.random as jr
 from diffrax import Solution
 from jaxtyping import PyTree
 
-from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNetwork
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNetwork, NoisyNetworkState
 from adaptive_SNN.utils.solver import simulate_noisy_SNN
+
+
+def _default_args(N_neurons, N_inputs):
+    return {
+        "excitatory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
+        "inhibitory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
+        "RPE": lambda t, x, a: jnp.array([0.0]),
+        "input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
+        "learning_rate": lambda t, x, a: jnp.array([0.0]),
+        "desired_balance": lambda t, x, a: 0.0,  # = no balancing
+    }
 
 
 def get_non_inf_ts_ys(sol: Solution) -> tuple[PyTree, PyTree]:
@@ -123,11 +134,12 @@ def test_solver_timesteps():
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.Euler()
+    args = _default_args(N_neurons, N_inputs)
 
     # Our method
     save_every = 1
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
+        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=args
     )
     sol_1_ts = sol_1.ts
 
@@ -141,6 +153,7 @@ def test_solver_timesteps():
         t1=t1,
         dt0=dt0,
         y0=y0,
+        args=args,
         saveat=saveat,
         adjoint=dfx.ForwardMode(),
     )
@@ -163,11 +176,12 @@ def test_solver_output_noiseless():
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.EulerHeun()
+    args = _default_args(N_neurons, N_inputs)
 
     # Our method
     save_every = 1
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
+        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=args
     )
 
     # Direct diffrax call for comparison
@@ -181,9 +195,20 @@ def test_solver_output_noiseless():
         dt0=dt0,
         y0=y0,
         saveat=saveat,
+        args=args,
         adjoint=dfx.ForwardMode(),
     )
     sol_2_ts, sol_2_ys = get_non_inf_ts_ys(sol_2)
+    sol_1_state: NoisyNetworkState = sol_1.ys
+    assert allclose_pytree(sol_1_state.noise_E_state, sol_2_ys.noise_E_state)
+    assert allclose_pytree(sol_1_state.noise_I_state, sol_2_ys.noise_I_state)
+    print(sol_1_state.network_state.V)
+    print("__________________")
+    print(sol_2_ys.network_state.V)
+    assert allclose_pytree(sol_1_state.network_state.V, sol_2_ys.network_state.V)
+    assert allclose_pytree(sol_1_state.network_state.W, sol_2_ys.network_state.W)
+    assert allclose_pytree(sol_1_state.network_state.G, sol_2_ys.network_state.G)
+    assert allclose_pytree(sol_1_state.network_state.S, sol_2_ys.network_state.S)
 
     assert jnp.allclose(sol_1.ts, sol_2_ts)
     assert allclose_pytree(sol_1.ys, sol_2_ys)
@@ -218,11 +243,12 @@ def test_solver_output_with_noise():
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.Euler()
+    args = _default_args(N_neurons, N_inputs)
 
     # Our method
     save_every = 1
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
+        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=args
     )
 
     # Direct diffrax call for comparison
@@ -236,10 +262,23 @@ def test_solver_output_with_noise():
         dt0=dt0,
         y0=y0,
         saveat=saveat,
+        args=args,
         adjoint=dfx.ForwardMode(),
     )
 
     sol_2_ts, sol_2_ys = get_non_inf_ts_ys(sol_2)
 
+    sol_1_state: NoisyNetworkState = sol_1.ys
+
     assert jnp.allclose(sol_1.ts, sol_2_ts)
+    assert allclose_pytree(sol_1_state.noise_E_state, sol_2_ys.noise_E_state)
+    assert allclose_pytree(sol_1_state.noise_I_state, sol_2_ys.noise_I_state)
+    print(sol_1_state.network_state.V)
+    print("__________________")
+    print(sol_2_ys.network_state.V)
+    assert allclose_pytree(sol_1_state.network_state.V, sol_2_ys.network_state.V)
+    assert allclose_pytree(sol_1_state.network_state.W, sol_2_ys.network_state.W)
+    assert allclose_pytree(sol_1_state.network_state.G, sol_2_ys.network_state.G)
+    assert allclose_pytree(sol_1_state.network_state.S, sol_2_ys.network_state.S)
+
     assert allclose_pytree(sol_1.ys, sol_2_ys)

@@ -22,6 +22,17 @@ def _baseline_state(model: LIFNetwork) -> LIFState:
     return LIFState(V, S, W, G)
 
 
+def _default_args(N_neurons, N_inputs):
+    return {
+        "excitatory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
+        "inhibitory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
+        "RPE": lambda t, x, a: jnp.array([0.0]),
+        "input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
+        "learning_rate": lambda t, x, a: jnp.array([0.0]),
+        "desired_balance": lambda t, x, a: 0.0,  # = no balancing
+    }
+
+
 def test_initial_state():
     N = 10
     key = jr.PRNGKey(0)
@@ -48,8 +59,9 @@ def test_drift_diffusion_shapes():
     model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
     state = model.initial
 
-    derivs = model.drift(0.0, state, None)
-    diffs = model.diffusion(0.0, state, None)
+    args = _default_args(N, model.N_inputs)
+    derivs = model.drift(0.0, state, args)
+    diffs = model.diffusion(0.0, state, args)
     dV, dS, dW, dG = derivs.V, derivs.S, derivs.W, derivs.G
     diffV, diffS, diffW, diffG = diffs.V, diffs.S, diffs.W, diffs.G
     assert dV.shape == (N,)
@@ -81,7 +93,8 @@ def test_drift_voltage_output():
 
     # Manually set initial state- V at zero, so leak current is predictable
     initial_state = _baseline_state(model)
-    derivs = model.drift(0.0, initial_state, None)
+    args = _default_args(N, model.N_inputs)
+    derivs = model.drift(0.0, initial_state, args)
     dv = derivs.V
     expected_dv = (
         1
@@ -105,7 +118,8 @@ def test_drift_conductance_output():
         W=model.weights,
         G=jnp.ones((N, N + model.N_inputs)),
     )
-    derivs = model.drift(0.0, initial_state, None)
+    args = _default_args(N, model.N_inputs)
+    derivs = model.drift(0.0, initial_state, args)
     dg = derivs.G
     expected_dg = -1 / model.synaptic_time_constants * initial_state.G
 
@@ -117,6 +131,7 @@ def test_zero_diffusion():
     key = jr.PRNGKey(0)
     model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
     state = _baseline_state(model)
+    args = _default_args(N, model.N_inputs)
     terms = model.terms(key)
     solver = dfx.EulerHeun()
     sol = dfx.diffeqsolve(
@@ -126,7 +141,7 @@ def test_zero_diffusion():
         t1=0.1,
         dt0=0.01,
         y0=state,
-        args=None,
+        args=args,
         adjoint=dfx.ForwardMode(),
     )
     final_state = sol.ys  # LIFState of trajectories
@@ -142,6 +157,7 @@ def test_recurrent_current():
         N = 10
         key = jr.PRNGKey(0)
         model = LIFNetwork(N_neurons=N, N_inputs=0, key=key)
+        args = _default_args(N, model.N_inputs)
 
         # Set specific weights and conductances for testing
         excitatory_mask = (
@@ -174,7 +190,7 @@ def test_recurrent_current():
             G=conductances,
         )
 
-        derivs = model.drift(0.0, initial_state, None)
+        derivs = model.drift(0.0, initial_state, args)
         dv, dS = derivs.V, derivs.S
         assert jnp.all(dS == 0)
 
@@ -202,7 +218,7 @@ def test_input_current():
     N_inputs = 3
     key = jr.PRNGKey(0)
     model = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
-
+    args = _default_args(N_neurons, N_inputs)
     assert jnp.all(
         model.excitatory_mask.at[-N_inputs:].get() == 1
     )  # input neurons are excitatory
@@ -227,7 +243,7 @@ def test_input_current():
         G=conductances,
     )
 
-    derivs = model.drift(0.0, initial_state, None)
+    derivs = model.drift(0.0, initial_state, args)
     dv, dS = derivs.V, derivs.S
     assert jnp.all(dS == 0)
 
@@ -359,28 +375,34 @@ def test_weight_plasticity():
     RPE_value = 2.0
 
     args = {
+        **_default_args(N, 0),
         "excitatory_noise": lambda t, x, a: E_noise,
         "inhibitory_noise": lambda t, x, a: I_noise,
         "RPE": lambda t, x, a: RPE_value,
         "learning": lambda t, x, a: True,
+        "learning_rate": lambda t, x, a: 0.1,
     }
 
     derivs = model.drift(0.0, state, args)
     dW = derivs.W
 
     excitatory_mask = model.excitatory_mask
-    inhibitory_mask = jnp.invert(excitatory_mask)
 
     # Build expected dW using outer products replicating implementation
     E_component = jnp.outer(E_noise, excitatory_mask)
-    I_component = jnp.outer(I_noise, inhibitory_mask)
-    expected_dW = model.learning_rate * RPE_value * (E_component + I_component) * G
+    expected_dW = args["learning_rate"](0, 0, 0) * RPE_value * E_component * G
     assert jnp.allclose(dW, expected_dW)
 
     # Manual sanity check
-    assert dW[0, 1] == model.learning_rate * RPE_value * I_noise[0] * G.at[0, 1].get()
-    assert dW[0, 2] == model.learning_rate * RPE_value * E_noise[0] * G.at[0, 2].get()
-    assert dW[1, 0] == model.learning_rate * RPE_value * E_noise[1] * G.at[1, 0].get()
+    assert dW[0, 1] == 0.0  # inhibitory presynaptic neuron, so no change
+    assert (
+        dW[0, 2]
+        == args["learning_rate"](0, 0, 0) * RPE_value * E_noise[0] * G.at[0, 2].get()
+    )
+    assert (
+        dW[1, 0]
+        == args["learning_rate"](0, 0, 0) * RPE_value * E_noise[1] * G.at[1, 0].get()
+    )
 
 
 def test_excitatory_noise_only_affects_voltage_correctly():
@@ -395,6 +417,7 @@ def test_excitatory_noise_only_affects_voltage_correctly():
     noise_I = jnp.zeros((N,), dtype=state.V.dtype)
 
     args = {
+        **_default_args(N, 0),
         "excitatory_noise": lambda t, x, a: noise_E,
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
@@ -421,6 +444,7 @@ def test_inhibitory_noise_only_affects_voltage_correctly():
     noise_I = jnp.linspace(0.0, 1.0, N, dtype=state.V.dtype)
 
     args = {
+        **_default_args(N, 0),
         "excitatory_noise": lambda t, x, a: noise_E,
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
@@ -447,6 +471,7 @@ def test_both_noises_add_linearly():
     noise_I = jnp.linspace(0.0, 1.0, N, dtype=state.V.dtype)
 
     args = {
+        **_default_args(N, 0),
         "excitatory_noise": lambda t, x, a: noise_E,
         "inhibitory_noise": lambda t, x, a: noise_I,
     }
@@ -473,9 +498,10 @@ def test_noise_is_unique():
         neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
     )
     initial_state = model.initial
+    args = _default_args(N, 0)
     solver = dfx.EulerHeun()
     terms = model.terms(jr.PRNGKey(0))
-    y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, None, None, False)
+    y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, args, None, False)
     noise_E_state = y1.noise_E_state
     noise_I_state = y1.noise_I_state
     assert not jnp.all(noise_E_state == noise_I_state)
@@ -499,12 +525,13 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     )
 
     network_state = _baseline_state(network)
+    args = _default_args(N, 0)
     noise_E_state = jnp.arange(N, dtype=network_state.V.dtype)
     noise_I_state = jnp.arange(N, dtype=network_state.V.dtype)[::-1]
 
     x = NoisyNetworkState(network_state, noise_E_state, noise_I_state)
 
-    noisy_network_drift = model.drift(0.0, x, args=None)
+    noisy_network_drift = model.drift(0.0, x, args)
     network_drift = noisy_network_drift.network_state
     dV, dS, dW, dG = network_drift.V, network_drift.S, network_drift.W, network_drift.G
 
@@ -543,8 +570,9 @@ def test_NoisyNeuronModel_diffusion():
     noise_E_state = jnp.arange(N, dtype=network_state.V.dtype)
     noise_I_state = jnp.arange(N, dtype=network_state.V.dtype)[::-1]
     initial_state = NoisyNetworkState(network_state, noise_E_state, noise_I_state)
+    args = _default_args(N, 0)
 
-    noisy_network_diff = model.diffusion(0.0, initial_state, args=None)
+    noisy_network_diff = model.diffusion(0.0, initial_state, args)
     network_diff = noisy_network_diff.network_state
     dV, dS, dW, dG = network_diff.V, network_diff.S, network_diff.W, network_diff.G
 
@@ -573,8 +601,9 @@ def test_spike_generation():
     S = jnp.zeros((N + model.N_inputs,))
     G = jnp.zeros((N, N + model.N_inputs))
     state = LIFState(V, S, model.weights, G)
+    args = _default_args(N, model.N_inputs)
 
-    new_state = model.update(0.0, state, args=None)
+    new_state = model.spike_and_reset(0.0, state, args)
 
     expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
     expected_V_new = (
@@ -606,9 +635,9 @@ def test_spike_generation_with_input():
     def input_spikes_fn(t, x, args):
         return jnp.array([1.0, 0.0, 0.0])  # Input neurons 0 spikes
 
-    args = {"input_spikes": input_spikes_fn}
+    args = {**_default_args(N_neurons, N_inputs), "input_spikes": input_spikes_fn}
 
-    new_state = model.update(0.0, state, args=args)
+    new_state = model.spike_and_reset(0.0, state, args=args)
     V_new, spikes, W_new, G_new = new_state.V, new_state.S, new_state.W, new_state.G
     state = new_state
 
@@ -639,6 +668,29 @@ def test_spike_generation_with_input():
     )  # Other neurons are at zero conductance, should not change
 
 
+def test_force_balance_no_change():
+    N_neurons = 10
+    N_inputs = 3
+    key = jr.PRNGKey(7)
+    input_types = jnp.array(
+        [1, 0, 1]
+    )  # Input neuron 0 excitatory, 1 inhibitory, 2 excitatory
+    args = {
+        **_default_args(N_neurons, N_inputs),
+        "desired_balance": lambda t, x, args: jnp.array([0.0]),
+    }
+    model = LIFNetwork(
+        N_neurons=N_neurons, N_inputs=N_inputs, input_neuron_types=input_types, key=key
+    )
+    state = model.initial
+
+    balance = model.compute_balance(0, state, args)
+    assert balance.shape == (N_neurons,)
+    state = model.force_balanced_weights(0, model.initial, args=args)
+    balance_after = model.compute_balance(0, state, args=args)
+    assert jnp.allclose(balance_after, balance)  # No change desired balance =
+
+
 def test_force_balance():
     N_neurons = 2
     N_inputs = 3
@@ -647,9 +699,9 @@ def test_force_balance():
         [1, 0, 1]
     )  # Input neuron 0 excitatory, 1 inhibitory, 2 excitatory
     args = {
+        **_default_args(N_neurons, N_inputs),
         "desired_balance": lambda t, x, args: jnp.array([10.0]),  # Desired E/I balance
     }
-    t = 0.0
     model = LIFNetwork(
         N_neurons=N_neurons, N_inputs=N_inputs, input_neuron_types=input_types, key=key
     )
