@@ -8,7 +8,7 @@ from adaptive_SNN.models.environment import EnvironmentModel
 def test_environment():
     env = EnvironmentModel(dim=1)
 
-    args = {"env_input": lambda t, x, args: jnp.array([1.0])}
+    args = {"env_input": jnp.array([1.0])}
     solver = dfx.Euler()
     t0 = 0.0
     t1 = 10.0
