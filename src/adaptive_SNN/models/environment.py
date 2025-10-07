@@ -37,9 +37,7 @@ class EnvironmentModel(eqx.Module):
             raise ValueError(
                 "EnvironmentModel requires 'env_input' in args for drift computation."
             )
-        return self.rate * (
-            args["env_input"] - x
-        )  # Simple dynamics towards input
+        return self.rate * (args["env_input"] - x)  # Simple dynamics towards input
 
     def diffusion(self, t, x, args):
         return jnp.zeros((self.dim, self.dim))
