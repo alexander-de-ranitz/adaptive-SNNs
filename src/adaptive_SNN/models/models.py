@@ -109,13 +109,13 @@ class LIFNetwork(NeuronModel):
     input_weight: float = 10.0  # Weight of input spikes
     learning_rate: float = 1e-3  # Learning rate for plasticity
 
-    N_neurons: int = eqx.field(static=True)
-    N_inputs: int = eqx.field(static=True)
+    fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
+    N_neurons: int
+    N_inputs: int
     excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
     synaptic_time_constants: (
         Array  # Vector of size N_neurons with synaptic time constants (tau_E or tau_I)
     )
-    weights: Array  # Shape (N_neurons, N_neurons + N_inputs)
 
     def __init__(
         self,
@@ -127,19 +127,8 @@ class LIFNetwork(NeuronModel):
     ):
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
+        self.fully_connected_input = fully_connected_input
         key, key_1, key_2, key_3 = jr.split(key, 4)
-
-        # Set weights
-        # TODO: move this to initial state, the weights should be part of the state and not a class attribute
-        self.weights = jr.normal(
-            key_1, (N_neurons, N_neurons + N_inputs)
-        ) * jr.bernoulli(key_2, self.connection_prob, (N_neurons, N_neurons + N_inputs))
-        if (
-            fully_connected_input and N_inputs > 0
-        ):  # Make all input connections fully connected
-            self.weights = self.weights.at[:, N_neurons:].set(
-                jnp.ones(shape=(N_neurons, N_inputs)) * self.input_weight
-            )
 
         # Set neuron types
         neuron_types = jnp.where(
@@ -156,7 +145,7 @@ class LIFNetwork(NeuronModel):
         )
 
     @property
-    def initial(self):
+    def initial(self, key: jr.PRNGKey = jr.PRNGKey(0)):
         """Return initial network state as LIFState."""
         V_init = (
             jnp.zeros((self.N_neurons,), dtype=default_float) + self.resting_potential
@@ -165,7 +154,25 @@ class LIFNetwork(NeuronModel):
             (self.N_neurons, self.N_neurons + self.N_inputs), dtype=default_float
         )
         spikes_init = jnp.zeros((self.N_neurons + self.N_inputs,), dtype=default_float)
-        return LIFState(V_init, spikes_init, self.weights, conductance_init)
+
+        key, key_2 = jr.split(key)
+
+        # Initialize weights with random sparse connectivity
+        weights = jr.normal(
+            key, (self.N_neurons, self.N_neurons + self.N_inputs)
+        ) * jr.bernoulli(
+            key_2,
+            self.connection_prob,
+            (self.N_neurons, self.N_neurons + self.N_inputs),
+        )
+
+        if (
+            self.fully_connected_input and self.N_inputs > 0
+        ):  # Make all input connections fully connected
+            weights = weights.at[:, self.N_neurons :].set(
+                jnp.ones(shape=(self.N_neurons, self.N_inputs)) * self.input_weight
+            )
+        return LIFState(V_init, spikes_init, weights, conductance_init)
 
     def drift(self, t, state: LIFState, args) -> LIFState:
         """Compute deterministic time derivatives for LIF state.
@@ -196,8 +203,12 @@ class LIFNetwork(NeuronModel):
         )
 
         # Get noise from args and add to total conductances
-        inhibitory_conductances += args["inhibitory_noise"](t, state, args)
-        excitatory_conductances += args["excitatory_noise"](t, state, args)
+        inhibitory_conductances = inhibitory_conductances + args["inhibitory_noise"](
+            t, state, args
+        )
+        excitatory_conductances = excitatory_conductances + args["excitatory_noise"](
+            t, state, args
+        )
 
         # Compute total recurrent current
         recurrent_current = inhibitory_conductances * (
@@ -290,7 +301,7 @@ class LIFNetwork(NeuronModel):
         V_new = (1.0 - recurrent_spikes) * V + recurrent_spikes * self.V_reset
 
         input_sp = args["input_spikes"](t, state, args)
-        spikes = jnp.concatenate((recurrent_spikes, input_sp))
+        spikes = jnp.concatenate((recurrent_spikes, input_sp), dtype=V.dtype)
         G_new = G + spikes[None, :] * self.synaptic_increment
         return LIFState(V_new, spikes, W, G_new)
 
