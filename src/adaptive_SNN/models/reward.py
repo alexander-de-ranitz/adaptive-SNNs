@@ -26,7 +26,7 @@ class RewardModel(eqx.Module):
             raise ValueError(
                 "RewardModel requires 'reward' in args for drift computation."
             )
-        return self.reward_rate * (args["reward"](t, x, args) - x)
+        return self.reward_rate * (args["reward"] - x)
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
