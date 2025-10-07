@@ -12,14 +12,18 @@ from adaptive_SNN.utils.solver import simulate_noisy_SNN
 def main():
     t0 = 0
     t1 = 3
-    dt0 = 0.001
+    dt0 = 0.0001
     key = jr.PRNGKey(1)
     N_neurons = 1
-    N_inputs = 10
+    N_inputs = 2
 
     # Set up models
     neuron_model = LIFNetwork(
-        N_neurons=N_neurons, N_inputs=N_inputs, fully_connected_input=True, key=key
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        input_neuron_types=jnp.array([1.0, 0.0]),
+        fully_connected_input=True,
+        key=key,
     )
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=1.0, noise_scale=0.0, mean=0.0, dim=N_neurons)
@@ -38,7 +42,7 @@ def main():
     init_state = model.initial
 
     # Input spikes: Poisson with rate 20 Hz
-    rate = 20  # firing rate in Hz
+    rate = 500  # firing rate in Hz
     p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
 
     # Define args
@@ -52,7 +56,7 @@ def main():
             jr.PRNGKey((t / dt0).astype(int)), p=p, shape=(N_inputs,)
         ),
         "get_desired_balance": lambda t, x, args: jnp.array(
-            [12.0]
+            [1.0]
         ),  # Desired E/I balance
     }
 
