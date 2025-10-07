@@ -125,6 +125,15 @@ class LIFNetwork(NeuronModel):
         fully_connected_input: bool = True,
         key: jr.PRNGKey = jr.PRNGKey(0),
     ):
+        """Initialize LIF network model.
+
+        Args:
+            N_neurons: Number of neurons in the network
+            N_inputs: Number of input neurons
+            input_neuron_types: Binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory). If None, all input neurons are excitatory.
+            fully_connected_input: If True, all input neurons connect to all neurons with weight input_weight
+            key: JAX random key for weight initialization
+        """
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
         self.fully_connected_input = fully_connected_input
@@ -218,7 +227,7 @@ class LIFNetwork(NeuronModel):
 
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        RPE = args["RPE"]
+        RPE = args.get("RPE", jnp.array(0.0))
         E_noise = jnp.outer(args["excitatory_noise"], self.excitatory_mask)
 
         # No learning of inhibitory weights for now
