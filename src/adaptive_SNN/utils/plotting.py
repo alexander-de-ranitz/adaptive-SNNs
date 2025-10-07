@@ -21,16 +21,17 @@ def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
         network_state = state.network_state
 
     V = network_state.V
+    S = network_state.S
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(V.shape[0])
 
     # Plot membrane potentials
     for i in neurons_to_plot:
-        spike_times = t[V[:, i] > -50e-3]
+        spike_times = t[S[:, i] > 0]
         ax.vlines(
             spike_times,
-            V[:, i][V[:, i] > -50e-3] * 1e3,
+            V[:, i][S[:, i] > 0] * 1e3,
             -40,
         )
         ax.plot(t, V[:, i] * 1e3, label=f"Neuron {i + 1} V")
