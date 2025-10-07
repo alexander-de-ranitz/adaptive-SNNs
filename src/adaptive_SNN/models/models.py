@@ -312,13 +312,10 @@ class LIFNetwork(NeuronModel):
         current_balance = self.compute_balance(t, state, args)
         adjust_ratio = desired_balance / current_balance
 
-        # If desired_balance is 0, do not adjust anything
         adjust_ratio = jnp.where(
-            adjust_ratio == 0.0, jnp.ones_like(state.V), adjust_ratio
+            (adjust_ratio == 0.0) | (~jnp.isfinite(adjust_ratio)), 1.0, adjust_ratio
         )
-        adjust_ratio = jnp.clip(
-            adjust_ratio, 0.01, 100.0
-        )  # For safety, do not allow too large adjustments
+
         # Scale inhibitory weights to achieve desired balance
         balanced_weights = state.W * (
             jnp.outer(adjust_ratio, jnp.invert(self.excitatory_mask))
