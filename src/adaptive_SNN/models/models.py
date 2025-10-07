@@ -137,11 +137,10 @@ class LIFNetwork(NeuronModel):
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
         self.fully_connected_input = fully_connected_input
-        key, key_1, key_2, key_3 = jr.split(key, 4)
 
         # Set neuron types
         neuron_types = jnp.where(
-            jr.bernoulli(key_3, 0.8, (N_neurons,)), True, False
+            jr.bernoulli(key, 0.8, (N_neurons,)), True, False
         )  # 80% excitatory, 20% inhibitory
         # If no input neuron types provided, assume all input neurons are excitatory
         if input_neuron_types is None:
