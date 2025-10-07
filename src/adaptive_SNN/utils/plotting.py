@@ -3,84 +3,168 @@ import matplotlib as mpl
 from diffrax import Solution
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import AgentSystem, NoisyNetwork, NoisyNetworkState
+from adaptive_SNN.models.models import (
+    AgentSystem,
+    LIFNetwork,
+    NoisyNetwork,
+)
 
 mpl.rcParams["savefig.directory"] = "../figures"
 
 
-def plot_simulate_noisy_SNN_results(
+def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
+    if isinstance(model, LIFNetwork):
+        base_network = model
+        network_state = state
+    elif isinstance(model, NoisyNetwork):
+        base_network = model.base_network
+        network_state = state.network_state
+
+    V = network_state.V
+
+    if neurons_to_plot is None:
+        neurons_to_plot = jnp.arange(V.shape[0])
+
+    # Plot membrane potentials
+    for i in neurons_to_plot:
+        spike_times = t[V[:, i] > -50e-3]
+        ax.vlines(
+            spike_times,
+            V[:, i][V[:, i] > -50e-3] * 1e3,
+            -40,
+        )
+        ax.plot(t, V[:, i] * 1e3, label=f"Neuron {i + 1} V")
+    ax.set_ylabel("Membrane Potential (mV)")
+    ax.set_title("Neuron Membrane Potential")
+
+
+def _plot_spikes(ax, t, state, model, neurons_to_plot=None):
+    if isinstance(model, LIFNetwork):
+        base_network = model
+        network_state = state
+    elif isinstance(model, NoisyNetwork):
+        base_network = model.base_network
+        network_state = state.network_state
+    elif isinstance(model, AgentSystem):
+        base_network = model.noisy_network.base_network
+        network_state = state[0].network_state
+
+    N_neurons = base_network.N_neurons
+    N_inputs = base_network.N_inputs
+    exc_mask = base_network.excitatory_mask
+    spikes = network_state.S
+
+    dt = t[1] - t[0]
+    spike_times_per_neuron = [
+        jnp.nonzero(spikes[:, i])[0] * dt for i in range(spikes.shape[1])
+    ][::-1]
+    ax.set_yticks(range(len(spike_times_per_neuron)))
+    ax.eventplot(spike_times_per_neuron, colors="black", linelengths=0.8)
+    ax.set_ylabel("Neuron")
+    ax.set_xlabel("Time (s)")
+    ax.set_title("Spike Raster Plot")
+
+    if N_inputs > 0:
+        # Shade background to distinguish input vs. main neurons
+        # This assumes that all exc/inh inputs are grouped toghether at the end of the neuron list
+        N_exc_input = jnp.sum(exc_mask[N_neurons:])
+        N_inh_input = N_inputs - N_exc_input
+        ax.axhspan(-0.5, N_inh_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
+        ax.axhspan(
+            N_inh_input - 0.5,
+            N_inh_input + N_exc_input - 0.5,
+            facecolor="#B5D6E8",
+            alpha=0.3,
+        )
+
+
+def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=False):
+    if isinstance(model, LIFNetwork):
+        base_network = model
+        network_state = state
+
+        noise_E = jnp.zeros_like(N_neurons)
+        noise_I = jnp.zeros_like(N_neurons)
+    elif isinstance(model, NoisyNetwork):
+        base_network = model.base_network
+        network_state = state.network_state
+
+        noise_E = state.noise_E_state
+        noise_I = state.noise_I_state
+
+    N_neurons = base_network.N_neurons
+    N_inputs = base_network.N_inputs
+    W = network_state.W
+    G = network_state.G
+    exc_mask = base_network.excitatory_mask
+
+    if neurons_to_plot is None:
+        neurons_to_plot = jnp.arange(N_neurons)
+
+    weighed_G_inhibitory = jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1)
+    weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1)
+
+    if split_noise:
+        ax.plot(
+            t,
+            weighed_G_excitatory[:, neurons_to_plot],
+            label="Synaptic E Conductance",
+            color="g",
+        )
+        ax.plot(
+            t,
+            weighed_G_inhibitory[:, neurons_to_plot],
+            label="Synaptic I Conductance",
+            color="r",
+        )
+        ax.plot(
+            t,
+            noise_E[:, neurons_to_plot],
+            label="Noise E Conductance",
+            color="g",
+            linestyle="--",
+        )
+        ax.plot(
+            t,
+            noise_I[:, neurons_to_plot],
+            label="Noise I Conductance",
+            color="r",
+            linestyle="--",
+        )
+    else:
+        ax.plot(
+            t,
+            weighed_G_excitatory[:, neurons_to_plot] + noise_E[:, neurons_to_plot],
+            label="Total E Conductance",
+            color="g",
+        )
+        ax.plot(
+            t,
+            weighed_G_inhibitory[:, neurons_to_plot] + noise_I[:, neurons_to_plot],
+            label="Total I Conductance",
+            color="r",
+        )
+    ax.legend(loc="upper right")
+    ax.set_ylabel("Total Conductance (S)")
+    ax.set_title("Total Conductances")
+
+
+def plot_simulate_SNN_results(
     sol: Solution,
-    model: NoisyNetwork,
+    model: LIFNetwork | NoisyNetwork,
     t0: float,
     t1: float,
     dt0: float,
 ):
     # Get results
     t = sol.ts
-    result: NoisyNetworkState = sol.ys
-    network_state, noise_E, noise_I = (
-        result.network_state,
-        result.noise_E_state,
-        result.noise_I_state,
-    )
+    state = sol.ys
 
-    V, S, W, G = network_state.V, network_state.S, network_state.W, network_state.G
-
-    weighed_G_inhibitory = (
-        jnp.sum(
-            W * G * jnp.invert(model.base_network.excitatory_mask[None, :]), axis=-1
-        )
-        + noise_I
-    )
-    weighed_G_excitatory = (
-        jnp.sum(W * G * model.base_network.excitatory_mask[None, :], axis=-1) + noise_E
-    )
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
 
-    # Plot membrane potentials
-    for i in range(model.base_network.N_neurons):
-        spike_times = t[S[:, i] > 0]
-        ax1.vlines(
-            spike_times,
-            V[:, i][S[:, i] > 0] * 1e3,
-            -40,
-        )
-        ax1.plot(t, V[:, i] * 1e3, label=f"Neuron {i + 1} V")
-    ax1.set_ylabel("Membrane Potential (mV)")
-    ax1.set_title("Neuron Membrane Potential")
-
-    # Plot total conductance of neuron 0
-    ax2.plot(t, weighed_G_excitatory[:, 0], label="Total E Conductance", color="g")
-    ax2.plot(t, weighed_G_inhibitory[:, 0], label="Total I Conductance", color="r")
-    ax2.plot(t, noise_E[:, 0], label="Noise E Conductance", color="g", linestyle="--")
-    ax2.legend(loc="upper right")
-    ax2.set_ylabel("Total Conductance (S)")
-    ax2.set_title("Total Conductances")
-
-    # Plot spikes as raster plot
-    spike_times_per_neuron = [jnp.nonzero(S[:, i])[0] * dt0 for i in range(S.shape[1])][
-        ::-1
-    ]
-    ax3.eventplot(spike_times_per_neuron, colors="black", linelengths=0.8)
-    ax3.set_yticks(range(len(spike_times_per_neuron)))
-    ax3.set_ylabel("Neuron")
-    ax3.set_xlabel("Time (s)")
-    ax3.set_title("Spike Raster Plot")
-
-    if model.base_network.N_inputs > 0:
-        # Shade background to distinguish input vs. main neurons
-        # This assumes that all exc/inh inputs are grouped toghether at the end of the neuron list
-        N_exc_input = jnp.sum(
-            model.base_network.excitatory_mask[model.base_network.N_neurons :]
-        )
-        N_inh_input = model.base_network.N_inputs - N_exc_input
-        ax3.axhspan(-0.5, N_inh_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
-        ax3.axhspan(
-            N_inh_input - 0.5,
-            N_inh_input + N_exc_input - 0.5,
-            facecolor="#B5D6E8",
-            alpha=0.3,
-        )
+    _plot_membrane_potential(ax1, t, state, model, [0])
+    _plot_conductances(ax2, t, state, model, [0])
+    _plot_spikes(ax3, t, state, model)
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  # 6 evenly spaced ticks
@@ -104,60 +188,35 @@ def plot_learning_results(
 ):
     # Get results
     t = sol.ts
-    network_state, reward_state, env_state = sol.ys
+    state = sol.ys
+    network_state, reward_state, env_state = state
 
     # Compute reward prediction error if possible
-    if args is not None and "compute_reward" in args:
+    if args is not None and "reward_fn" in args:
         rewards = jnp.array(
-            [args["compute_reward"](ti, env_state[i], args) for i, ti in enumerate(t)]
+            [args["reward_fn"](ti, env_state[i], args) for i, ti in enumerate(t)]
         )
         RPE = rewards - jnp.squeeze(reward_state)
-        print("RPE shape:", RPE.shape)
-        print("Rewards shape:", rewards.shape)
-        print("Reward state shape:", reward_state.shape)
     else:
         RPE = None
 
     fig, axs = plt.subplots(4, 1, figsize=(10, 8))
 
-    axs[0].plot(t, reward_state, label="Reward State", color="b")
-    axs[0].set_title("Reward State Over Time")
-    axs[0].set_ylabel("Reward")
+    axs[0].plot(t, env_state, label="Environment State", color="m")
+    axs[0].set_title("Environment State Over Time")
+    axs[0].set_ylabel("Environment State")
 
-    axs[1].plot(t, env_state, label="Environment State", color="m")
-    axs[1].set_title("Environment State Over Time")
-    axs[1].set_ylabel("Environment State")
+    axs[1].plot(t, reward_state, label="Reward State", color="b")
+    axs[1].plot(t, rewards, label="Instant Rewards", color="k", linestyle="--")
+    axs[1].set_title("Rewards Over Time")
+    axs[1].set_ylabel("Reward")
 
-    if RPE is not None:
-        axs[2].plot(t, RPE, label="Reward Prediction Error", color="r")
-        axs[2].set_title("Reward Prediction Error Over Time")
-        axs[2].set_ylabel("RPE")
+    axs[2].plot(t, RPE, label="Reward Prediction Error", color="r")
+    axs[2].set_title("Reward Prediction Error Over Time")
+    axs[2].set_ylabel("RPE")
 
     # Plot spikes as raster plot
-    spike_times_per_neuron = [
-        jnp.nonzero(network_state[0].S[:, i])[0] * dt0
-        for i in range(network_state[0].S.shape[1])
-    ][::-1]
-    axs[3].eventplot(spike_times_per_neuron, colors="black", linelengths=0.8)
-    axs[3].set_yticks(range(len(spike_times_per_neuron)))
-    axs[3].set_ylabel("Neuron")
-    axs[3].set_xlabel("Time (s)")
-    axs[3].set_title("Spike Raster Plot")
-
-    if model.base_network.N_inputs > 0:
-        # Shade background to distinguish input vs. main neurons
-        # This assumes that all exc/inh inputs are grouped toghether at the end of the neuron list
-        N_exc_input = jnp.sum(
-            model.base_network.excitatory_mask[model.base_network.N_neurons :]
-        )
-        N_inh_input = model.base_network.N_inputs - N_exc_input
-        axs[3].axhspan(-0.5, N_inh_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
-        axs[3].axhspan(
-            N_inh_input - 0.5,
-            N_inh_input + N_exc_input - 0.5,
-            facecolor="#B5D6E8",
-            alpha=0.3,
-        )
+    _plot_spikes(axs[3], t, state, model)
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  #
