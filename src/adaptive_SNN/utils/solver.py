@@ -19,6 +19,28 @@ def simulate_noisy_SNN(
     args: PyTree = None,
     key: jr.PRNGKey = jr.PRNGKey(0),
 ):
+    """
+    Fixed-step Euler simulation of a (noisy) SNN model with selective state saving.
+
+    Given a model, a solver, an initial state, and a time interval, simulates the model
+    from `t0` to `t1` using fixed step size `dt0`. The state is saved every `save_every_n_steps` steps.
+
+    Notes:
+      - Final interval may be shorter than `dt0` if (t1 - t0) is not an integer multiple of dt0.
+
+    Args:
+        model: Provides `terms(key)` and `update(t, y, args)`.
+        solver: A diffrax solver implementing `.step(...)`.
+        t0, t1: Simulation interval.
+        dt0: Nominal step size.
+        y0: Initial PyTree state.
+        save_every_n_steps: After how many steps to save state (>=1).
+        args: Extra args passed to solver/model (PyTree or None).
+        key: Optional PRNG key. If None, a default key is used.
+
+    Returns:
+        diffrax.Solution with (ts, ys) containing saved times and states.
+    """
     # Compute time grid
     n_steps = jnp.floor((t1 - t0) / dt0).astype(int)
     times = t0 + dt0 * jnp.arange(n_steps + 1)  # Add 1 for t1
@@ -77,8 +99,8 @@ def simulate_noisy_SNN(
     ys = run_simulation(times, y0, ys, save_mask, terms, args, model, solver)
 
     return Solution(
-        t0=float(save_times[0]),
-        t1=float(save_times[-1]),
+        t0=t0,
+        t1=t1,
         ts=save_times,
         ys=ys,
         interpolation=None,
