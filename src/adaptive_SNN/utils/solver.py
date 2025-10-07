@@ -15,7 +15,7 @@ def simulate_noisy_SNN(
     t1: float,
     dt0: float,
     y0: PyTree,
-    save_every_n_steps: int = 1,
+    save_every_n_steps: int = 1,  # TODO: use Diffrax' SaveAt class instead for better compatibility
     args: PyTree = None,
     key: jr.PRNGKey = jr.PRNGKey(0),
 ):
