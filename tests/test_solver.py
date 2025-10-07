@@ -101,16 +101,14 @@ class DeterministicNoisyNeuronModel(NoisyNetwork):
         )
 
 
-def _make_quiet_model(N_neurons: int, N_inputs: int, key: jr.PRNGKey) -> NoisyNetwork:
+def _make_noiseless_network(
+    N_neurons: int, N_inputs: int, key: jr.PRNGKey
+) -> NoisyNetwork:
     """Helper to build a NoisyNeuronModel with no recurrent coupling and no OU diffusion.
 
     This keeps the dynamics simple/predictable for testing the solver wrapper.
     """
     network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
-    # Remove recurrent effects so G-noise does not affect V
-    object.__setattr__(
-        network, "weights", jnp.zeros((N_neurons, N_neurons + network.N_inputs))
-    )
 
     # OU processes with zero diffusion so their states remain constant (deterministic)
     noise_E = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
@@ -127,7 +125,7 @@ def test_solver_timesteps():
     N_neurons = 4
     N_inputs = 0
     key = jr.PRNGKey(0)
-    model = _make_quiet_model(N_neurons, N_inputs, key)
+    model = _make_noiseless_network(N_neurons, N_inputs, key)
 
     t0, t1, dt0 = 0.0, 1.0, 0.1
 
@@ -169,13 +167,13 @@ def test_solver_output_noiseless():
     N_neurons = 4
     N_inputs = 0
     key = jr.PRNGKey(0)
-    model = _make_quiet_model(N_neurons, N_inputs, key)
+    model = _make_noiseless_network(N_neurons, N_inputs, key)
 
     t0, t1, dt0 = 0.0, 1.0, 0.1
 
     # Prepare initial state from model
     y0 = model.initial
-    solver = dfx.EulerHeun()
+    solver = dfx.Euler()
     args = _default_args(N_neurons, N_inputs)
 
     # Our method
@@ -200,16 +198,8 @@ def test_solver_output_noiseless():
     )
     sol_2_ts, sol_2_ys = get_non_inf_ts_ys(sol_2)
     sol_1_state: NoisyNetworkState = sol_1.ys
-    assert allclose_pytree(sol_1_state.noise_E_state, sol_2_ys.noise_E_state)
-    assert allclose_pytree(sol_1_state.noise_I_state, sol_2_ys.noise_I_state)
-    print(sol_1_state.network_state.V)
-    print("__________________")
-    print(sol_2_ys.network_state.V)
-    assert allclose_pytree(sol_1_state.network_state.V, sol_2_ys.network_state.V)
-    assert allclose_pytree(sol_1_state.network_state.W, sol_2_ys.network_state.W)
-    assert allclose_pytree(sol_1_state.network_state.G, sol_2_ys.network_state.G)
-    assert allclose_pytree(sol_1_state.network_state.S, sol_2_ys.network_state.S)
 
+    print(sol_1_state.network_state.V)
     assert jnp.allclose(sol_1.ts, sol_2_ts)
     assert allclose_pytree(sol_1.ys, sol_2_ys)
 
@@ -268,17 +258,5 @@ def test_solver_output_with_noise():
 
     sol_2_ts, sol_2_ys = get_non_inf_ts_ys(sol_2)
 
-    sol_1_state: NoisyNetworkState = sol_1.ys
-
     assert jnp.allclose(sol_1.ts, sol_2_ts)
-    assert allclose_pytree(sol_1_state.noise_E_state, sol_2_ys.noise_E_state)
-    assert allclose_pytree(sol_1_state.noise_I_state, sol_2_ys.noise_I_state)
-    print(sol_1_state.network_state.V)
-    print("__________________")
-    print(sol_2_ys.network_state.V)
-    assert allclose_pytree(sol_1_state.network_state.V, sol_2_ys.network_state.V)
-    assert allclose_pytree(sol_1_state.network_state.W, sol_2_ys.network_state.W)
-    assert allclose_pytree(sol_1_state.network_state.G, sol_2_ys.network_state.G)
-    assert allclose_pytree(sol_1_state.network_state.S, sol_2_ys.network_state.S)
-
     assert allclose_pytree(sol_1.ys, sol_2_ys)

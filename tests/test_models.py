@@ -111,17 +111,13 @@ def test_drift_conductance_output():
     key = jr.PRNGKey(0)
     model = LIFNetwork(N_neurons=N, N_inputs=3, key=key)
 
-    # Manually set initial state- G at ones, so decay is predictable
-    initial_state = LIFState(
-        V=jnp.zeros((N,)),
-        S=jnp.zeros((N + model.N_inputs,)),
-        W=model.weights,
-        G=jnp.ones((N, N + model.N_inputs)),
-    )
+    # Manually set G at ones, so decay is predictable
+    state = _baseline_state(model)
+    state = LIFState(state.V, state.S, state.W, jnp.ones_like(state.G))
     args = _default_args(N, model.N_inputs)
-    derivs = model.drift(0.0, initial_state, args)
+    derivs = model.drift(0.0, state, args)
     dg = derivs.G
-    expected_dg = -1 / model.synaptic_time_constants * initial_state.G
+    expected_dg = -1 / model.synaptic_time_constants * state.G
 
     assert jnp.allclose(dg, expected_dg)
 
@@ -595,12 +591,11 @@ def test_spike_generation():
     key = jr.PRNGKey(6)
     model = LIFNetwork(N_neurons=N, key=key)
 
+    state = _baseline_state(model)
     V = (
         jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
     )  # Some above/below threshold
-    S = jnp.zeros((N + model.N_inputs,))
-    G = jnp.zeros((N, N + model.N_inputs))
-    state = LIFState(V, S, model.weights, G)
+    state = LIFState(V, state.S, state.W, state.G)
     args = _default_args(N, model.N_inputs)
 
     new_state = model.spike_and_reset(0.0, state, args)
@@ -627,10 +622,9 @@ def test_spike_generation_with_input():
     key = jr.PRNGKey(7)
     model = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
 
+    state = _baseline_state(model)
     V = jnp.array([-70.0, -70.0, -45.0, -60.0]) * 1e-3  # Neuron 2 will spike
-    S = jnp.zeros((N_neurons + N_inputs,))
-    G = jnp.zeros((N_neurons, N_neurons + N_inputs))
-    state = LIFState(V, S, model.weights, G)
+    state = LIFState(V, state.S, state.W, state.G)
 
     def input_spikes_fn(t, x, args):
         return jnp.array([1.0, 0.0, 0.0])  # Input neurons 0 spikes
