@@ -51,9 +51,7 @@ def main():
         "get_input_spikes": lambda t, x, args: jr.bernoulli(
             jr.PRNGKey((t / dt0).astype(int)), p=p, shape=(N_inputs,)
         ),
-        "get_learning_rate": lambda t, x, args: 0.0,
-        "get_desired_balance": get_desired_balance,  # Desired I/E balance
-        "RPE": jnp.array([0.0]),
+        "get_desired_balance": get_desired_balance,
     }
 
     sol = simulate_noisy_SNN(

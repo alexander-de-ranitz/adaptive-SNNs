@@ -33,9 +33,6 @@ def main():
 
     args = {
         "get_input_spikes": lambda t, x, a: jnp.zeros((model.base_network.N_inputs,)),
-        "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
-        "get_desired_balance": lambda t, x, a: 0.0,  # = no balancing
-        "RPE": jnp.array([0.0]),
     }
 
     sol = simulate_noisy_SNN(
