@@ -46,7 +46,7 @@ def main():
     p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
 
     balances = [0.5, 1, 2, 5]
-    weights = [0.5, 1.0, 1.5, 2.0]
+    weights = [5, 10, 15, 20]
     data = []
     for b in balances:
         for w in weights:

@@ -14,10 +14,10 @@ mpl.rcParams["savefig.directory"] = "../figures"
 
 def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
     if isinstance(model, LIFNetwork):
-        base_network = model
+        # base_network = model
         network_state = state
     elif isinstance(model, NoisyNetwork):
-        base_network = model.base_network
+        # base_network = model.base_network
         network_state = state.network_state
 
     V = network_state.V
@@ -84,8 +84,8 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
         base_network = model
         network_state = state
 
-        noise_E = jnp.zeros_like(N_neurons)
-        noise_I = jnp.zeros_like(N_neurons)
+        noise_E = jnp.zeros_like(base_network.N_neurons)
+        noise_I = jnp.zeros_like(base_network.N_neurons)
     elif isinstance(model, NoisyNetwork):
         base_network = model.base_network
         network_state = state.network_state
@@ -94,7 +94,6 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
         noise_I = state.noise_I_state
 
     N_neurons = base_network.N_neurons
-    N_inputs = base_network.N_inputs
     W = network_state.W
     G = network_state.G
     exc_mask = base_network.excitatory_mask
@@ -201,7 +200,7 @@ def plot_learning_results(
     else:
         RPE = None
 
-    fig, axs = plt.subplots(4, 1, figsize=(10, 8))
+    fig, axs = plt.subplots(5, 1, figsize=(10, 8))
 
     axs[0].plot(t, env_state, label="Environment State", color="m")
     axs[0].set_title("Environment State Over Time")
@@ -218,6 +217,12 @@ def plot_learning_results(
 
     # Plot spikes as raster plot
     _plot_spikes(axs[3], t, state, model)
+
+    # Plot exc synaptic weights over time for first neuron
+    axs[4].plot(t, network_state.network_state.W[:, 0, 1])
+    axs[4].set_title("Synaptic Weight Over Time")
+    axs[4].set_ylabel("Weight")
+    axs[4].set_xlabel("Time (s)")
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  #

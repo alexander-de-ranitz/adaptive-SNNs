@@ -106,9 +106,8 @@ class LIFNetwork(NeuronModel):
     synaptic_increment: float = 1.0 * 1e-9  # nS
     firing_threshold: float = -50.0 * 1e-3  # mV
     V_reset: float = -60.0 * 1e-3  # mV
-    input_weight: float = 10.0  # Weight of input spikes
-    learning_rate: float = 1e-3  # Learning rate for plasticity
 
+    input_weight: float  # Weight of input spikes
     fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
     N_neurons: int
     N_inputs: int
@@ -123,6 +122,7 @@ class LIFNetwork(NeuronModel):
         N_inputs: int = 0,
         input_neuron_types: Array = None,  # Binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
         fully_connected_input: bool = True,
+        input_weight: float = 1.0,
         key: jr.PRNGKey = jr.PRNGKey(0),
     ):
         """Initialize LIF network model.
@@ -137,6 +137,7 @@ class LIFNetwork(NeuronModel):
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
         self.fully_connected_input = fully_connected_input
+        self.input_weight = input_weight
 
         # Set neuron types
         neuron_types = jnp.where(
@@ -166,13 +167,14 @@ class LIFNetwork(NeuronModel):
         key, key_2 = jr.split(key)
 
         # Initialize weights with random sparse connectivity
-        weights = jr.normal(
+        weights = 1 + 0.1 * jr.normal(
             key, (self.N_neurons, self.N_neurons + self.N_inputs)
         ) * jr.bernoulli(
             key_2,
             self.connection_prob,
             (self.N_neurons, self.N_neurons + self.N_inputs),
         )
+        weights = jnp.fill_diagonal(weights, 0.0, inplace=False)  # No self-connections
 
         if (
             self.fully_connected_input and self.N_inputs > 0
@@ -236,7 +238,10 @@ class LIFNetwork(NeuronModel):
         #                 jnp.invert(self.excitatory_mask),
         #             )
 
-        dW = learning_rate * RPE * (E_noise) * G
+        dW = (
+            learning_rate * RPE * (E_noise * 1e9) * (G * 1e9)
+        )  # use G as an eligibility trace, we need to scale since G is tiny
+        # TODO: This is hacky, fix the scaling properly
 
         dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
 
@@ -305,6 +310,7 @@ class LIFNetwork(NeuronModel):
         input_sp = args["get_input_spikes"](t, state, args)
         spikes = jnp.concatenate((recurrent_spikes, input_sp), dtype=V.dtype)
         G_new = G + spikes[None, :] * self.synaptic_increment
+        G_new = jnp.fill_diagonal(G_new, 0.0, inplace=False)  # Avoid self-connections
         return LIFState(V_new, spikes, W, G_new)
 
     def compute_balance(self, t, state, args):

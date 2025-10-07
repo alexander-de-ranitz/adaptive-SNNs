@@ -690,8 +690,8 @@ def test_force_balance_no_change():
     assert jnp.allclose(balance_after, balance)  # No change desired balance =
 
 
-def test_force_balance():
-    N_neurons = 2
+def test_force_balance_mini():
+    N_neurons = 1
     N_inputs = 3
     key = jr.PRNGKey(7)
     input_types = jnp.array(
@@ -699,9 +699,7 @@ def test_force_balance():
     )  # Input neuron 0 excitatory, 1 inhibitory, 2 excitatory
     args = {
         **_default_args(N_neurons, N_inputs),
-        "get_desired_balance": lambda t, x, args: jnp.array(
-            [10.0]
-        ),  # Desired E/I balance
+        "get_desired_balance": lambda t, x, args: jnp.array([1]),  # Desired E/I balance
     }
     model = LIFNetwork(
         N_neurons=N_neurons, N_inputs=N_inputs, input_neuron_types=input_types, key=key
@@ -713,3 +711,26 @@ def test_force_balance():
     state = model.force_balanced_weights(0, model.initial, args=args)
     balance_after = model.compute_balance(0, state, args=args)
     assert jnp.allclose(balance_after, args["get_desired_balance"](0, state, args))
+    assert state.W[0][2] == 2.0  # Inh weight is rescaled
+    assert state.W[0][0] == 0.0  # No self connection
+    assert state.W[0][1] == 1.0 and state.W[0][1] == 1.0  # Exc weights unchanged
+
+
+def test_force_balance_random():
+    N_neurons = 50
+    N_inputs = 10
+    key = jr.PRNGKey(7)
+    input_types = jr.bernoulli(key, p=0.5, shape=(N_inputs,)).astype(jnp.int32)
+    args = {"get_desired_balance": lambda t, x, args: jnp.array([2.0])}
+    model = LIFNetwork(
+        N_neurons=N_neurons, N_inputs=N_inputs, input_neuron_types=input_types, key=key
+    )
+    state = model.initial
+
+    balance = model.compute_balance(0, state, args)
+    assert balance.shape == (N_neurons,)
+    state = model.force_balanced_weights(0, model.initial, args=args)
+    balance_after = model.compute_balance(0, state, args=args)
+    assert jnp.allclose(
+        balance_after, args["get_desired_balance"](0, state, args), atol=1e-5
+    )
