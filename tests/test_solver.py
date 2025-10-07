@@ -5,8 +5,19 @@ import jax.random as jr
 from diffrax import Solution
 from jaxtyping import PyTree
 
-from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNetwork
+from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNetwork, NoisyNetworkState
 from adaptive_SNN.utils.solver import simulate_noisy_SNN
+
+
+def _default_args(N_neurons, N_inputs):
+    return {
+        "excitatory_noise": jnp.zeros((N_neurons,)),
+        "inhibitory_noise": jnp.zeros((N_neurons,)),
+        "RPE": jnp.array([0.0]),
+        "get_input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
+        "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
+        "get_desired_balance": lambda t, x, a: 0.0,  # = no balancing
+    }
 
 
 def get_non_inf_ts_ys(sol: Solution) -> tuple[PyTree, PyTree]:
@@ -90,16 +101,14 @@ class DeterministicNoisyNeuronModel(NoisyNetwork):
         )
 
 
-def _make_quiet_model(N_neurons: int, N_inputs: int, key: jr.PRNGKey) -> NoisyNetwork:
+def _make_noiseless_network(
+    N_neurons: int, N_inputs: int, key: jr.PRNGKey
+) -> NoisyNetwork:
     """Helper to build a NoisyNeuronModel with no recurrent coupling and no OU diffusion.
 
     This keeps the dynamics simple/predictable for testing the solver wrapper.
     """
     network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, key=key)
-    # Remove recurrent effects so G-noise does not affect V
-    object.__setattr__(
-        network, "weights", jnp.zeros((N_neurons, N_neurons + network.N_inputs))
-    )
 
     # OU processes with zero diffusion so their states remain constant (deterministic)
     noise_E = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
@@ -116,18 +125,19 @@ def test_solver_timesteps():
     N_neurons = 4
     N_inputs = 0
     key = jr.PRNGKey(0)
-    model = _make_quiet_model(N_neurons, N_inputs, key)
+    model = _make_noiseless_network(N_neurons, N_inputs, key)
 
     t0, t1, dt0 = 0.0, 1.0, 0.1
 
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.Euler()
+    args = _default_args(N_neurons, N_inputs)
 
     # Our method
     save_every = 1
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
+        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=args
     )
     sol_1_ts = sol_1.ts
 
@@ -141,6 +151,7 @@ def test_solver_timesteps():
         t1=t1,
         dt0=dt0,
         y0=y0,
+        args=args,
         saveat=saveat,
         adjoint=dfx.ForwardMode(),
     )
@@ -156,18 +167,19 @@ def test_solver_output_noiseless():
     N_neurons = 4
     N_inputs = 0
     key = jr.PRNGKey(0)
-    model = _make_quiet_model(N_neurons, N_inputs, key)
+    model = _make_noiseless_network(N_neurons, N_inputs, key)
 
     t0, t1, dt0 = 0.0, 1.0, 0.1
 
     # Prepare initial state from model
     y0 = model.initial
-    solver = dfx.EulerHeun()
+    solver = dfx.Euler()
+    args = _default_args(N_neurons, N_inputs)
 
     # Our method
     save_every = 1
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
+        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=args
     )
 
     # Direct diffrax call for comparison
@@ -181,10 +193,13 @@ def test_solver_output_noiseless():
         dt0=dt0,
         y0=y0,
         saveat=saveat,
+        args=args,
         adjoint=dfx.ForwardMode(),
     )
     sol_2_ts, sol_2_ys = get_non_inf_ts_ys(sol_2)
+    sol_1_state: NoisyNetworkState = sol_1.ys
 
+    print(sol_1_state.network_state.V)
     assert jnp.allclose(sol_1.ts, sol_2_ts)
     assert allclose_pytree(sol_1.ys, sol_2_ys)
 
@@ -218,11 +233,12 @@ def test_solver_output_with_noise():
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.Euler()
+    args = _default_args(N_neurons, N_inputs)
 
     # Our method
     save_every = 1
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=None
+        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=args
     )
 
     # Direct diffrax call for comparison
@@ -236,6 +252,7 @@ def test_solver_output_with_noise():
         dt0=dt0,
         y0=y0,
         saveat=saveat,
+        args=args,
         adjoint=dfx.ForwardMode(),
     )
 

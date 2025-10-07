@@ -1,13 +1,11 @@
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 from diffrax import RESULTS, Euler, Solution
 from jaxtyping import PyTree
-from joblib.memory import Memory
 
 from adaptive_SNN.models.models import AgentSystem, NoisyNetwork
-
-memory = Memory(location="./.cache", verbose=0)
 
 
 def simulate_noisy_SNN(
@@ -17,63 +15,93 @@ def simulate_noisy_SNN(
     t1: float,
     dt0: float,
     y0: PyTree,
-    save_every_n_steps: int = 1,
+    save_every_n_steps: int = 1,  # TODO: use Diffrax' SaveAt class instead for better compatibility
     args: PyTree = None,
+    key: jr.PRNGKey = jr.PRNGKey(0),
 ):
     """
-    Run a simulation using the specified solver and terms.
+    Fixed-step Euler simulation of a (noisy) SNN model with selective state saving.
 
-    Steps through the differential equation defined by `terms` from time `t0` to `t1` with increments of `dt0`.
+    Given a model, a solver, an initial state, and a time interval, simulates the model
+    from `t0` to `t1` using fixed step size `dt0`. The state is saved every `save_every_n_steps` steps.
+
+    Notes:
+      - Final interval may be shorter than `dt0` if (t1 - t0) is not an integer multiple of dt0.
 
     Args:
-        model (NoisyNeuronModel): The neuron model containing the terms.
-        solver (Euler): The solver to use for integration.
-        t0 (float): Initial time.
-        t1 (float): Final time.
-        dt0 (float): Initial time step.
-        y0 (PyTree): Initial state.
-        save_every_n_steps (int, optional): Interval of steps to save the state. Defaults to 1 (save every step).
-        args (PyTree, optional): Additional arguments for the terms. Defaults to None.
+        model: Provides `terms(key)` and `update(t, y, args)`.
+        solver: A diffrax solver implementing `.step(...)`.
+        t0, t1: Simulation interval.
+        dt0: Nominal step size.
+        y0: Initial PyTree state.
+        save_every_n_steps: After how many steps to save state (>=1).
+        args: Extra args passed to solver/model (PyTree or None).
+        key: Optional PRNG key. If None, a default key is used.
 
     Returns:
-        Solution object containing times and states.
+        diffrax.Solution with (ts, ys) containing saved times and states.
     """
+    # Compute time grid
+    n_steps = jnp.floor((t1 - t0) / dt0).astype(int)
+    times = t0 + dt0 * jnp.arange(n_steps + 1)  # Add 1 for t1
+    times = times.at[-1].set(t1)  # Make sure last time is exactly t1
 
-    # Helper function to add current state to ys
-    def add_to_ys(ys, y, index):
-        return jax.tree.map(lambda arr, v: arr.at[index].set(v), ys, y)
+    save_mask = (jnp.arange(times.size) % save_every_n_steps) == 0
+    save_times = times[save_mask]
+    n_saves = save_times.size
 
-    # Set up solution parameters
-    times = jnp.arange(t0, t1, dt0)
-    if times[-1] < t1:
-        times = jnp.append(times, t1)  # Ensure t1 is included
-    n_saves = len(times) // save_every_n_steps
+    # Preallocate storage for results
+    ys = jax.tree_util.tree_map(lambda x: jnp.empty((n_saves, *x.shape), x.dtype), y0)
 
-    # Set up storage for results
-    ys = jax.tree.map(lambda x: jnp.empty(shape=(n_saves, *x.shape)), y0)
-    ys = add_to_ys(ys, y0, index=0)
-    save_index = 1
+    terms = model.terms(key)
 
-    step = 0
-    y = y0
-    terms = model.terms(jr.PRNGKey(0))
-    for t in times:
-        y, _, _, _, result = solver.step(terms, t, t + dt0, y, args, None, False)
-        if result != RESULTS.successful:
-            raise RuntimeError(f"Solver step failed with result: {result}")
-        step += 1
+    @eqx.filter_jit
+    def run_simulation(times, y0, ys, save_mask, terms, args, model, solver):
+        """Runs the simulation loop."""
 
-        y = model.update(t, y, args)
+        # Utility function to save the current state
+        def save_state(carry):
+            y, ys, save_index = carry
+            ys = jax.tree_util.tree_map(lambda arr, v: arr.at[save_index].set(v), ys, y)
+            return (y, ys, save_index + 1)
 
-        # Save results if at the correct interval
-        if step % save_every_n_steps == 0:
-            ys = add_to_ys(ys, y, save_index)
-            save_index += 1
+        def step(i, carry):
+            """Inner loop of the simulation. Takes one step and saves if needed."""
+            y, ys, save_index = carry
+
+            # Take a step
+            t_start = times[i]
+            t_end = times[i + 1]
+            y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
+            y = model.update(t_end, y, args)
+
+            # Is save_mask true at this index? If so, save, else do nothing
+            y, ys, save_index = jax.lax.cond(
+                save_mask[i + 1],  # + 1 because we already stepped
+                save_state,
+                lambda c: c,
+                (y, ys, save_index),
+            )
+
+            return (y, ys, save_index)
+
+        # Save the initial state if needed
+        y0, ys, save_index = jax.lax.cond(
+            save_mask[0], save_state, lambda c: c, (y0, ys, 0)
+        )
+
+        # Loop over all intervals
+        y_final, ys, save_index = jax.lax.fori_loop(
+            0, times.size - 1, step, (y0, ys, save_index)
+        )
+        return ys
+
+    ys = run_simulation(times, y0, ys, save_mask, terms, args, model, solver)
 
     return Solution(
         t0=t0,
         t1=t1,
-        ts=times,
+        ts=save_times,
         ys=ys,
         interpolation=None,
         stats=None,
@@ -83,34 +111,3 @@ def simulate_noisy_SNN(
         made_jump=None,
         event_mask=None,
     )
-
-
-def simulate_learning_SNN(
-    model: AgentSystem,
-    solver: Euler,
-    t0: float,
-    t1: float,
-    dt0: float,
-    y0: PyTree,
-    save_every_n_steps: int = 1,
-    args: PyTree = None,
-):
-    """
-    Run a simulation of the LearningModel using the specified solver.
-
-    Steps through the differential equation defined by `terms` of the model from time `t0` to `t1` with increments of `dt0`.
-    y0 is the initial state of the model, which is (network_state, reward_state, environment_state).
-
-    Args:
-        model (LearningModel): The learning neuron model containing the terms.
-        solver (Euler): The solver to use for integration.
-        t0 (float): Initial time.
-        t1 (float): Final time.
-        dt0 (float): Initial time step.
-        y0 (PyTree): Initial state.
-        save_every_n_steps (int, optional): Interval of steps to save the state. Defaults to 1 (save every step).
-        args (PyTree, optional): Additional arguments for the terms. Defaults to None.
-
-    Returns:
-        Solution object containing times and states.
-    """
