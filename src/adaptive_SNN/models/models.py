@@ -181,8 +181,8 @@ class LIFNetwork(NeuronModel):
             t: time (unused for autonomous dynamics)
             state: LIFState current state
             args: dict containing keys:
-                - inhibitory_noise(t, state, args) -> (N_neurons,)
-                - excitatory_noise(t, state, args) -> (N_neurons,)
+                - inhibitory_noise-> (N_neurons,)
+                - excitatory_noise-> (N_neurons,)
                 - learning_rate(t, state, args) -> scalar
                 - RPE(t, state, args) -> scalar
         Returns:
@@ -203,12 +203,8 @@ class LIFNetwork(NeuronModel):
         )
 
         # Get noise from args and add to total conductances
-        inhibitory_conductances = inhibitory_conductances + args["inhibitory_noise"](
-            t, state, args
-        )
-        excitatory_conductances = excitatory_conductances + args["excitatory_noise"](
-            t, state, args
-        )
+        inhibitory_conductances = inhibitory_conductances + args["inhibitory_noise"]
+        excitatory_conductances = excitatory_conductances + args["excitatory_noise"]
 
         # Compute total recurrent current
         recurrent_current = inhibitory_conductances * (
@@ -221,16 +217,14 @@ class LIFNetwork(NeuronModel):
         dGdt = -1 / self.synaptic_time_constants[None, :] * G
 
         # Compute weight changes
-        learning_rate = args["learning_rate"](t, state, args)
-        RPE = args["RPE"](t, state, args)
-        E_noise = jnp.outer(
-            args["excitatory_noise"](t, state, args), self.excitatory_mask
-        )
+        learning_rate = args["get_learning_rate"](t, state, args)
+        RPE = args["RPE"]
+        E_noise = jnp.outer(args["excitatory_noise"], self.excitatory_mask)
 
         # No learning of inhibitory weights for now
         # TODO: If desired, implement inhibitory weight learning
         # I_noise = jnp.outer(
-        #                 args["inhibitory_noise"](t, state, args),
+        #                 args["inhibitory_noise"],
         #                 jnp.invert(self.excitatory_mask),
         #             )
 
@@ -300,7 +294,7 @@ class LIFNetwork(NeuronModel):
         recurrent_spikes = (V > self.firing_threshold).astype(V.dtype)
         V_new = (1.0 - recurrent_spikes) * V + recurrent_spikes * self.V_reset
 
-        input_sp = args["input_spikes"](t, state, args)
+        input_sp = args["get_input_spikes"](t, state, args)
         spikes = jnp.concatenate((recurrent_spikes, input_sp), dtype=V.dtype)
         G_new = G + spikes[None, :] * self.synaptic_increment
         return LIFState(V_new, spikes, W, G_new)
@@ -319,7 +313,7 @@ class LIFNetwork(NeuronModel):
 
     def force_balanced_weights(self, t, state, args):
         """Adjust weights to achieve a desired E/I balance for each neuron"""
-        desired_balance = args["desired_balance"](t, state, args)
+        desired_balance = args["get_desired_balance"](t, state, args)
         current_balance = self.compute_balance(t, state, args)
         adjust_ratio = desired_balance / current_balance
 
@@ -375,11 +369,10 @@ class NoisyNetwork(NeuronModel):
         )
 
         # TODO: As above, this could be made more general by allowing any noise model and just passing that
-        # TODO: Move this so args are not changed in an inner function for JIT compatibility
         network_args = {
             **args,
-            "excitatory_noise": lambda t, x, args: noise_E_state,
-            "inhibitory_noise": lambda t, x, args: noise_I_state,
+            "excitatory_noise": noise_E_state,
+            "inhibitory_noise": noise_I_state,
         }
 
         network_drift = self.base_network.drift(t, network_state, network_args)
@@ -460,30 +453,25 @@ class AgentSystem(eqx.Module):
             t: time
             x: (network_state, reward_state, environment_state)
             args: dict containing keys:
-                - network_output(t, network_state, args) -> scalar
-                - compute_reward(t, environment_state, args) -> scalar
+                - network_output_fn(t, network_state, args) -> scalar
+                - reward_fn(t, environment_state, args) -> scalar
         Returns:
             (d_network_state, d_reward_state, d_environment_state)
         """
 
         (network_state, reward_state, env_state) = x
 
-        if args is None or "network_output" not in args or "compute_reward" not in args:
-            raise ValueError(
-                "Args must contain 'network_output' and 'compute_reward' functions."
-            )
-
         # Compute network output, reward, and RPE
-        network_output = args["network_output"](t, network_state, args)
-        reward = args["compute_reward"](t, env_state, args)
+        network_output = args["network_output_fn"](t, network_state, args)
+        reward = args["reward_fn"](t, env_state, args)
         RPE = jnp.asarray(reward - reward_state)
 
         # Add to args for use in models
         args = {
             **args,
-            "env_input": lambda t, x, args: network_output,
-            "RPE": lambda t, x, args: RPE,
-            "reward": lambda t, x, args: reward,
+            "env_input": network_output,
+            "RPE": RPE,
+            "reward": reward,
         }
 
         neuron_drift = self.noisy_network.drift(t, network_state, args)

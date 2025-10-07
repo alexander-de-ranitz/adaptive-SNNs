@@ -24,12 +24,12 @@ def _baseline_state(model: LIFNetwork) -> LIFState:
 
 def _default_args(N_neurons, N_inputs):
     return {
-        "excitatory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
-        "inhibitory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
-        "RPE": lambda t, x, a: jnp.array([0.0]),
-        "input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
-        "learning_rate": lambda t, x, a: jnp.array([0.0]),
-        "desired_balance": lambda t, x, a: 0.0,  # = no balancing
+        "excitatory_noise": jnp.zeros((N_neurons,)),
+        "inhibitory_noise": jnp.zeros((N_neurons,)),
+        "RPE": jnp.array([0.0]),
+        "get_input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
+        "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
+        "get_desired_balance": lambda t, x, a: 0.0,  # = no balancing
     }
 
 
@@ -372,11 +372,10 @@ def test_weight_plasticity():
 
     args = {
         **_default_args(N, 0),
-        "excitatory_noise": lambda t, x, a: E_noise,
-        "inhibitory_noise": lambda t, x, a: I_noise,
-        "RPE": lambda t, x, a: RPE_value,
-        "learning": lambda t, x, a: True,
-        "learning_rate": lambda t, x, a: 0.1,
+        "excitatory_noise": E_noise,
+        "inhibitory_noise": I_noise,
+        "RPE": RPE_value,
+        "get_learning_rate": lambda t, x, a: 0.1,
     }
 
     derivs = model.drift(0.0, state, args)
@@ -386,18 +385,24 @@ def test_weight_plasticity():
 
     # Build expected dW using outer products replicating implementation
     E_component = jnp.outer(E_noise, excitatory_mask)
-    expected_dW = args["learning_rate"](0, 0, 0) * RPE_value * E_component * G
+    expected_dW = args["get_learning_rate"](0, 0, 0) * RPE_value * E_component * G
     assert jnp.allclose(dW, expected_dW)
 
     # Manual sanity check
     assert dW[0, 1] == 0.0  # inhibitory presynaptic neuron, so no change
     assert (
         dW[0, 2]
-        == args["learning_rate"](0, 0, 0) * RPE_value * E_noise[0] * G.at[0, 2].get()
+        == args["get_learning_rate"](0, 0, 0)
+        * RPE_value
+        * E_noise[0]
+        * G.at[0, 2].get()
     )
     assert (
         dW[1, 0]
-        == args["learning_rate"](0, 0, 0) * RPE_value * E_noise[1] * G.at[1, 0].get()
+        == args["get_learning_rate"](0, 0, 0)
+        * RPE_value
+        * E_noise[1]
+        * G.at[1, 0].get()
     )
 
 
@@ -414,8 +419,8 @@ def test_excitatory_noise_only_affects_voltage_correctly():
 
     args = {
         **_default_args(N, 0),
-        "excitatory_noise": lambda t, x, a: noise_E,
-        "inhibitory_noise": lambda t, x, a: noise_I,
+        "excitatory_noise": noise_E,
+        "inhibitory_noise": noise_I,
     }
 
     derivs = model.drift(0.0, state, args)
@@ -441,8 +446,8 @@ def test_inhibitory_noise_only_affects_voltage_correctly():
 
     args = {
         **_default_args(N, 0),
-        "excitatory_noise": lambda t, x, a: noise_E,
-        "inhibitory_noise": lambda t, x, a: noise_I,
+        "excitatory_noise": noise_E,
+        "inhibitory_noise": noise_I,
     }
 
     derivs = model.drift(0.0, state, args)
@@ -468,8 +473,8 @@ def test_both_noises_add_linearly():
 
     args = {
         **_default_args(N, 0),
-        "excitatory_noise": lambda t, x, a: noise_E,
-        "inhibitory_noise": lambda t, x, a: noise_I,
+        "excitatory_noise": noise_E,
+        "inhibitory_noise": noise_I,
     }
 
     derivs = model.drift(0.0, state, args)
@@ -629,7 +634,7 @@ def test_spike_generation_with_input():
     def input_spikes_fn(t, x, args):
         return jnp.array([1.0, 0.0, 0.0])  # Input neurons 0 spikes
 
-    args = {**_default_args(N_neurons, N_inputs), "input_spikes": input_spikes_fn}
+    args = {**_default_args(N_neurons, N_inputs), "get_input_spikes": input_spikes_fn}
 
     new_state = model.spike_and_reset(0.0, state, args=args)
     V_new, spikes, W_new, G_new = new_state.V, new_state.S, new_state.W, new_state.G
@@ -694,7 +699,9 @@ def test_force_balance():
     )  # Input neuron 0 excitatory, 1 inhibitory, 2 excitatory
     args = {
         **_default_args(N_neurons, N_inputs),
-        "desired_balance": lambda t, x, args: jnp.array([10.0]),  # Desired E/I balance
+        "get_desired_balance": lambda t, x, args: jnp.array(
+            [10.0]
+        ),  # Desired E/I balance
     }
     model = LIFNetwork(
         N_neurons=N_neurons, N_inputs=N_inputs, input_neuron_types=input_types, key=key
@@ -705,4 +712,4 @@ def test_force_balance():
     assert balance.shape == (N_neurons,)
     state = model.force_balanced_weights(0, model.initial, args=args)
     balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, args["desired_balance"](0, state, args))
+    assert jnp.allclose(balance_after, args["get_desired_balance"](0, state, args))

@@ -11,12 +11,12 @@ from adaptive_SNN.utils.solver import simulate_noisy_SNN
 
 def _default_args(N_neurons, N_inputs):
     return {
-        "excitatory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
-        "inhibitory_noise": lambda t, x, a: jnp.zeros((N_neurons,)),
-        "RPE": lambda t, x, a: jnp.array([0.0]),
-        "input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
-        "learning_rate": lambda t, x, a: jnp.array([0.0]),
-        "desired_balance": lambda t, x, a: 0.0,  # = no balancing
+        "excitatory_noise": jnp.zeros((N_neurons,)),
+        "inhibitory_noise": jnp.zeros((N_neurons,)),
+        "RPE": jnp.array([0.0]),
+        "get_input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
+        "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
+        "get_desired_balance": lambda t, x, a: 0.0,  # = no balancing
     }
 
 
