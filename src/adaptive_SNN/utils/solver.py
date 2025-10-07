@@ -34,14 +34,17 @@ def simulate_noisy_SNN(
     terms = model.terms(key)
 
     @eqx.filter_jit
-    def loop(times, y0, ys, save_mask, terms, args, model, solver):
+    def run_simulation(times, y0, ys, save_mask, terms, args, model, solver):
+        """Runs the simulation loop."""
+
         # Utility function to save the current state
         def save_state(carry):
             y, ys, save_index = carry
             ys = jax.tree_util.tree_map(lambda arr, v: arr.at[save_index].set(v), ys, y)
             return (y, ys, save_index + 1)
 
-        def body(i, carry):
+        def step(i, carry):
+            """Inner loop of the simulation. Takes one step and saves if needed."""
             y, ys, save_index = carry
 
             # Take a step
@@ -67,11 +70,11 @@ def simulate_noisy_SNN(
 
         # Loop over all intervals
         y_final, ys, save_index = jax.lax.fori_loop(
-            0, times.size - 1, body, (y0, ys, save_index)
+            0, times.size - 1, step, (y0, ys, save_index)
         )
         return ys
 
-    ys = loop(times, y0, ys, save_mask, terms, args, model, solver)
+    ys = run_simulation(times, y0, ys, save_mask, terms, args, model, solver)
 
     return Solution(
         t0=float(save_times[0]),
