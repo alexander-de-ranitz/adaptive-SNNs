@@ -7,6 +7,14 @@ from jaxtyping import PyTree
 
 from adaptive_SNN.models.models import AgentSystem, NoisyNetwork
 
+def get_default_args():
+    """Returns a dictionary of all zero default args for simulate_noisy_SNN."""
+    return {
+        "get_learning_rate": lambda t, x, args: 0.0,
+        "get_input_spikes": lambda t, x, args: jnp.zeros_like(x.V),
+        "get_desired_balance": lambda t, x, args: 0.0,
+        "RPE": jnp.array(0.0)
+    }
 
 def simulate_noisy_SNN(
     model: NoisyNetwork | AgentSystem,
@@ -41,6 +49,9 @@ def simulate_noisy_SNN(
     Returns:
         diffrax.Solution with (ts, ys) containing saved times and states.
     """
+    # Args are the default args, overridden by any user-provided args
+    args = {**get_default_args(), **(args or {})}
+
     # Compute time grid
     n_steps = jnp.floor((t1 - t0) / dt0).astype(int)
     times = t0 + dt0 * jnp.arange(n_steps + 1)  # Add 1 for t1
