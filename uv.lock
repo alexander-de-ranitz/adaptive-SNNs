@@ -26,7 +26,7 @@ wheels = [
 
 [[package]]
 name = "diffrax"
-version = "0.6.2"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "equinox" },
@@ -34,12 +34,12 @@ dependencies = [
     { name = "jaxtyping" },
     { name = "lineax" },
     { name = "optimistix" },
-    { name = "typeguard" },
     { name = "typing-extensions" },
+    { name = "wadler-lindig" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/00/b8/eb664497d769eaeba543ed4f9cb8d97f2386bc4d2fc8a4c0c04e1db45447/diffrax-0.6.2.tar.gz", hash = "sha256:50fde010792a2e9d6105fdf2242e024dd779da27c618b56b92c244cd842bd3d1", size = 147027, upload-time = "2024-12-24T16:50:08.119Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/9e/d6081a1daf7a7b70f53ddac637bd2e6cd6fa91042ffd7b204741c0ce6d44/diffrax-0.7.0.tar.gz", hash = "sha256:f3bcc578cd92a9ca86fc6f5a54c1de76c1ba62f74de69b56002624bf205316f1", size = 151595, upload-time = "2025-03-14T03:52:22.422Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f7/f7/4f3fc1538df2229be5d40bc85b561eb4190bba7a1b16678bd53446dfff88/diffrax-0.6.2-py3-none-any.whl", hash = "sha256:05f14cbdc1146867f35dd2468a5f3a8cd666c0faff42d8e1cb953f47add05d22", size = 187199, upload-time = "2024-12-24T16:50:04.112Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/1d/236424e689f62d7fe58f8b10f08c63a49c68efba087eabdd09198a9bbf38/diffrax-0.7.0-py3-none-any.whl", hash = "sha256:aa9645c40552f11a2d32042ef6b9fcd53c1f0f6bdbe32d37cb788669ca9910be", size = 193163, upload-time = "2025-03-14T03:52:20.943Z" },
 ]
 
 [[package]]
@@ -473,20 +473,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "diffrax", specifier = "==0.6.2" },
+    { name = "diffrax", specifier = "==0.7.0" },
     { name = "jax", specifier = ">=0.7.2" },
     { name = "joblib", specifier = ">=1.5.2" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pytest", specifier = ">=8.4.2" },
-]
-
-[[package]]
-name = "typeguard"
-version = "2.13.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3a/38/c61bfcf62a7b572b5e9363a802ff92559cb427ee963048e1442e3aef7490/typeguard-2.13.3.tar.gz", hash = "sha256:00edaa8da3a133674796cf5ea87d9f4b4c367d77476e185e80251cc13dfbb8c4", size = 40604, upload-time = "2021-12-10T21:09:39.158Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/bb/d43e5c75054e53efce310e79d63df0ac3f25e34c926be5dffb7d283fb2a8/typeguard-2.13.3-py3-none-any.whl", hash = "sha256:5e3e3be01e887e7eafae5af63d1f36c849aaa94e3a0112097312aabfa16284f1", size = 17605, upload-time = "2021-12-10T21:09:37.844Z" },
 ]
 
 [[package]]
