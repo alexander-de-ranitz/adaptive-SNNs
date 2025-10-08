@@ -239,9 +239,11 @@ class LIFNetwork(NeuronModel):
         #             )
 
         dW = (
-            learning_rate * RPE * (E_noise * 1e9) * (G * 1e9)
-        )  # use G as an eligibility trace, we need to scale since G is tiny
-        # TODO: This is hacky, fix the scaling properly
+            learning_rate
+            * RPE
+            * (E_noise * self.synaptic_increment)
+            * (G / self.synaptic_increment)
+        )  # Since W is in arbitrary units (not nS), scale by synaptic increment to get a sensible scale
 
         dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
 
