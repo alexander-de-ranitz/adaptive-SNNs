@@ -60,18 +60,16 @@ def test_drift_diffusion_shapes():
     state = model.initial
 
     args = _default_args(N, model.N_inputs)
-    derivs = model.drift(0.0, state, args)
-    diffs = model.diffusion(0.0, state, args)
-    dV, dS, dW, dG = derivs.V, derivs.S, derivs.W, derivs.G
-    diffV, diffS, diffW, diffG = diffs.V, diffs.S, diffs.W, diffs.G
-    assert dV.shape == (N,)
-    assert dS.shape == (N + model.N_inputs,)
-    assert dW.shape == (N, N + model.N_inputs)
-    assert dG.shape == (N, N + model.N_inputs)
-    assert diffV.shape == (N,)
-    assert diffS.shape == (N + model.N_inputs,)
-    assert diffW.shape == (N, N + model.N_inputs)
-    assert diffG.shape == (N, N + model.N_inputs)
+    drift = model.drift(0.0, state, args)
+    diff = model.diffusion(0.0, state, args).pytree
+    assert drift.V.shape == (N,)
+    assert drift.S.shape == (N + model.N_inputs,)
+    assert drift.W.shape == (N, N + model.N_inputs)
+    assert drift.G.shape == (N, N + model.N_inputs)
+    assert diff.V.matrix.shape == (N,)
+    assert diff.S.matrix.shape == (N + model.N_inputs,)
+    assert diff.W.matrix.shape == (N, N + model.N_inputs)
+    assert diff.G.matrix.shape == (N, N + model.N_inputs)
 
 
 def test_noise_shape():
@@ -573,9 +571,14 @@ def test_NoisyNeuronModel_diffusion():
     initial_state = NoisyNetworkState(network_state, noise_E_state, noise_I_state)
     args = _default_args(N, 0)
 
-    noisy_network_diff = model.diffusion(0.0, initial_state, args)
-    network_diff = noisy_network_diff.network_state
-    dV, dS, dW, dG = network_diff.V, network_diff.S, network_diff.W, network_diff.G
+    noisy_network_diff = model.diffusion(0.0, initial_state, args).pytree
+    network_diff = noisy_network_diff.network_state.pytree
+    dV, dS, dW, dG = (
+        network_diff.V.matrix,
+        network_diff.S.matrix,
+        network_diff.W.matrix,
+        network_diff.G.matrix,
+    )
 
     # Network diffusion is zero
     assert jnp.allclose(dV, 0.0)
@@ -661,7 +664,9 @@ def test_spike_generation_with_input():
     assert jnp.all(
         dG[:, model.N_neurons + 1 :] == 0
     )  # Conductance from other input neurons should not change
-    assert jnp.all(dG[:, 2] < 0)  # Conductance from spiking neuron 2 should decay
+    assert jnp.all(
+        dG[jnp.arange(N_neurons) != 2, 2] < 0
+    )  # Conductance from spiking neuron 2 should decay, except G[2,2] which is 0 since there are no autapses
     assert jnp.all(
         dG[:, jnp.array([0, 1, 3])] == 0
     )  # Other neurons are at zero conductance, should not change

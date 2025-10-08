@@ -9,12 +9,15 @@ from jaxtyping import Array
 
 from adaptive_SNN.models.environment import EnvironmentModel
 from adaptive_SNN.models.reward import RewardModel
+from adaptive_SNN.utils.operators import ElementWiseMul, MixedPyTreeOperator
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 class LIFState(eqx.Module):
     """State container for LIF network.
+
+    Used to make it easier to work with the state by avoiding tuples with many indices.
 
     Attributes:
         V: Membrane potentials (N_neurons,)
@@ -250,28 +253,31 @@ class LIFNetwork(NeuronModel):
         return LIFState(dVdt, dS, dW, dGdt)
 
     def diffusion(self, t, state: LIFState, args) -> LIFState:
-        # TODO: Fix this. See below
-        # The diffusion (vf) and noise term (control) are used as:
-        # jnp.tensordot(jnp.conj(vf), control, axes=jnp.ndim(control)),
-        # applied to each leaf of the pytree.
-        # See https://numpy.org/doc/stable/reference/generated/numpy.linalg.tensordot.html#numpy.linalg.tensordot
-        # With the values below, this tensordot returns a pytree with shapes: ((N_neurons,), (), ())
-        # this is then (presumably) broadcasted to the shapes of the state ((N_neurons,), (N_neurons, N_neurons + N_inputs), (N_neurons, N_neurons + N_inputs))
-        # As everything is zero, this does not cause issues, but it is not correct.
-        #
-        # I would probably like to do element-wise multiplication.
-        # Perhaps a custom Lineax operator could be used here? Investigate this further.
-
-        return LIFState(
-            jnp.zeros_like(state.V, dtype=default_float),  # dV noise
-            jnp.zeros_like(state.S, dtype=default_float),  # dS noise
-            jnp.zeros_like(state.W, dtype=default_float),  # dW noise
-            jnp.zeros_like(state.G, dtype=default_float),  # dG noise
+        # Our noise_shape is a pytree of 1d and 2d arrays. Diffusion must have compatible shapes.
+        # since each noise value is independent, element-wise multiplication of the matrix-valued noise term is sufficient,
+        # we do not need to use tensor products or similar more complex operations.
+        # We wrap everything in a MixedPyTreeOperator, which can handle a pytree of both Lineax operators and arrays.
+        # In this case, all elements are ElementWiseMul operators of zeros, since we do not use noise in this model.
+        # However, I wanted to keep the structure for future use, e.g. if we want to add noise to conductances or weights
+        return MixedPyTreeOperator(
+            LIFState(
+                ElementWiseMul(
+                    jnp.zeros_like(state.V, dtype=default_float)
+                ),  # dV noise
+                ElementWiseMul(
+                    jnp.zeros_like(state.S, dtype=default_float)
+                ),  # dS noise
+                ElementWiseMul(
+                    jnp.zeros_like(state.W, dtype=default_float)
+                ),  # dW noise
+                ElementWiseMul(
+                    jnp.zeros_like(state.G, dtype=default_float)
+                ),  # dG noise
+            )
         )
 
     @property
     def noise_shape(self):
-        # TODO: same as above: should this be None instead of shapes of zeros?
         return LIFState(
             jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
             jax.ShapeDtypeStruct(
@@ -346,6 +352,8 @@ class LIFNetwork(NeuronModel):
 
 
 class NoisyNetworkState(eqx.Module):
+    """State container for NoisyNetwork."""
+
     network_state: LIFState
     noise_E_state: Array  # (N_neurons,)
     noise_I_state: Array  # (N_neurons,)
@@ -405,8 +413,8 @@ class NoisyNetwork(NeuronModel):
         network_diffusion = self.base_network.diffusion(t, network_state, args)
         noise_E_diffusion = self.noise_E.diffusion(t, noise_E_state, args)
         noise_I_diffusion = self.noise_I.diffusion(t, noise_I_state, args)
-        return NoisyNetworkState(
-            network_diffusion, noise_E_diffusion, noise_I_diffusion
+        return MixedPyTreeOperator(
+            NoisyNetworkState(network_diffusion, noise_E_diffusion, noise_I_diffusion)
         )
 
     @property
@@ -500,7 +508,7 @@ class AgentSystem(eqx.Module):
         neuron_diffusion = self.noisy_network.diffusion(t, neuron_state, args)
         reward_diffusion = self.reward_model.diffusion(t, reward_state, args)
         env_diffusion = self.environment.diffusion(t, env_state, args)
-        return (neuron_diffusion, reward_diffusion, env_diffusion)
+        return MixedPyTreeOperator((neuron_diffusion, reward_diffusion, env_diffusion))
 
     @property
     def noise_shape(self):
