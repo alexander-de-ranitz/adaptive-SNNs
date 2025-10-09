@@ -255,7 +255,7 @@ class LIFNetwork(NeuronModel):
         dW = (
             learning_rate
             * RPE
-            * (E_noise * self.synaptic_increment)
+            * (E_noise / self.synaptic_increment)
             * (G / self.synaptic_increment)
         )  # Since W is in arbitrary units (not nS), scale by synaptic increment to get a sensible scale
 
@@ -268,10 +268,6 @@ class LIFNetwork(NeuronModel):
         dV = jnp.where(
             state.time_since_last_spike < self.refractory_period, 0.0, dV
         )  # Neurons in refractory period do not change their membrane potential
-        dW = jnp.where(
-            (state.time_since_last_spike < self.refractory_period)[:, None], 0.0, dW
-        )  # Neurons in refractory period do not change their weights
-
         return LIFState(dV, dS, dW, dGdt, d_time_since_last_spike)
 
     def diffusion(self, t, state: LIFState, args) -> LIFState:
