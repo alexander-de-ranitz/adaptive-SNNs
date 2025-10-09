@@ -118,9 +118,7 @@ class LIFNetwork(NeuronModel):
     N_neurons: int
     N_inputs: int
     excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
-    synaptic_time_constants: (
-        Array  # Vector of size N_neurons with synaptic time constants (tau_E or tau_I)
-    )
+    synaptic_time_constants: Array  # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
 
     def __init__(
         self,
