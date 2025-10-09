@@ -1,4 +1,5 @@
 import diffrax as dfx
+import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jr
 
@@ -19,7 +20,8 @@ def _baseline_state(model: LIFNetwork) -> LIFState:
     S = jnp.zeros((N_neurons + N_inputs,))
     W = jnp.zeros((N_neurons, N_neurons + N_inputs))
     G = jnp.zeros((N_neurons, N_neurons + N_inputs))
-    return LIFState(V, S, W, G)
+    time_since_last_spike = jnp.ones((N_neurons,)) * jnp.inf
+    return LIFState(V, S, W, G, time_since_last_spike)
 
 
 def _default_args(N_neurons, N_inputs):
@@ -111,7 +113,7 @@ def test_drift_conductance_output():
 
     # Manually set G at ones, so decay is predictable
     state = _baseline_state(model)
-    state = LIFState(state.V, state.S, state.W, jnp.ones_like(state.G))
+    state = eqx.tree_at(lambda s: s.G, state, jnp.ones_like(state.G))
     args = _default_args(N, model.N_inputs)
     derivs = model.drift(0.0, state, args)
     dg = derivs.G
@@ -177,12 +179,8 @@ def test_recurrent_current():
         conductances = conductances.at[1, 0].set(0.5)  # set g_10 = 0.5
 
         # Initial state with all neurons at resting potential
-        initial_state = LIFState(
-            V=jnp.ones((N,)) * model.resting_potential,
-            S=jnp.zeros((N + model.N_inputs,)),
-            W=weights,
-            G=conductances,
-        )
+        initial_state = eqx.tree_at(lambda s: s.W, _baseline_state(model), weights)
+        initial_state = eqx.tree_at(lambda s: s.G, initial_state, conductances)
 
         derivs = model.drift(0.0, initial_state, args)
         dv, dS = derivs.V, derivs.S
@@ -230,12 +228,8 @@ def test_input_current():
     conductances = conductances.at[1, N_neurons + 2].set(0.5)  # set g_16 = 0.5
 
     # Initial state with all neurons at resting potential
-    initial_state = LIFState(
-        V=jnp.ones((N_neurons,)) * model.resting_potential,
-        S=jnp.zeros((N_neurons + N_inputs,)),
-        W=weights,
-        G=conductances,
-    )
+    initial_state = eqx.tree_at(lambda s: s.W, _baseline_state(model), weights)
+    initial_state = eqx.tree_at(lambda s: s.G, initial_state, conductances)
 
     derivs = model.drift(0.0, initial_state, args)
     dv, dS = derivs.V, derivs.S
@@ -356,12 +350,11 @@ def test_weight_plasticity():
 
     # Manually set state
     init_state = model.initial
-    V, S, W, G = init_state.V, init_state.S, init_state.W, init_state.G
     G = jnp.zeros((N, N))
     G = G.at[0, 1].set(1.0)
     G = G.at[0, 2].set(0.5)
     G = G.at[1, 0].set(2)
-    state = LIFState(V, S, W, G)
+    state = eqx.tree_at(lambda s: s.G, init_state, G)
 
     # Define deterministic noise and RPE
     E_noise = jnp.arange(N, dtype=jnp.float32) + 1.0  # [1,2,3,4]
@@ -603,7 +596,7 @@ def test_spike_generation():
     V = (
         jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
     )  # Some above/below threshold
-    state = LIFState(V, state.S, state.W, state.G)
+    state = eqx.tree_at(lambda s: s.V, state, V)
     args = _default_args(N, model.N_inputs)
 
     new_state = model.spike_and_reset(0.0, state, args)
@@ -620,8 +613,18 @@ def test_spike_generation():
     mask = jnp.array(expected_spikes, dtype=bool)
     assert jnp.allclose(new_state.G[:, mask], model.synaptic_increment)
     assert jnp.allclose(new_state.G[:, jnp.invert(mask)], 0.0)
+
     # Weights unchanged
     assert jnp.all(new_state.W == state.W)
+
+    # Check time since last spike updated correctly
+    expected_time_since_last_spike = jnp.array([jnp.inf, jnp.inf, 0.0, jnp.inf, 0.0])
+    assert jnp.allclose(new_state.time_since_last_spike, expected_time_since_last_spike)
+
+    # Check that voltage remains fixed after spike
+    drift = model.drift(0.0, new_state, args)
+    assert jnp.all(drift.V[mask] == 0.0)
+    assert jnp.all(drift.V[jnp.invert(mask)] != 0.0)
 
 
 def test_spike_generation_with_input():
@@ -632,7 +635,7 @@ def test_spike_generation_with_input():
 
     state = _baseline_state(model)
     V = jnp.array([-70.0, -70.0, -45.0, -60.0]) * 1e-3  # Neuron 2 will spike
-    state = LIFState(V, state.S, state.W, state.G)
+    state = eqx.tree_at(lambda s: s.V, state, V)
 
     def input_spikes_fn(t, x, args):
         return jnp.array([1.0, 0.0, 0.0])  # Input neurons 0 spikes

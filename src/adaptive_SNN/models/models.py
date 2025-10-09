@@ -24,12 +24,14 @@ class LIFState(eqx.Module):
         S: Spike vector (N_neurons + N_inputs,)
         W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs)
         G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
+        time_since_last_spike: Time since last spike for each neuron (N_neurons,)
     """
 
     V: Array
     S: Array
     W: Array
     G: Array
+    time_since_last_spike: Array
 
 
 class NeuronModel(ABC, eqx.Module):
@@ -109,6 +111,7 @@ class LIFNetwork(NeuronModel):
     synaptic_increment: float = 1.0 * 1e-9  # nS
     firing_threshold: float = -50.0 * 1e-3  # mV
     V_reset: float = -60.0 * 1e-3  # mV
+    refractory_period: float = 2.0 * 1e-3  # ms
 
     input_weight: float  # Weight of input spikes
     fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
@@ -185,7 +188,17 @@ class LIFNetwork(NeuronModel):
             weights = weights.at[:, self.N_neurons :].set(
                 jnp.ones(shape=(self.N_neurons, self.N_inputs)) * self.input_weight
             )
-        return LIFState(V_init, spikes_init, weights, conductance_init)
+
+        time_since_last_spike = (
+            jnp.ones((self.N_neurons,), dtype=default_float) * jnp.inf
+        )
+        return LIFState(
+            V=V_init,
+            S=spikes_init,
+            W=weights,
+            G=conductance_init,
+            time_since_last_spike=time_since_last_spike,
+        )
 
     def drift(self, t, state: LIFState, args) -> LIFState:
         """Compute deterministic time derivatives for LIF state.
@@ -224,7 +237,7 @@ class LIFNetwork(NeuronModel):
             self.reversal_potential_I - V
         ) + excitatory_conductances * (self.reversal_potential_E - V)
 
-        dVdt = (leak_current + recurrent_current) / self.membrane_capacitance
+        dV = (leak_current + recurrent_current) / self.membrane_capacitance
 
         # Compute synaptic conductance changes
         dGdt = -1 / self.synaptic_time_constants[None, :] * G
@@ -250,7 +263,18 @@ class LIFNetwork(NeuronModel):
 
         dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
 
-        return LIFState(dVdt, dS, dW, dGdt)
+        d_time_since_last_spike = jnp.ones_like(
+            state.time_since_last_spike
+        )  # Time since last spike increases by 1 for all neurons
+
+        dV = jnp.where(
+            state.time_since_last_spike < self.refractory_period, 0.0, dV
+        )  # Neurons in refractory period do not change their membrane potential
+        dW = jnp.where(
+            (state.time_since_last_spike < self.refractory_period)[:, None], 0.0, dW
+        )  # Neurons in refractory period do not change their weights
+
+        return LIFState(dV, dS, dW, dGdt, d_time_since_last_spike)
 
     def diffusion(self, t, state: LIFState, args) -> LIFState:
         # Our noise_shape is a pytree of 1d and 2d arrays. Diffusion must have compatible shapes.
@@ -261,18 +285,13 @@ class LIFNetwork(NeuronModel):
         # However, I wanted to keep the structure for future use, e.g. if we want to add noise to conductances or weights
         return MixedPyTreeOperator(
             LIFState(
+                ElementWiseMul(jnp.zeros_like(state.V, dtype=default_float)),  # V noise
+                ElementWiseMul(jnp.zeros_like(state.S, dtype=default_float)),  # S noise
+                ElementWiseMul(jnp.zeros_like(state.W, dtype=default_float)),  # W noise
+                ElementWiseMul(jnp.zeros_like(state.G, dtype=default_float)),  # G noise
                 ElementWiseMul(
-                    jnp.zeros_like(state.V, dtype=default_float)
-                ),  # dV noise
-                ElementWiseMul(
-                    jnp.zeros_like(state.S, dtype=default_float)
-                ),  # dS noise
-                ElementWiseMul(
-                    jnp.zeros_like(state.W, dtype=default_float)
-                ),  # dW noise
-                ElementWiseMul(
-                    jnp.zeros_like(state.G, dtype=default_float)
-                ),  # dG noise
+                    jnp.zeros_like(state.time_since_last_spike, dtype=default_float)
+                ),  # time_since_last_spike noise
             )
         )
 
@@ -291,6 +310,7 @@ class LIFNetwork(NeuronModel):
                 shape=(self.N_neurons, self.N_neurons + self.N_inputs),
                 dtype=default_float,
             ),
+            jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
         )
 
     def terms(self, key):
@@ -319,7 +339,10 @@ class LIFNetwork(NeuronModel):
         spikes = jnp.concatenate((recurrent_spikes, input_sp), dtype=V.dtype)
         G_new = G + spikes[None, :] * self.synaptic_increment
         G_new = jnp.fill_diagonal(G_new, 0.0, inplace=False)  # Avoid self-connections
-        return LIFState(V_new, spikes, W, G_new)
+        time_since_last_spike = jnp.where(
+            recurrent_spikes > 0, 0.0, state.time_since_last_spike
+        )  # Reset time since last spike to 0 for neurons that spiked
+        return LIFState(V_new, spikes, W, G_new, time_since_last_spike)
 
     def compute_balance(self, t, state, args):
         """Compute the ratio of total inhibitory to excitatory input weights for each neuron."""
@@ -348,7 +371,7 @@ class LIFNetwork(NeuronModel):
             jnp.outer(adjust_ratio, jnp.invert(self.excitatory_mask))
             + jnp.outer(jnp.ones(self.N_neurons), self.excitatory_mask)
         )
-        return LIFState(state.V, state.S, balanced_weights, state.G)
+        return eqx.tree_at(lambda s: s.W, state, balanced_weights)
 
 
 class NoisyNetworkState(eqx.Module):
