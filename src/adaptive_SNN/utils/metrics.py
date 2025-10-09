@@ -1,6 +1,11 @@
 from jax import numpy as jnp
 from jaxtyping import Array
 
+from adaptive_SNN.models.models import (
+    LIFNetwork,
+    NoisyNetwork,
+)
+
 
 def compute_CV_ISI(spikes) -> Array:
     """Compute the coefficient of variation (CV) of inter-spike intervals (ISI) for each neuron.
@@ -32,3 +37,106 @@ def compute_CV_ISI(spikes) -> Array:
             CV_ISI = CV_ISI.at[neuron_idx].set(jnp.nan)  # Avoid division by zero
 
     return CV_ISI
+
+
+def compute_conductance_ratio(t, state, model) -> Array:
+    """Compute the ratio of weighted inhibitory to excitatory synaptic conductances for each neuron.
+
+    Essentially computes the average over time of the ratio:
+        (sum_j W_ij * G_ij * (1 - exc_mask_j) + noise_I) /
+        (sum_j W_ij * G_ij * exc_mask_j + noise_E)
+
+    Args:
+        t (jnp.ndarray): Time array of shape (num_time_steps,).
+        state: The state of the network containing synaptic conductances.
+        model: The network model containing parameters and structure.
+    Returns:
+        jnp.ndarray: An array of shape (num_neurons,) containing the average ratio of inhibitory to excitatory conductances.
+    """
+    if isinstance(model, LIFNetwork):
+        base_network = model
+        network_state = state
+
+        noise_E = jnp.zeros_like(base_network.N_neurons)
+        noise_I = jnp.zeros_like(base_network.N_neurons)
+    elif isinstance(model, NoisyNetwork):
+        base_network = model.base_network
+        network_state = state.network_state
+
+        noise_E = state.noise_E_state
+        noise_I = state.noise_I_state
+
+    N_neurons = base_network.N_neurons
+    W = network_state.W
+    G = network_state.G
+    exc_mask = base_network.excitatory_mask
+
+    weighed_G_inhibitory = (
+        jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1) + noise_I
+    )
+    weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1) + noise_E
+
+    ratio = weighed_G_inhibitory / (
+        weighed_G_excitatory + 1e-9
+    )  # Avoid division by zero
+    avg_ratio = jnp.mean(ratio, axis=0)  # Average over time
+
+    return avg_ratio
+
+
+def compute_charge_ratio(t, state, model) -> Array:
+    """Compute the ratio of total inhibitory to excitatory charge for each neuron.
+
+    Essentially computes the ratio:
+        total_inhibitory_charge / total_excitatory_charge
+    where total_inhibitory_charge = (sum_j W_ij * G_ij * (1 - exc_mask_j) + noise_I) * (E_I - V_i)
+          total_excitatory_charge = (sum_j W_ij * G_ij * exc_mask_j + noise_E) * (E_E - V_i)
+
+    Args:
+        t (jnp.ndarray): Time array of shape (num_time_steps,).
+        state: The state of the network containing synaptic conductances.
+        model: The network model containing parameters and structure.
+    Returns:
+        jnp.ndarray: An array of shape (num_neurons,) containing the ratio of total inhibitory to excitatory charge.
+    """
+    if isinstance(model, LIFNetwork):
+        base_network: LIFNetwork = model
+        network_state = state
+
+        noise_E = jnp.zeros_like(base_network.N_neurons)
+        noise_I = jnp.zeros_like(base_network.N_neurons)
+    elif isinstance(model, NoisyNetwork):
+        base_network: LIFNetwork = model.base_network
+        network_state = state.network_state
+
+        noise_E = state.noise_E_state
+        noise_I = state.noise_I_state
+
+    W = network_state.W
+    G = network_state.G
+    V = network_state.V
+    exc_mask = base_network.excitatory_mask
+
+    dt = t[1] - t[0]
+    weighed_G_inhibitory = (
+        jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1) + noise_I
+    )
+    weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1) + noise_E
+
+    print(
+        f"weighed_G_inhibitory shape: {weighed_G_inhibitory.shape}, V shape: {V.shape}"
+    )
+    total_inhibitory_charge = (
+        jnp.sum(weighed_G_inhibitory * (base_network.reversal_potential_I - V), axis=0)
+        * dt
+    )
+    total_excitatory_charge = (
+        jnp.sum(weighed_G_excitatory * (base_network.reversal_potential_E - V), axis=0)
+        * dt
+    )
+
+    ratio = total_inhibitory_charge / (
+        total_excitatory_charge + 1e-9
+    )  # Avoid division by zero
+
+    return ratio
