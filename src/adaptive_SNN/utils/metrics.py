@@ -123,9 +123,6 @@ def compute_charge_ratio(t, state, model) -> Array:
     )
     weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1) + noise_E
 
-    print(
-        f"weighed_G_inhibitory shape: {weighed_G_inhibitory.shape}, V shape: {V.shape}"
-    )
     total_inhibitory_charge = (
         jnp.sum(weighed_G_inhibitory * (base_network.reversal_potential_I - V), axis=0)
         * dt
@@ -135,8 +132,5 @@ def compute_charge_ratio(t, state, model) -> Array:
         * dt
     )
 
-    ratio = total_inhibitory_charge / (
-        total_excitatory_charge + 1e-9
-    )  # Avoid division by zero
-
+    ratio = jnp.abs(total_inhibitory_charge / (total_excitatory_charge + 1e-9))
     return ratio
