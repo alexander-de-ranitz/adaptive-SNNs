@@ -1,21 +1,26 @@
 import diffrax as dfx
+import equinox as eqx
 import jax.random as jr
+import matplotlib as mpl
 from jax import numpy as jnp
 from matplotlib import pyplot as plt
 
 from adaptive_SNN.models.models import (
     OUP,
     LIFNetwork,
-    LIFState,
     NoisyNetwork,
-    NoisyNetworkState,
+)
+from adaptive_SNN.utils.metrics import (
+    compute_charge_ratio,
 )
 from adaptive_SNN.utils.solver import simulate_noisy_SNN
+
+mpl.rcParams["savefig.directory"] = "../figures"
 
 
 def main():
     t0 = 0
-    t1 = 1
+    t1 = 1.0
     dt0 = 0.0001
     key = jr.PRNGKey(1)
     N_neurons = 1
@@ -39,31 +44,19 @@ def main():
     )
 
     solver = dfx.EulerHeun()
-    init_state = model.initial
 
-    # Input spikes: Poisson with rate 20 Hz
-    rate = 500  # firing rate in Hz
-    p = 1.0 - jnp.exp(-rate * dt0)  # per-step spike probability, Poisson process
+    rate = jnp.array([500, 125])  # firing rate in Hz
+    p = 1.0 - jnp.exp(-rate * dt0)
 
-    balances = [0.5, 1, 2, 5]
-    weights = [5, 10, 15, 20]
+    balances = [0.05, 0.1, 0.5, 1, 5, 10]
+    weights = [1, 2, 5, 10]
     data = []
     for b in balances:
         for w in weights:
-            network_state, E, I = (
-                model.initial.network_state,
-                model.initial.noise_E_state,
-                model.initial.noise_I_state,
-            )
-            init_state = NoisyNetworkState(
-                LIFState(
-                    network_state.V,
-                    network_state.S,
-                    network_state.W * w,
-                    network_state.G,
-                ),
-                E,
-                I,
+            init_state = eqx.tree_at(
+                lambda x: x.network_state.W,
+                model.initial,
+                model.initial.network_state.W * w,
             )
 
             print(f"Simulating for balance {b} and weight {w}")
@@ -81,9 +74,15 @@ def main():
             sol = simulate_noisy_SNN(
                 model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
             )
+
             voltage_trace = sol.ys.network_state.V[:, 0]
             spikes = sol.ys.network_state.S[:, 0]
-            data.append((b, w, voltage_trace, spikes))
+            balance_ratio = compute_charge_ratio(
+                sol.ts,
+                sol.ys,
+                model,
+            )[0]
+            data.append((b, w, voltage_trace, spikes, balance_ratio))
 
     # Plot voltage traces
     fig, ax = plt.subplots(
@@ -140,7 +139,7 @@ def main():
         ax.set_title(title)
 
     # Heatmap of firing rates
-    fig, axs = plt.subplots(1, 3, figsize=(8, 6))
+    fig, axs = plt.subplots(2, 2, figsize=(8, 6))
     firing_rates = jnp.array(
         [
             [
@@ -168,9 +167,15 @@ def main():
             for b_idx in range(len(balances))
         ]
     )
+    balance_ratios = jnp.array(
+        [
+            [data[b_idx * len(weights) + w_idx][4] for w_idx in range(len(weights))]
+            for b_idx in range(len(balances))
+        ]
+    )
 
     make_heatmap_with_values(
-        axs[0],
+        axs[0][0],
         firing_rates,
         weights,
         balances,
@@ -180,7 +185,7 @@ def main():
         value_format="{:.1f}",
     )
     make_heatmap_with_values(
-        axs[1],
+        axs[0][1],
         mean_potentials * 1e3,
         weights,
         balances,
@@ -190,7 +195,7 @@ def main():
         value_format="{:.1f}",
     )
     make_heatmap_with_values(
-        axs[2],
+        axs[1][0],
         stddev_potentials * 1e3,
         weights,
         balances,
@@ -198,6 +203,16 @@ def main():
         "Synaptic Weight",
         "I/E Balance",
         value_format="{:.1f}",
+    )
+    make_heatmap_with_values(
+        axs[1][1],
+        balance_ratios,
+        weights,
+        balances,
+        "Measured I/E Balance",
+        "Synaptic Weight",
+        "Desired I/E Balance",
+        value_format="{:.2f}",
     )
     plt.tight_layout()
     plt.show()
