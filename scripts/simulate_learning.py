@@ -11,8 +11,8 @@ from adaptive_SNN.utils.solver import simulate_noisy_SNN
 
 def main():
     t0 = 0
-    t1 = 10
-    dt0 = 0.0001
+    t1 = 50
+    dt0 = 1e-4
     key = jr.PRNGKey(1)
     N_neurons = 1
     N_inputs = 2
@@ -61,10 +61,12 @@ def main():
         ),  # Desired E/I balance
     }
 
+    print("Running simulation...")
     sol = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
+        model, solver, t0, t1, dt0, init_state, save_every_n_steps=100, args=args
     )
 
+    print("Plotting results...")
     plot_learning_results(sol, model, t0, t1, dt0, args)
 
 

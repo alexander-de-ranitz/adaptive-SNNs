@@ -21,7 +21,7 @@ mpl.rcParams["savefig.directory"] = "../figures"
 def main():
     t0 = 0
     t1 = 1.0
-    dt0 = 0.0001
+    dt0 = 1e-4
     key = jr.PRNGKey(1)
     N_neurons = 1
     N_inputs = 2
@@ -45,14 +45,16 @@ def main():
 
     solver = dfx.EulerHeun()
 
-    rate = jnp.array([500, 125])  # firing rate in Hz
-    p = 1.0 - jnp.exp(-rate * dt0)
+    exc_rate = 5000
+    exc_to_inh_ratio = 4.0
+    inh_rate = exc_rate / exc_to_inh_ratio
+    rate = jnp.array([exc_rate, inh_rate])  # firing rate in Hz
 
-    balances = [0.05, 0.1, 0.5, 1, 5, 10]
-    weights = [1, 2, 5, 10]
+    balances = [0.05, 0.1, 0.5, 1, 2.0]
+    weight_factor = [0.1, 0.5, 0.65, 0.8, 1]
     data = []
     for b in balances:
-        for w in weights:
+        for w in weight_factor:
             init_state = eqx.tree_at(
                 lambda x: x.network_state.W,
                 model.initial,
@@ -63,8 +65,8 @@ def main():
 
             # Define args
             args = {
-                "get_input_spikes": lambda t, x, args: jr.bernoulli(
-                    jr.PRNGKey((t / dt0).astype(int)), p=p, shape=(N_inputs,)
+                "get_input_spikes": lambda t, x, args: jr.poisson(
+                    jr.PRNGKey((t / dt0).astype(int)), rate * dt0, shape=(N_inputs,)
                 ),
                 "get_desired_balance": lambda t, x, args: jnp.array(
                     b
@@ -86,11 +88,11 @@ def main():
 
     # Plot voltage traces
     fig, ax = plt.subplots(
-        len(balances), len(weights), figsize=(15, 10), sharex=True, sharey=True
+        len(balances), len(weight_factor), figsize=(15, 10), sharex=True, sharey=True
     )
     for b_idx, b in enumerate(balances):
-        for w_idx, w in enumerate(weights):
-            idx = b_idx * len(weights) + w_idx
+        for w_idx, w in enumerate(weight_factor):
+            idx = b_idx * len(weight_factor) + w_idx
             t = sol.ts
             V = data[idx][2]
             S = data[idx][3]
@@ -143,8 +145,8 @@ def main():
     firing_rates = jnp.array(
         [
             [
-                jnp.sum(data[b_idx * len(weights) + w_idx][3]) / (t1 - t0)
-                for w_idx in range(len(weights))
+                jnp.sum(data[b_idx * len(weight_factor) + w_idx][3]) / (t1 - t0)
+                for w_idx in range(len(weight_factor))
             ]
             for b_idx in range(len(balances))
         ]
@@ -152,8 +154,8 @@ def main():
     mean_potentials = jnp.array(
         [
             [
-                jnp.mean(data[b_idx * len(weights) + w_idx][2])
-                for w_idx in range(len(weights))
+                jnp.mean(data[b_idx * len(weight_factor) + w_idx][2])
+                for w_idx in range(len(weight_factor))
             ]
             for b_idx in range(len(balances))
         ]
@@ -161,15 +163,18 @@ def main():
     stddev_potentials = jnp.array(
         [
             [
-                jnp.std(data[b_idx * len(weights) + w_idx][2])
-                for w_idx in range(len(weights))
+                jnp.std(data[b_idx * len(weight_factor) + w_idx][2])
+                for w_idx in range(len(weight_factor))
             ]
             for b_idx in range(len(balances))
         ]
     )
     balance_ratios = jnp.array(
         [
-            [data[b_idx * len(weights) + w_idx][4] for w_idx in range(len(weights))]
+            [
+                data[b_idx * len(weight_factor) + w_idx][4]
+                for w_idx in range(len(weight_factor))
+            ]
             for b_idx in range(len(balances))
         ]
     )
@@ -177,7 +182,7 @@ def main():
     make_heatmap_with_values(
         axs[0][0],
         firing_rates,
-        weights,
+        weight_factor,
         balances,
         "Firing Rates (Hz)",
         "Synaptic Weight",
@@ -187,7 +192,7 @@ def main():
     make_heatmap_with_values(
         axs[0][1],
         mean_potentials * 1e3,
-        weights,
+        weight_factor,
         balances,
         "Mean Membrane Potential (mV)",
         "Synaptic Weight",
@@ -197,7 +202,7 @@ def main():
     make_heatmap_with_values(
         axs[1][0],
         stddev_potentials * 1e3,
-        weights,
+        weight_factor,
         balances,
         "Std Dev of Membrane Potential (mV)",
         "Synaptic Weight",
@@ -207,7 +212,7 @@ def main():
     make_heatmap_with_values(
         axs[1][1],
         balance_ratios,
-        weights,
+        weight_factor,
         balances,
         "Measured I/E Balance",
         "Synaptic Weight",
