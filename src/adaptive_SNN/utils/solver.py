@@ -1,3 +1,5 @@
+from typing import Callable
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -7,14 +9,16 @@ from jaxtyping import PyTree
 
 from adaptive_SNN.models.models import AgentSystem, NoisyNetwork
 
+
 def get_default_args():
     """Returns a dictionary of all zero default args for simulate_noisy_SNN."""
     return {
         "get_learning_rate": lambda t, x, args: 0.0,
         "get_input_spikes": lambda t, x, args: jnp.zeros_like(x.V),
         "get_desired_balance": lambda t, x, args: 0.0,
-        "RPE": jnp.array(0.0)
+        "RPE": jnp.array(0.0),
     }
+
 
 def simulate_noisy_SNN(
     model: NoisyNetwork | AgentSystem,
@@ -24,6 +28,7 @@ def simulate_noisy_SNN(
     dt0: float,
     y0: PyTree,
     save_every_n_steps: int = 1,  # TODO: use Diffrax' SaveAt class instead for better compatibility
+    save_fn: Callable = None,
     args: PyTree = None,
     key: jr.PRNGKey = jr.PRNGKey(0),
 ):
@@ -43,6 +48,7 @@ def simulate_noisy_SNN(
         dt0: Nominal step size.
         y0: Initial PyTree state.
         save_every_n_steps: After how many steps to save state (>=1).
+        save_fn: Optional function `fn(y) -> state_to_save' used to determine how to save the state (e.g. only save part of the current state, or some summary statistics). If None, saves the full state.
         args: Extra args passed to solver/model (PyTree or None).
         key: Optional PRNG key. If None, a default key is used.
 
@@ -51,6 +57,10 @@ def simulate_noisy_SNN(
     """
     # Args are the default args, overridden by any user-provided args
     args = {**get_default_args(), **(args or {})}
+
+    # Default save function is identity
+    if save_fn is None:
+        save_fn = lambda y: y
 
     # Compute time grid
     n_steps = jnp.floor((t1 - t0) / dt0).astype(int)
@@ -62,18 +72,23 @@ def simulate_noisy_SNN(
     n_saves = save_times.size
 
     # Preallocate storage for results
-    ys = jax.tree_util.tree_map(lambda x: jnp.empty((n_saves, *x.shape), x.dtype), y0)
+    y0_to_save = save_fn(y0)
+    ys = jax.tree_util.tree_map(
+        lambda x: jnp.empty((n_saves, *x.shape), x.dtype), y0_to_save
+    )
 
     terms = model.terms(key)
 
     @eqx.filter_jit
-    def run_simulation(times, y0, ys, save_mask, terms, args, model, solver):
+    def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver):
         """Runs the simulation loop."""
 
         # Utility function to save the current state
-        def save_state(carry):
+        def save_state(carry, save_fn):
             y, ys, save_index = carry
-            ys = jax.tree_util.tree_map(lambda arr, v: arr.at[save_index].set(v), ys, y)
+            ys = jax.tree_util.tree_map(
+                lambda arr, v: arr.at[save_index].set(v), ys, save_fn(y)
+            )
             return (y, ys, save_index + 1)
 
         def step(i, carry):
@@ -89,7 +104,7 @@ def simulate_noisy_SNN(
             # Is save_mask true at this index? If so, save, else do nothing
             y, ys, save_index = jax.lax.cond(
                 save_mask[i + 1],  # + 1 because we already stepped
-                save_state,
+                lambda c: save_state(c, save_fn),
                 lambda c: c,
                 (y, ys, save_index),
             )
@@ -98,7 +113,7 @@ def simulate_noisy_SNN(
 
         # Save the initial state if needed
         y0, ys, save_index = jax.lax.cond(
-            save_mask[0], save_state, lambda c: c, (y0, ys, 0)
+            save_mask[0], lambda c: save_state(c, save_fn), lambda c: c, (y0, ys, 0)
         )
 
         # Loop over all intervals
@@ -107,7 +122,7 @@ def simulate_noisy_SNN(
         )
         return ys
 
-    ys = run_simulation(times, y0, ys, save_mask, terms, args, model, solver)
+    ys = run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver)
 
     return Solution(
         t0=t0,
