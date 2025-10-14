@@ -690,7 +690,7 @@ def test_force_balance_mini():
     balance_after = model.compute_balance(0, state, args=args)
     assert jnp.allclose(balance_after, args["get_desired_balance"](0, state, args))
     assert state.W[0][2] == 2.0  # Inh weight is rescaled
-    assert state.W[0][0] == 0.0  # No self connection
+    assert state.W[0][0] == -jnp.inf  # No self connection
     assert state.W[0][1] == 1.0 and state.W[0][1] == 1.0  # Exc weights unchanged
 
 
@@ -734,7 +734,11 @@ def test_synaptic_delays():
         [0, 1, 1, 0, 0, 0], dtype=bool
     )  # Last two are input neurons
     init_state = make_baseline_state(
-        model, V=voltages, W=jnp.ones((N_neurons, N_neurons + N_inputs))
+        model,
+        V=voltages,
+        W=jnp.fill_diagonal(
+            jnp.ones((N_neurons, N_neurons + N_inputs)), -jnp.inf, inplace=False
+        ),
     )  # Set some voltages above threshold to trigger spikes, set all w=1
     args = make_default_args(N_neurons, N_inputs)
 

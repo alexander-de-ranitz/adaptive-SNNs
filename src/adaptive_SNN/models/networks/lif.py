@@ -19,7 +19,7 @@ class LIFState(eqx.Module):
     Attributes:
         V: Membrane potentials (N_neurons,)
         S: Spike vector (N_neurons + N_inputs,)
-        W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs)
+        W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs). -inf indicates no connection
         G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
         time_since_last_spike: Time since last spike for each neuron (N_neurons,)
         spike_buffer: Circular buffer of past spikes (buffer_size, N_neurons + N_inputs)
@@ -40,8 +40,6 @@ class LIFNetwork(NeuronModelABC):
 
     The state consists of the membrane potentials, spikes, weights, and synaptic conductances of all neurons.
     """
-
-    # TODO: Add refractory period and synaptic delays
 
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_capacitance: float = 250 * 1e-12  # pF
@@ -101,9 +99,11 @@ class LIFNetwork(NeuronModelABC):
         neuron_types = jnp.where(
             jr.bernoulli(subkey, 0.8, (N_neurons,)), True, False
         )  # 80% excitatory, 20% inhibitory
+
         # If no input neuron types provided, assume all input neurons are excitatory
         if input_neuron_types is None:
             input_neuron_types = jnp.ones((N_inputs,), dtype=bool)
+
         self.excitatory_mask = jnp.concatenate(
             [neuron_types, input_neuron_types], dtype=bool
         )
@@ -122,6 +122,7 @@ class LIFNetwork(NeuronModelABC):
             min=0.5 * self.mean_synaptic_delay,
             max=2.0 * self.mean_synaptic_delay,
         )  # Avoid too small or too large
+
         self.synaptic_delay_matrix = delays
         self.buffer_size = (jnp.ceil(jnp.max(delays) / self.dt) + 1).astype(jnp.int32)
 
@@ -139,14 +140,17 @@ class LIFNetwork(NeuronModelABC):
         key, key_2 = jr.split(key)
 
         # Initialize weights with random sparse connectivity
-        weights = 1 + 0.1 * jr.normal(
-            key, (self.N_neurons, self.N_neurons + self.N_inputs)
+        weights = jnp.abs(
+            1 + 0.1 * jr.normal(key, (self.N_neurons, self.N_neurons + self.N_inputs))
         ) * jr.bernoulli(
             key_2,
             self.connection_prob,
             (self.N_neurons, self.N_neurons + self.N_inputs),
         )
         weights = jnp.fill_diagonal(weights, 0.0, inplace=False)  # No self-connections
+        weights = jnp.where(
+            weights == 0.0, -jnp.inf, weights
+        )  # Non existing connections have weight -inf
 
         if (
             self.fully_connected_input and self.N_inputs > 0
@@ -195,22 +199,28 @@ class LIFNetwork(NeuronModelABC):
         leak_current = -self.leak_conductance * (V - self.resting_potential)
 
         # Compute E/I currents from recurrent connections
-        weighted_conductances = W * G
-        inhibitory_conductances = jnp.sum(
+        weighted_conductances = (
+            jnp.where(W == -jnp.inf, 0.0, W) * G
+        )  # For non-existing connections, set weighted conductance to 0
+        total_I_conductances = jnp.sum(
             weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
         )
-        excitatory_conductances = jnp.sum(
+        total_E_conductances = jnp.sum(
             weighted_conductances * self.excitatory_mask[None, :], axis=1
         )
 
         # Get noise from args and add to total conductances
-        inhibitory_conductances = inhibitory_conductances + args["inhibitory_noise"]
-        excitatory_conductances = excitatory_conductances + args["excitatory_noise"]
+        total_I_conductances = jnp.clip(
+            total_I_conductances + args["inhibitory_noise"], min=0.0
+        )  # Ensure non-negative conductances
+        total_E_conductances = jnp.clip(
+            total_E_conductances + args["excitatory_noise"], min=0.0
+        )
 
         # Compute total recurrent current
-        recurrent_current = inhibitory_conductances * (
+        recurrent_current = total_I_conductances * (
             self.reversal_potential_I - V
-        ) + excitatory_conductances * (self.reversal_potential_E - V)
+        ) + total_E_conductances * (self.reversal_potential_E - V)
 
         dV = (leak_current + recurrent_current) / self.membrane_capacitance
 
@@ -235,6 +245,9 @@ class LIFNetwork(NeuronModelABC):
             * (E_noise / self.synaptic_increment)
             * (G / self.synaptic_increment)
         )  # Since W is in arbitrary units (not nS), scale by synaptic increment to get a sensible scale
+        dW = jnp.where(
+            W == -jnp.inf, 0.0, dW
+        )  # No weight change for non-existing connections
 
         dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
 
@@ -319,7 +332,16 @@ class LIFNetwork(NeuronModelABC):
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         state = self.spike_and_reset(t, x, args)
         state = self.force_balanced_weights(t, state, args)
+        state = self.clip_weights(t, state, args)
         return state
+
+    def clip_weights(self, t, state, args):
+        """Clip weights to be non-negative."""
+        return eqx.tree_at(
+            lambda s: s.W,
+            state,
+            jnp.clip(state.W, min=0.0),
+        )
 
     def get_delayed_spikes(self, state: LIFState) -> Array:
         """Retrieve spikes from buffer according to delay matrix.
@@ -363,7 +385,7 @@ class LIFNetwork(NeuronModelABC):
             lambda s: s.spike_buffer,
             state,
             state.spike_buffer.at[buffer_idx].set(spikes),
-        )  # For JIT compatibility
+        )
         new_buffer = state.spike_buffer
         new_buffer_index = jnp.round(
             (state.buffer_index + 1) % self.buffer_size
@@ -371,8 +393,12 @@ class LIFNetwork(NeuronModelABC):
 
         # Get delayed spikes and update conductances based on delayed activity
         delayed_spikes = self.get_delayed_spikes(state)
-        G_new = G + delayed_spikes * self.synaptic_increment
-        G_new = jnp.fill_diagonal(G_new, 0.0, inplace=False)  # Avoid self-connections
+        conductance_values = (
+            G + delayed_spikes * self.synaptic_increment
+        )  # Raw conductance update, does not consider connectivity
+        G_new = jnp.where(
+            W == -jnp.inf, 0.0, conductance_values
+        )  # Only update conductances for existing connections, else set to 0
 
         time_since_last_spike = jnp.where(
             recurrent_spikes > 0, 0.0, state.time_since_last_spike
@@ -384,7 +410,9 @@ class LIFNetwork(NeuronModelABC):
 
     def compute_balance(self, t, state, args):
         """Compute the ratio of total inhibitory to excitatory input weights for each neuron."""
-        weights = state.W
+        weights = jnp.where(
+            state.W == -jnp.inf, 0.0, state.W
+        )  # Treat non-existing connections as weight 0 for balance computation
         excitatory_weights = jnp.sum(weights * self.excitatory_mask[None, :], axis=1)
         inhibitory_weights = jnp.sum(
             weights * jnp.invert(self.excitatory_mask[None, :]), axis=1
