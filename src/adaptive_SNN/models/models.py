@@ -25,6 +25,8 @@ class LIFState(eqx.Module):
         W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs)
         G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
         time_since_last_spike: Time since last spike for each neuron (N_neurons,)
+        spike_buffer: Circular buffer of past spikes (buffer_size, N_neurons + N_inputs)
+        buffer_index: Current write position in spike buffer (scalar int)
     """
 
     V: Array
@@ -32,6 +34,8 @@ class LIFState(eqx.Module):
     W: Array
     G: Array
     time_since_last_spike: Array
+    spike_buffer: Array
+    buffer_index: Array  # Scalar array to maintain JAX compatibility
 
 
 class NeuronModel(ABC, eqx.Module):
@@ -112,6 +116,7 @@ class LIFNetwork(NeuronModel):
     firing_threshold: float = -50.0 * 1e-3  # mV
     V_reset: float = -60.0 * 1e-3  # mV
     refractory_period: float = 2.0 * 1e-3  # ms
+    mean_synaptic_delay: float = 1.5 * 1e-3  # ms
 
     input_weight: float  # Weight of input spikes
     fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
@@ -119,9 +124,15 @@ class LIFNetwork(NeuronModel):
     N_inputs: int
     excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
     synaptic_time_constants: Array  # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
+    synaptic_delay_matrix: (
+        Array  # Matrix of synaptic delays (N_neurons, N_neurons + N_inputs) in seconds
+    )
+    buffer_size: int  # Size of spike history buffer
+    dt: float  # Timestep size for simulation in seconds, used for delay buffer
 
     def __init__(
         self,
+        dt,
         N_neurons: int,
         N_inputs: int = 0,
         input_neuron_types: Array = None,  # Binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
@@ -136,16 +147,20 @@ class LIFNetwork(NeuronModel):
             N_inputs: Number of input neurons
             input_neuron_types: Binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory). If None, all input neurons are excitatory.
             fully_connected_input: If True, all input neurons connect to all neurons with weight input_weight
+            input_weight: Weight of input spikes
+            dt: Timestep size for simulation (s)
             key: JAX random key for weight initialization
         """
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
         self.fully_connected_input = fully_connected_input
         self.input_weight = input_weight
+        self.dt = dt
 
+        key, subkey = jr.split(key)
         # Set neuron types
         neuron_types = jnp.where(
-            jr.bernoulli(key, 0.8, (N_neurons,)), True, False
+            jr.bernoulli(subkey, 0.8, (N_neurons,)), True, False
         )  # 80% excitatory, 20% inhibitory
         # If no input neuron types provided, assume all input neurons are excitatory
         if input_neuron_types is None:
@@ -156,6 +171,20 @@ class LIFNetwork(NeuronModel):
         self.synaptic_time_constants = jnp.where(
             self.excitatory_mask, self.tau_E, self.tau_I
         )
+
+        key, subkey = jr.split(key)
+        delays = self.mean_synaptic_delay * (
+            1.0
+            + 0.1
+            * jr.normal(subkey, shape=(self.N_neurons, self.N_neurons + self.N_inputs))
+        )
+        delays = jnp.clip(
+            delays,
+            min=0.5 * self.mean_synaptic_delay,
+            max=2.0 * self.mean_synaptic_delay,
+        )  # Avoid too small or too large
+        self.synaptic_delay_matrix = delays
+        self.buffer_size = (jnp.ceil(jnp.max(delays) / self.dt) + 1).astype(jnp.int32)
 
     @property
     def initial(self, key: jr.PRNGKey = jr.PRNGKey(0)):
@@ -190,12 +219,21 @@ class LIFNetwork(NeuronModel):
         time_since_last_spike = (
             jnp.ones((self.N_neurons,), dtype=default_float) * jnp.inf
         )
+
+        # Initialize spike delay buffer
+        spike_buffer = jnp.zeros(
+            (self.buffer_size, self.N_neurons + self.N_inputs), dtype=default_float
+        )
+        buffer_index = jnp.array(0, dtype=jnp.int32)
+
         return LIFState(
             V=V_init,
             S=spikes_init,
             W=weights,
             G=conductance_init,
             time_since_last_spike=time_since_last_spike,
+            spike_buffer=spike_buffer,
+            buffer_index=buffer_index,
         )
 
     def drift(self, t, state: LIFState, args) -> LIFState:
@@ -268,7 +306,16 @@ class LIFNetwork(NeuronModel):
         dV = jnp.where(
             state.time_since_last_spike < self.refractory_period, 0.0, dV
         )  # Neurons in refractory period do not change their membrane potential
-        return LIFState(dV, dS, dW, dGdt, d_time_since_last_spike)
+
+        # Buffer fields have zero derivative (updated discretely in spike_and_reset)
+        d_spike_buffer = jnp.zeros_like(state.spike_buffer)
+        d_buffer_index = jnp.zeros_like(
+            state.buffer_index, dtype=state.buffer_index.dtype
+        )
+
+        return LIFState(
+            dV, dS, dW, dGdt, d_time_since_last_spike, d_spike_buffer, d_buffer_index
+        )
 
     def diffusion(self, t, state: LIFState, args) -> LIFState:
         # Our noise_shape is a pytree of 1d and 2d arrays. Diffusion must have compatible shapes.
@@ -286,6 +333,12 @@ class LIFNetwork(NeuronModel):
                 ElementWiseMul(
                     jnp.zeros_like(state.time_since_last_spike, dtype=default_float)
                 ),  # time_since_last_spike noise
+                ElementWiseMul(
+                    jnp.zeros_like(state.spike_buffer, dtype=default_float)
+                ),  # spike_buffer noise
+                ElementWiseMul(
+                    jnp.zeros_like(state.buffer_index, dtype=state.buffer_index.dtype)
+                ),  # buffer_index noise
             )
         )
 
@@ -305,6 +358,11 @@ class LIFNetwork(NeuronModel):
                 dtype=default_float,
             ),
             jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
+            jax.ShapeDtypeStruct(
+                shape=(self.buffer_size, self.N_neurons + self.N_inputs),
+                dtype=default_float,
+            ),
+            jax.ShapeDtypeStruct(shape=(), dtype=default_float),
         )
 
     def terms(self, key):
@@ -324,6 +382,32 @@ class LIFNetwork(NeuronModel):
         state = self.force_balanced_weights(t, state, args)
         return state
 
+    def get_delayed_spikes(self, state: LIFState) -> Array:
+        """Retrieve spikes from buffer according to delay matrix.
+
+        Returns:
+            Array of shape (N_neurons, N_neurons + N_inputs) with delayed spike values
+        """
+        # Cast buffer_index to int32 for indexing operations
+        buffer_idx = jnp.round(state.buffer_index).astype(jnp.int32)
+
+        # For each synapse, compute which buffer index to read from
+        # Convert delays from seconds to buffer timesteps
+        delay_steps = jnp.round(self.synaptic_delay_matrix / self.dt).astype(jnp.int32)
+
+        # buffer_index points to most recent, we need to go back by delay amount
+        read_indices = ((buffer_idx - delay_steps) % self.buffer_size).astype(jnp.int32)
+
+        # Gather spikes from buffer for each synapse
+        # Use vmap to vectorize over neurons
+        def get_neuron_inputs(neuron_idx):
+            return state.spike_buffer[
+                read_indices[neuron_idx], jnp.arange(self.N_neurons + self.N_inputs)
+            ]
+
+        delayed_spikes = jax.vmap(get_neuron_inputs)(jnp.arange(self.N_neurons))
+        return delayed_spikes
+
     def spike_and_reset(self, t, state: LIFState, args):
         V, _, W, G = state.V, state.S, state.W, state.G
         recurrent_spikes = (V > self.firing_threshold).astype(V.dtype)
@@ -331,12 +415,33 @@ class LIFNetwork(NeuronModel):
 
         input_sp = args["get_input_spikes"](t, state, args)
         spikes = jnp.concatenate((recurrent_spikes, input_sp), dtype=V.dtype)
-        G_new = G + spikes[None, :] * self.synaptic_increment
+
+        # Cast buffer_index to int32 to ensure it's an integer for indexing
+        buffer_idx = jnp.round(state.buffer_index).astype(jnp.int32)
+
+        # Update spike buffer with current spikes
+        state = eqx.tree_at(
+            lambda s: s.spike_buffer,
+            state,
+            state.spike_buffer.at[buffer_idx].set(spikes),
+        )  # For JIT compatibility
+        new_buffer = state.spike_buffer
+        new_buffer_index = jnp.round(
+            (state.buffer_index + 1) % self.buffer_size
+        ).astype(jnp.int32)
+
+        # Get delayed spikes and update conductances based on delayed activity
+        delayed_spikes = self.get_delayed_spikes(state)
+        G_new = G + delayed_spikes * self.synaptic_increment
         G_new = jnp.fill_diagonal(G_new, 0.0, inplace=False)  # Avoid self-connections
+
         time_since_last_spike = jnp.where(
             recurrent_spikes > 0, 0.0, state.time_since_last_spike
         )  # Reset time since last spike to 0 for neurons that spiked
-        return LIFState(V_new, spikes, W, G_new, time_since_last_spike)
+
+        return LIFState(
+            V_new, spikes, W, G_new, time_since_last_spike, new_buffer, new_buffer_index
+        )
 
     def compute_balance(self, t, state, args):
         """Compute the ratio of total inhibitory to excitatory input weights for each neuron."""
