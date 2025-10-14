@@ -114,7 +114,7 @@ class MixedPyTreeOperator(lx.AbstractLinearOperator):
 
         return jax.tree.map(
             get_out_structure,
-            self.pytre,
+            self.pytree,
             is_leaf=lambda x: isinstance(x, lx.AbstractLinearOperator)
             or isinstance(x, jnp.ndarray),
         )

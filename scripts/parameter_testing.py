@@ -5,15 +5,13 @@ import matplotlib as mpl
 from jax import numpy as jnp
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import (
+from adaptive_SNN.models import (
     OUP,
     LIFNetwork,
     NoisyNetwork,
 )
-from adaptive_SNN.utils.metrics import (
-    compute_charge_ratio,
-)
-from adaptive_SNN.utils.solver import simulate_noisy_SNN
+from adaptive_SNN.models.metrics import compute_charge_ratio
+from adaptive_SNN.solver import simulate_noisy_SNN
 
 mpl.rcParams["savefig.directory"] = "../figures"
 
@@ -30,6 +28,7 @@ def main():
     neuron_model = LIFNetwork(
         N_neurons=N_neurons,
         N_inputs=N_inputs,
+        dt=dt0,
         input_neuron_types=jnp.array([1, 0]),
         fully_connected_input=True,
         key=key,

@@ -3,7 +3,7 @@ import jax.random as jr
 from jax import numpy as jnp
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import OUP
+from adaptive_SNN.models import OUP
 
 
 def main():
