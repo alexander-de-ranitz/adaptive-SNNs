@@ -7,7 +7,7 @@ import jax.random as jr
 from diffrax import RESULTS, Euler, Solution
 from jaxtyping import PyTree
 
-from adaptive_SNN.models.models import AgentSystem, NoisyNetwork
+from adaptive_SNN.models import AgentSystem, NoisyNetwork
 
 
 def get_default_args():

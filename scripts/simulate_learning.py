@@ -2,11 +2,11 @@ import diffrax as dfx
 import jax.random as jr
 from jax import numpy as jnp
 
+from adaptive_SNN.models import OUP, AgentSystem, LIFNetwork, NoisyNetwork
 from adaptive_SNN.models.environment import EnvironmentModel
-from adaptive_SNN.models.models import OUP, AgentSystem, LIFNetwork, NoisyNetwork
 from adaptive_SNN.models.reward import RewardModel
-from adaptive_SNN.utils.plotting import plot_learning_results
-from adaptive_SNN.utils.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.visualization.plotting import plot_learning_results
 
 
 def main():
@@ -21,6 +21,7 @@ def main():
     neuron_model = LIFNetwork(
         N_neurons=N_neurons,
         N_inputs=N_inputs,
+        dt=dt0,
         input_neuron_types=jnp.array([1.0, 0.0]),
         fully_connected_input=True,
         input_weight=10.0,

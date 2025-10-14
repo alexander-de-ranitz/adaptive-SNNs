@@ -1,124 +1,16 @@
 import diffrax as dfx
-import jax
 import jax.numpy as jnp
 import jax.random as jr
-from diffrax import Solution
-from jaxtyping import PyTree
+from helpers import (
+    DeterministicNoisyNeuronModel,
+    DeterministicOUP,
+    allclose_pytree,
+    get_non_inf_ts_ys,
+    make_default_args,
+)
 
-from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNetwork, NoisyNetworkState
-from adaptive_SNN.utils.solver import simulate_noisy_SNN
-
-
-def _default_args(N_neurons, N_inputs):
-    return {
-        "excitatory_noise": jnp.zeros((N_neurons,)),
-        "inhibitory_noise": jnp.zeros((N_neurons,)),
-        "RPE": jnp.array([0.0]),
-        "get_input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
-        "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
-        "get_desired_balance": lambda t, x, a: 0.0,  # = no balancing
-    }
-
-
-def get_non_inf_ts_ys(sol: Solution) -> tuple[PyTree, PyTree]:
-    """Get all non-inf values of ts and ys from a diffrax Solution."""
-    ts = sol.ts
-    ys = sol.ys
-    mask = ~jnp.isinf(ts)
-    ts_clean = ts[mask]
-    ys_clean = jax.tree.map(lambda y: y[mask], ys)
-    return ts_clean, ys_clean
-
-
-def allclose_pytree(x: PyTree, y: PyTree, atol=1e-6):
-    """Check if two PyTrees are allclose."""
-    return jax.tree.all(jax.tree.map(lambda a, b: jnp.allclose(a, b, atol=atol), x, y))
-
-
-class DeterministicOUP(OUP):
-    """This class is identical to OUP, except it uses a VirtualBrownianTree for the noise terms.
-    This makes the noise deterministic given the same key, which is useful for testing."""
-
-    t0: float
-    t1: float
-
-    def __init__(
-        self,
-        theta: float = 1.0,
-        noise_scale: float = 1,
-        dim: int = 1,
-        t0: float = 0.0,
-        t1: float = 1.0,
-    ):
-        super().__init__(theta=theta, noise_scale=noise_scale, dim=dim)
-        self.t0 = t0
-        self.t1 = t1
-
-    def terms(self, key):
-        process_noise = dfx.VirtualBrownianTree(
-            self.t0,
-            self.t1,
-            shape=self.noise_shape,
-            key=key,
-            levy_area=dfx.SpaceTimeLevyArea,
-            tol=1e-3,
-        )
-        return dfx.MultiTerm(
-            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
-        )
-
-
-class DeterministicNoisyNeuronModel(NoisyNetwork):
-    """This class is identical to NoisyNeuronModel, except it uses a VirtualBrownianTree for the noise terms.
-    This makes the noise deterministic given the same key, which is useful for testing."""
-
-    t0: float
-    t1: float
-
-    def __init__(
-        self,
-        neuron_model,
-        noise_I_model,
-        noise_E_model,
-        t0: float = 0.0,
-        t1: float = 1.0,
-    ):
-        super().__init__(neuron_model, noise_I_model, noise_E_model)
-        self.t0 = t0
-        self.t1 = t1
-
-    def terms(self, key):
-        process_noise = dfx.VirtualBrownianTree(
-            self.t0,
-            self.t1,
-            shape=self.noise_shape,
-            key=key,
-            levy_area=dfx.SpaceTimeLevyArea,
-            tol=1e-3,
-        )
-        return dfx.MultiTerm(
-            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
-        )
-
-
-def _make_noiseless_network(
-    N_neurons: int, N_inputs: int, dt=1e-4, key: jr.PRNGKey = jr.PRNGKey(0)
-) -> NoisyNetwork:
-    """Helper to build a NoisyNeuronModel with no recurrent coupling and no OU diffusion.
-
-    This keeps the dynamics simple/predictable for testing the solver wrapper.
-    """
-    network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt, key=key)
-
-    # OU processes with zero diffusion so their states remain constant (deterministic)
-    noise_E = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
-    noise_I = OUP(theta=1.0, noise_scale=0.0, dim=N_neurons)
-
-    return NoisyNetwork(
-        neuron_model=network,
-        noise_I_model=noise_I,
-        noise_E_model=noise_E,
-    )
+from adaptive_SNN.models import LIFNetwork, NoisyNetworkState
+from adaptive_SNN.solver import simulate_noisy_SNN
 
 
 def test_solver_timesteps():
@@ -127,12 +19,28 @@ def test_solver_timesteps():
     t0, t1, dt0 = 0.0, 1.0, 0.1
 
     key = jr.PRNGKey(0)
-    model = _make_noiseless_network(N_neurons, N_inputs, dt0, key)
+
+    network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key)
+
+    noise_E = DeterministicOUP(
+        theta=1.0, noise_scale=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
+    )
+    noise_I = DeterministicOUP(
+        theta=1.0, noise_scale=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
+    )
+
+    model = DeterministicNoisyNeuronModel(
+        neuron_model=network,
+        noise_I_model=noise_I,
+        noise_E_model=noise_E,
+        t0=t0,
+        t1=t1 + dt0,
+    )
 
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.Euler()
-    args = _default_args(N_neurons, N_inputs)
+    args = make_default_args(N_neurons, N_inputs)
 
     # Our method
     save_every = 1
@@ -192,7 +100,7 @@ def test_solver_output():
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.Euler()
-    args = _default_args(N_neurons, N_inputs)
+    args = make_default_args(N_neurons, N_inputs)
 
     # Define a save function that extracts only the relevant parts of the state. Necessary because
     # diffrax does not update the spike buffer in the same way as our custom solver.

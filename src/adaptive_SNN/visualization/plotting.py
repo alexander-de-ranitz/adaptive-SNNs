@@ -3,7 +3,7 @@ import matplotlib as mpl
 from diffrax import Solution
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.models import (
+from adaptive_SNN.models import (
     AgentSystem,
     LIFNetwork,
     NoisyNetwork,

@@ -1,10 +1,8 @@
 from jax import numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.models import (
-    LIFNetwork,
-    NoisyNetwork,
-)
+from adaptive_SNN.models.networks.lif import LIFNetwork
+from adaptive_SNN.models.networks.noisy_network import NoisyNetwork
 
 
 def compute_CV_ISI(spikes) -> Array:
@@ -57,8 +55,8 @@ def compute_conductance_ratio(t, state, model) -> Array:
         base_network = model
         network_state = state
 
-        noise_E = jnp.zeros_like(base_network.N_neurons)
-        noise_I = jnp.zeros_like(base_network.N_neurons)
+        noise_E = jnp.zeros(base_network.N_neurons)
+        noise_I = jnp.zeros(base_network.N_neurons)
     elif isinstance(model, NoisyNetwork):
         base_network = model.base_network
         network_state = state.network_state
@@ -66,7 +64,6 @@ def compute_conductance_ratio(t, state, model) -> Array:
         noise_E = state.noise_E_state
         noise_I = state.noise_I_state
 
-    N_neurons = base_network.N_neurons
     W = network_state.W
     G = network_state.G
     exc_mask = base_network.excitatory_mask
@@ -103,8 +100,8 @@ def compute_charge_ratio(t, state, model) -> Array:
         base_network: LIFNetwork = model
         network_state = state
 
-        noise_E = jnp.zeros_like(base_network.N_neurons)
-        noise_I = jnp.zeros_like(base_network.N_neurons)
+        noise_E = jnp.zeros(base_network.N_neurons)
+        noise_I = jnp.zeros(base_network.N_neurons)
     elif isinstance(model, NoisyNetwork):
         base_network: LIFNetwork = model.base_network
         network_state = state.network_state

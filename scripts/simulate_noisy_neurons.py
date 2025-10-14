@@ -2,9 +2,9 @@ import diffrax as dfx
 import jax.random as jr
 from jax import numpy as jnp
 
-from adaptive_SNN.models.models import OUP, LIFNetwork, NoisyNetwork
-from adaptive_SNN.utils.plotting import plot_simulate_SNN_results
-from adaptive_SNN.utils.solver import simulate_noisy_SNN
+from adaptive_SNN.models import OUP, LIFNetwork, NoisyNetwork
+from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.visualization.plotting import plot_simulate_SNN_results
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
     N_neurons = 1
     # Set up models
     neuron_model = LIFNetwork(
-        N_neurons=N_neurons, N_inputs=0, fully_connected_input=True, key=key
+        N_neurons=N_neurons, N_inputs=0, fully_connected_input=True, key=key, dt=dt0
     )
     key, _ = jr.split(key)
     noise_E_model = OUP(theta=50.0, noise_scale=50e-9, mean=25 * 1e-9, dim=N_neurons)

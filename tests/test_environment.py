@@ -2,7 +2,7 @@ import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 
-from adaptive_SNN.models.environment import EnvironmentModel
+from adaptive_SNN.models import EnvironmentModel
 
 
 def test_environment():

@@ -2,137 +2,18 @@ import diffrax as dfx
 import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jr
-
-from adaptive_SNN.models.models import (
-    OUP,
-    LIFNetwork,
-    LIFState,
-    NoisyNetwork,
-    NoisyNetworkState,
+from helpers import (
+    make_baseline_state,
+    make_default_args,
+    make_LIF_model,
+    make_Noisy_LIF_model,
+    make_noisy_state,
+    make_OUP_model,
 )
 
-# ============================================================================
-# Model Creation Helpers
-# ============================================================================
-
-
-def make_LIF_model(
-    N_neurons=10,
-    N_inputs=3,
-    dt=0.1e-3,
-    input_neuron_types=None,
-    fully_connected_input=True,
-    input_weight=1.0,
-    key=jr.PRNGKey(0),
-):
-    """Create a LIFNetwork with configurable parameters."""
-    return LIFNetwork(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        dt=dt,
-        input_neuron_types=input_neuron_types,
-        fully_connected_input=fully_connected_input,
-        input_weight=input_weight,
-        key=key,
-    )
-
-
-def make_OUP_model(dim=3, theta=1.0, noise_scale=0.3, mean=0.0):
-    """Create an Ornstein-Uhlenbeck Process model with configurable parameters."""
-    return OUP(theta=theta, noise_scale=noise_scale, mean=mean, dim=dim)
-
-
-def make_Noisy_LIF_model(
-    N_neurons=10, N_inputs=3, noise_scale=0.0, theta=1.0, dt=0.1e-3, key=jr.PRNGKey(0)
-):
-    """Create a NoisyNetwork with LIF neurons and OU noise processes."""
-    network = make_LIF_model(N_neurons, N_inputs, dt=dt, key=key)
-    noise_E = OUP(theta=theta, noise_scale=noise_scale, dim=N_neurons)
-    noise_I = OUP(theta=theta, noise_scale=noise_scale, dim=N_neurons)
-    return NoisyNetwork(
-        neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
-    )
-
-
-# ============================================================================
-# State Creation Helpers
-# ============================================================================
-
-
-def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
-    """Create a baseline LIFState with sensible defaults.
-
-    Default state has:
-    - V at resting potential
-    - All spikes, weights, conductances at zero
-    - time_since_last_spike at infinity
-    - Empty spike buffer
-
-    Args:
-        model: LIFNetwork model to create state for
-        **overrides: Dict of field names and values to override defaults
-                     e.g., V=custom_voltages, W=custom_weights
-    """
-    N_neurons = model.N_neurons
-    N_inputs = model.N_inputs
-
-    state = LIFState(
-        V=jnp.ones((N_neurons,)) * model.resting_potential,
-        S=jnp.zeros((N_neurons + N_inputs,)),
-        W=jnp.zeros((N_neurons, N_neurons + N_inputs)),
-        G=jnp.zeros((N_neurons, N_neurons + N_inputs)),
-        time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
-        spike_buffer=jnp.zeros((model.buffer_size, N_neurons + N_inputs)),
-        buffer_index=jnp.array(0, dtype=jnp.int32),
-    )
-
-    # Apply overrides using eqx.tree_at
-    for field_name, value in overrides.items():
-        state = eqx.tree_at(lambda s: getattr(s, field_name), state, value)
-
-    return state
-
-
-def make_noisy_state(
-    network_state: LIFState, noise_E=None, noise_I=None
-) -> NoisyNetworkState:
-    """Create a NoisyNetworkState from a LIFState and optional noise states."""
-    N_neurons = network_state.V.shape[0]
-    if noise_E is None:
-        noise_E = jnp.zeros((N_neurons,))
-    if noise_I is None:
-        noise_I = jnp.zeros((N_neurons,))
-    return NoisyNetworkState(network_state, noise_E, noise_I)
-
-
-# ============================================================================
-# Args Creation Helpers
-# ============================================================================
-
-
-def make_default_args(N_neurons, N_inputs, **overrides):
-    """Create default args dict with sensible defaults.
-
-    Args:
-        N_neurons: Number of neurons
-        N_inputs: Number of input neurons
-        **overrides: Dict of arg names to override, e.g., RPE=1.5
-    """
-    args = {
-        "excitatory_noise": jnp.zeros((N_neurons,)),
-        "inhibitory_noise": jnp.zeros((N_neurons,)),
-        "RPE": jnp.array([0.0]),
-        "get_input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
-        "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
-        "get_desired_balance": lambda t, x, a: 0.0,
-    }
-    args.update(overrides)
-    return args
-
-
-# ============================================================================
-# Common Assertion Helpers
-# ============================================================================
+from adaptive_SNN.models import (
+    LIFState,
+)
 
 
 def assert_state_shapes(state: LIFState, N_neurons: int, N_inputs: int):
