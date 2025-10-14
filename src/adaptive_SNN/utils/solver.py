@@ -87,7 +87,7 @@ def simulate_noisy_SNN(
         def save_state(carry, save_fn):
             y, ys, save_index = carry
             ys = jax.tree_util.tree_map(
-                lambda arr, v: arr.at[save_index].set(v), save_fn(ys), y
+                lambda arr, v: arr.at[save_index].set(v), ys, save_fn(y)
             )
             return (y, ys, save_index + 1)
 
