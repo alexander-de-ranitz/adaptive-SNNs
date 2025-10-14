@@ -42,3 +42,6 @@ coverage.xml
 .vscode/
 *.swp
 *.swo
+
+# Other
+.ruff_cache/
