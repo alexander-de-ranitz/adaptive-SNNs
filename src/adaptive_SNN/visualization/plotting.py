@@ -149,30 +149,52 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
     ax.set_title("Total Conductances")
 
 
+def _plot_voltage_distribution(ax, t, state, model, neurons_to_plot=None):
+    if isinstance(model, LIFNetwork):
+        V = state.V
+    elif isinstance(model, NoisyNetwork):
+        V = state.network_state.V
+
+    if neurons_to_plot is None:
+        neurons_to_plot = jnp.arange(V.shape[1])
+
+    for i in neurons_to_plot:
+        ax.hist(
+            V[:, i] * 1e3, bins=50, alpha=0.5, label=f"Neuron {i + 1}", density=True
+        )
+    ax.set_xlabel("Membrane Potential (mV)")
+    ax.set_ylabel("Density")
+    ax.set_title("Membrane Potential Distribution")
+    ax.set_xlim(jnp.min(V) * 1e3 - 5, jnp.max(V) * 1e3 + 5)
+
+
 def plot_simulate_SNN_results(
     sol: Solution,
     model: LIFNetwork | NoisyNetwork,
     t0: float,
     t1: float,
     dt0: float,
+    split_noise: bool = False,
+    plot_spikes: bool = True,
+    plot_voltage_distribution: bool = False,
 ):
     # Get results
     t = sol.ts
     state = sol.ys
 
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
+    n_axs = 2 + int(plot_spikes) + int(plot_voltage_distribution)
 
-    _plot_membrane_potential(ax1, t, state, model, [0])
-    _plot_conductances(ax2, t, state, model, [0])
-    _plot_spikes(ax3, t, state, model)
+    fig, axs = plt.subplots(n_axs, 1, figsize=(10, 8), sharex=False)
 
-    # Set x-axis limits and ticks for all subplots
-    xticks = jnp.linspace(t0, t1, 6)  # 6 evenly spaced ticks
-    for ax in [ax1, ax2, ax3]:
+    for ax in axs:
         ax.set_xlim(t0, t1)
-        ax.set_xticks(xticks)
-        ax.set_xticklabels([f"{x:.1f}" for x in xticks])
-        ax.label_outer()
+
+    _plot_membrane_potential(axs[0], t, state, model, [0])
+    _plot_conductances(axs[1], t, state, model, [0], split_noise=split_noise)
+    if plot_spikes:
+        _plot_spikes(axs[2], t, state, model)
+    if plot_voltage_distribution:
+        _plot_voltage_distribution(axs[-1], t, state, model, [0])
 
     plt.tight_layout()
     plt.show()
@@ -200,7 +222,7 @@ def plot_learning_results(
     else:
         RPE = None
 
-    fig, axs = plt.subplots(5, 1, figsize=(10, 8))
+    fig, axs = plt.subplots(4, 1, figsize=(10, 8))
 
     axs[0].plot(t, env_state, label="Environment State", color="m")
     axs[0].set_title("Environment State Over Time")
@@ -215,14 +237,14 @@ def plot_learning_results(
     axs[2].set_title("Reward Prediction Error Over Time")
     axs[2].set_ylabel("RPE")
 
-    # Plot spikes as raster plot
-    _plot_spikes(axs[3], t, state, model)
+    # # Plot spikes as raster plot
+    # _plot_spikes(axs[3], t, state, model)
 
     # Plot exc synaptic weights over time for first neuron
-    axs[4].plot(t, network_state.network_state.W[:, 0, 1])
-    axs[4].set_title("Synaptic Weight Over Time")
-    axs[4].set_ylabel("Weight")
-    axs[4].set_xlabel("Time (s)")
+    axs[3].plot(t, network_state.network_state.W[:, 0, 1])
+    axs[3].set_title("Synaptic Weight Over Time")
+    axs[3].set_ylabel("Weight")
+    axs[3].set_xlabel("Time (s)")
 
     # Set x-axis limits and ticks for all subplots
     xticks = jnp.linspace(t0, t1, 6)  #
