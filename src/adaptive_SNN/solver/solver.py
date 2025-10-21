@@ -7,8 +7,6 @@ import jax.random as jr
 from diffrax import RESULTS, Euler, Solution
 from jaxtyping import PyTree
 
-from adaptive_SNN.models import AgentSystem, NoisyNetwork
-
 
 def get_default_args():
     """Returns a dictionary of all zero default args for simulate_noisy_SNN."""
@@ -21,7 +19,7 @@ def get_default_args():
 
 
 def simulate_noisy_SNN(
-    model: NoisyNetwork | AgentSystem,
+    model,
     solver: Euler,
     t0: float,
     t1: float,
