@@ -30,3 +30,32 @@ class NeuronModelABC(ABC, eqx.Module):
     def update(self, t, x, args):
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         pass
+
+
+class EnvironmentABC(ABC, eqx.Module):
+    @property
+    @abstractmethod
+    def initial(self):
+        pass
+
+    @property
+    @abstractmethod
+    def noise_shape(self):
+        pass
+
+    @abstractmethod
+    def drift(self, t, x, args):
+        pass
+
+    @abstractmethod
+    def diffusion(self, t, x, args):
+        pass
+
+    @abstractmethod
+    def terms(self, key):
+        pass
+
+    @abstractmethod
+    def update(self, t, x, args):
+        """Update function for applying non-differentiable updates to the environment state."""
+        pass

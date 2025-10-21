@@ -2,11 +2,11 @@ import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 
-from adaptive_SNN.models import EnvironmentModel
+from adaptive_SNN.models import InputTrackingEnvironment
 
 
 def test_environment():
-    env = EnvironmentModel(dim=1)
+    env = InputTrackingEnvironment(dim=1)
 
     args = {"env_input": jnp.array([1.0])}
     solver = dfx.Euler()
