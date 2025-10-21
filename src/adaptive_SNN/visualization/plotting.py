@@ -204,6 +204,7 @@ def plot_learning_results(
     t1: float,
     dt0: float,
     args: dict = None,
+    target_state: float = 10.0,
 ):
     # Get results
     t = sol.ts
@@ -225,17 +226,22 @@ def plot_learning_results(
 
     fig, axs = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
 
+    for ax in axs:
+        ax.set_xlim(t0, t1)
+
     axs[0].plot(t, env_state, label="Environment State", color="m")
-    axs[0].set_title("Environment State Over Time")
+    axs[0].axhline(target_state, color="k", linestyle="--", label="Target State")
+    axs[0].set_title("Environment State ")
     axs[0].set_ylabel("Environment State")
 
     axs[1].plot(t, reward_state, label="Reward State", color="b")
     axs[1].plot(t, rewards, label="Instant Rewards", color="k", linestyle="--")
+    axs[1].legend(loc="upper right")
     axs[1].set_title("Rewards Over Time")
     axs[1].set_ylabel("Reward")
 
     axs[2].plot(t, RPE, label="Reward Prediction Error", color="r")
-    axs[2].set_title("Reward Prediction Error Over Time")
+    axs[2].set_title("Reward Prediction Error")
     axs[2].set_ylabel("RPE")
 
     # # Plot spikes as raster plot
@@ -243,17 +249,9 @@ def plot_learning_results(
 
     # Plot exc synaptic weights over time for first neuron
     axs[3].plot(t, network_state.network_state.W[:, 0, 1])
-    axs[3].set_title("Synaptic Weight Over Time")
+    axs[3].set_title("Synaptic Weight")
     axs[3].set_ylabel("Weight")
     axs[3].set_xlabel("Time (s)")
-
-    # Set x-axis limits and ticks for all subplots
-    xticks = jnp.linspace(t0, t1, 6)  #
-    for ax in axs:
-        ax.set_xlim(t0, t1)
-        ax.set_xticks(xticks)
-        ax.set_xticklabels([f"{x:.1f}" for x in xticks])
-        ax.label_outer()
 
     plt.tight_layout()
     plt.show()
