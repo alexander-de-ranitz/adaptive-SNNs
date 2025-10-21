@@ -15,8 +15,9 @@ class EnvironmentModel(eqx.Module):
     target_state: Array  # Desired target state for the environment
     rate: float = 1.0  # Rate at which the environment responds to input
 
-    def __init__(self, target_state: Array = None, dim: int = 1):
+    def __init__(self, rate: float = 1.0, target_state: Array = None, dim: int = 1):
         self.dim = dim
+        self.rate = rate
         if target_state is None:
             target_state = jnp.zeros((dim,))
         self.target_state = target_state
