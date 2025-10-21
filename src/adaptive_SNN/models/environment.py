@@ -55,44 +55,28 @@ class InputTrackingEnvironment(EnvironmentABC):
 
 
 class SpikeRateEnvironment(EnvironmentABC):
-    """Environment model that tracks spike rates using a circular buffer."""
+    """Environment model that tracks the spike rate of a neuron."""
 
     dim: int = 1  # Dimension of the environment process
-    buffer_size: int = 1000  # Size of the spike rate buffer
-    dt: float  # Time step for spike rate calculation
 
-    def __init__(self, dt, dim: int = 1, buffer_size: int = 1000):
-        self.dt = dt
+    def __init__(self, dim: int = 1):
         self.dim = dim
-        self.buffer_size = jnp.int32(buffer_size)
 
     @property
     def initial(self):
-        return (
-            jnp.zeros(
-                self.dim,
-            ),
-            jnp.zeros((self.dim, self.buffer_size)),
-            jnp.zeros(
-                1,
-            ),
+        return jnp.zeros(
+            self.dim,
         )
 
     @property
     def noise_shape(self):
-        return (
-            jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float),
-            jax.ShapeDtypeStruct(
-                shape=(self.dim, self.buffer_size), dtype=default_float
-            ),
-            jax.ShapeDtypeStruct(shape=(1,), dtype=default_float),
-        )
+        return jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float)
 
     def drift(self, t, x, args):
-        return jax.tree.map(lambda a: jnp.zeros_like(a), x)
+        return -x  # Exponential decay of spike rate
 
     def diffusion(self, t, x, args):
-        return jax.tree.map(lambda a: ElementWiseMul(jnp.zeros_like(a)), x)
+        return ElementWiseMul(jnp.zeros_like(x))
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
@@ -103,17 +87,8 @@ class SpikeRateEnvironment(EnvironmentABC):
         )
 
     def update(self, t, x, args):
-        _, buffer, buffer_index = x
         if args is None or "env_input" not in args:
             raise ValueError(
                 "SpikeRateEnvironment requires 'env_input' in args for update."
             )
-        spikes = args["env_input"]
-
-        # Update buffer with new spikes
-        new_buffer = buffer.at[:, buffer_index.astype(jnp.int32)].set(spikes)
-        new_buffer_index = (buffer_index + 1) % self.buffer_size
-
-        # Compute spike rate
-        spike_rate = jnp.sum(new_buffer, axis=1) / (self.buffer_size * self.dt)
-        return (spike_rate, new_buffer, new_buffer_index)
+        return x + args["env_input"]
