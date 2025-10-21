@@ -223,9 +223,9 @@ def plot_learning_results(
     else:
         RPE = None
 
-    fig, axs = plt.subplots(4, 1, figsize=(10, 8))
+    fig, axs = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
 
-    axs[0].plot(t, env_state[0], label="Environment State", color="m")
+    axs[0].plot(t, env_state, label="Environment State", color="m")
     axs[0].set_title("Environment State Over Time")
     axs[0].set_ylabel("Environment State")
 
