@@ -1,13 +1,10 @@
+import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 from diffrax import Solution
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models import (
-    AgentSystem,
-    LIFNetwork,
-    NoisyNetwork,
-)
+from adaptive_SNN.models import Agent, LIFNetwork, NoisyNetwork, SystemState
 
 mpl.rcParams["savefig.directory"] = "../figures"
 
@@ -46,7 +43,7 @@ def _plot_spikes(ax, t, state, model, neurons_to_plot=None):
     elif isinstance(model, NoisyNetwork):
         base_network = model.base_network
         network_state = state.network_state
-    elif isinstance(model, AgentSystem):
+    elif isinstance(model, Agent):
         base_network = model.noisy_network.base_network
         network_state = state[0].network_state
 
@@ -202,39 +199,49 @@ def plot_simulate_SNN_results(
 
 def plot_learning_results(
     sol: Solution,
-    model: AgentSystem,
+    model,
     t0: float,
     t1: float,
     dt0: float,
     args: dict = None,
+    target_state: float = 10.0,
 ):
     # Get results
     t = sol.ts
-    state = sol.ys
-    network_state, reward_state, env_state = state
+    state: SystemState = sol.ys
+    agent_state, env_state = state.agent_state, state.environment_state
+    network_state, reward_state = agent_state.noisy_network, agent_state.reward
 
     # Compute reward prediction error if possible
     if args is not None and "reward_fn" in args:
         rewards = jnp.array(
-            [args["reward_fn"](ti, env_state[i], args) for i, ti in enumerate(t)]
+            [
+                args["reward_fn"](ti, jax.tree.map(lambda arr: arr[i], env_state), args)
+                for i, ti in enumerate(t)
+            ]
         )
-        RPE = rewards - jnp.squeeze(reward_state)
+        RPE = jnp.squeeze(rewards) - jnp.squeeze(reward_state)
     else:
         RPE = None
 
-    fig, axs = plt.subplots(4, 1, figsize=(10, 8))
+    fig, axs = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
+
+    for ax in axs:
+        ax.set_xlim(t0, t1)
 
     axs[0].plot(t, env_state, label="Environment State", color="m")
-    axs[0].set_title("Environment State Over Time")
+    axs[0].axhline(target_state, color="k", linestyle="--", label="Target State")
+    axs[0].set_title("Environment State ")
     axs[0].set_ylabel("Environment State")
 
     axs[1].plot(t, reward_state, label="Reward State", color="b")
     axs[1].plot(t, rewards, label="Instant Rewards", color="k", linestyle="--")
+    axs[1].legend(loc="upper right")
     axs[1].set_title("Rewards Over Time")
     axs[1].set_ylabel("Reward")
 
     axs[2].plot(t, RPE, label="Reward Prediction Error", color="r")
-    axs[2].set_title("Reward Prediction Error Over Time")
+    axs[2].set_title("Reward Prediction Error")
     axs[2].set_ylabel("RPE")
 
     # # Plot spikes as raster plot
@@ -242,17 +249,9 @@ def plot_learning_results(
 
     # Plot exc synaptic weights over time for first neuron
     axs[3].plot(t, network_state.network_state.W[:, 0, 1])
-    axs[3].set_title("Synaptic Weight Over Time")
+    axs[3].set_title("Synaptic Weight")
     axs[3].set_ylabel("Weight")
     axs[3].set_xlabel("Time (s)")
-
-    # Set x-axis limits and ticks for all subplots
-    xticks = jnp.linspace(t0, t1, 6)  #
-    for ax in axs:
-        ax.set_xlim(t0, t1)
-        ax.set_xticks(xticks)
-        ax.set_xticklabels([f"{x:.1f}" for x in xticks])
-        ax.label_outer()
 
     plt.tight_layout()
     plt.show()
