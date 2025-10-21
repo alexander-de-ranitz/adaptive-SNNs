@@ -52,8 +52,6 @@ def main():
         agent=agent,
         environment=SpikeRateEnvironment(
             dim=1,
-            buffer_size=1.0 / dt0,  # 1 second buffer
-            dt=dt0,
         ),
     )
     solver = dfx.EulerHeun()
