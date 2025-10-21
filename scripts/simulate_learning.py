@@ -2,8 +2,14 @@ import diffrax as dfx
 import jax.random as jr
 from jax import numpy as jnp
 
-from adaptive_SNN.models import OUP, AgentSystem, LIFNetwork, NoisyNetwork
-from adaptive_SNN.models.environment import EnvironmentModel
+from adaptive_SNN.models import (
+    OUP,
+    Agent,
+    AgentEnvSystem,
+    LIFNetwork,
+    NoisyNetwork,
+)
+from adaptive_SNN.models.environment import SpikeRateEnvironment
 from adaptive_SNN.models.reward import RewardModel
 from adaptive_SNN.solver import simulate_noisy_SNN
 from adaptive_SNN.visualization.plotting import plot_learning_results
@@ -37,10 +43,18 @@ def main():
         noise_E_model=noise_E_model,
         noise_I_model=noise_I_model,
     )
-    model = AgentSystem(
+    agent = Agent(
         neuron_model=network,
         reward_model=RewardModel(reward_rate=10),
-        environment=EnvironmentModel(rate=2),
+    )
+
+    model = AgentEnvSystem(
+        agent=agent,
+        environment=SpikeRateEnvironment(
+            dim=1,
+            buffer_size=1.0 / dt0,  # 1 second buffer
+            dt=dt0,
+        ),
     )
     solver = dfx.EulerHeun()
     init_state = model.initial
@@ -55,9 +69,13 @@ def main():
 
     # Define args
     args = {
-        "get_learning_rate": lambda t, x, args: jnp.where(t < 5, 0.0, 0.02),
-        "network_output_fn": lambda t, x, args: 1 / dt0 * jnp.sum(x.network_state.S[0]),
-        "reward_fn": lambda t, x, args: -jnp.abs(jnp.sum(x[0]) - target_state),
+        "get_learning_rate": lambda t, x, args: jnp.where(t < 2.5, 0.0, 0.0),
+        "network_output_fn": lambda t, agent_state, args: jnp.squeeze(
+            agent_state.noisy_network.network_state.S[0]
+        ),
+        "reward_fn": lambda t, environment_state, args: -jnp.abs(
+            environment_state[0] - target_state
+        ),
         "get_input_spikes": lambda t, x, args: jr.poisson(
             jr.PRNGKey((t / dt0).astype(int)), rate * dt0, shape=(N_inputs,)
         ),
