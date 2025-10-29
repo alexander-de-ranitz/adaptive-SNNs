@@ -4,21 +4,60 @@ import matplotlib as mpl
 from diffrax import Solution
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models import Agent, LIFNetwork, NoisyNetwork, SystemState
+from adaptive_SNN.models import (
+    Agent,
+    AgentEnvSystem,
+    AgentState,
+    LIFNetwork,
+    NoisyNetwork,
+    NoisyNetworkState,
+    SystemState,
+)
 
 mpl.rcParams["savefig.directory"] = "../figures"
 
 
-def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
-    if isinstance(model, LIFNetwork):
-        # base_network = model
-        network_state = state
-    elif isinstance(model, NoisyNetwork):
-        # base_network = model.base_network
-        network_state = state.network_state
+def _get_LIF_state(state):
+    if isinstance(state, LIFNetwork):
+        return state
+    elif isinstance(state, NoisyNetworkState):
+        return state.network_state
+    elif isinstance(state, AgentState):
+        return state.noisy_network.network_state
+    elif isinstance(state, SystemState):
+        return state.agent_state.noisy_network.network_state
+    else:
+        raise ValueError("Unsupported state type")
 
-    V = network_state.V
-    S = network_state.S
+
+def _get_LIF_model(model):
+    if isinstance(model, LIFNetwork):
+        return model
+    elif isinstance(model, NoisyNetwork):
+        return model.base_network
+    elif isinstance(model, Agent):
+        return model.noisy_network.base_network
+    elif isinstance(model, AgentEnvSystem):
+        return model.agent.noisy_network.base_network
+    else:
+        raise ValueError("Unsupported model type")
+
+
+def _get_noisy_network_state(state):
+    if isinstance(state, NoisyNetworkState):
+        return state
+    elif isinstance(state, AgentState):
+        return state.noisy_network
+    elif isinstance(state, SystemState):
+        return state.agent_state.noisy_network
+    else:
+        raise ValueError("Unsupported state type")
+
+
+def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
+    lif_state = _get_LIF_state(state)
+    V = lif_state.V
+    S = lif_state.S
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(V.shape[0])
@@ -37,20 +76,13 @@ def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
 
 
 def _plot_spikes(ax, t, state, model, neurons_to_plot=None):
-    if isinstance(model, LIFNetwork):
-        base_network = model
-        network_state = state
-    elif isinstance(model, NoisyNetwork):
-        base_network = model.base_network
-        network_state = state.network_state
-    elif isinstance(model, Agent):
-        base_network = model.noisy_network.base_network
-        network_state = state[0].network_state
+    lif_network = _get_LIF_model(model)
+    lif_state = _get_LIF_state(state)
 
-    N_neurons = base_network.N_neurons
-    N_inputs = base_network.N_inputs
-    exc_mask = base_network.excitatory_mask
-    spikes = network_state.S
+    N_neurons = lif_network.N_neurons
+    N_inputs = lif_network.N_inputs
+    exc_mask = lif_network.excitatory_mask
+    spikes = lif_state.S
 
     dt = t[1] - t[0]
     spike_times_per_neuron = [
@@ -77,18 +109,8 @@ def _plot_spikes(ax, t, state, model, neurons_to_plot=None):
 
 
 def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=False):
-    if isinstance(model, LIFNetwork):
-        base_network = model
-        network_state = state
-
-        noise_E = jnp.zeros_like(base_network.N_neurons)
-        noise_I = jnp.zeros_like(base_network.N_neurons)
-    elif isinstance(model, NoisyNetwork):
-        base_network = model.base_network
-        network_state = state.network_state
-
-        noise_E = state.noise_E_state
-        noise_I = state.noise_I_state
+    base_network = _get_LIF_model(model)
+    network_state = _get_LIF_state(state)
 
     N_neurons = base_network.N_neurons
     W = network_state.W
@@ -102,6 +124,9 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
     weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1)
 
     if split_noise:
+        noisy_network_state = _get_noisy_network_state(state)
+        noise_E = noisy_network_state.noise_E_state
+        noise_I = noisy_network_state.noise_I_state
         ax.plot(
             t,
             weighed_G_excitatory[:, neurons_to_plot],
@@ -119,14 +144,14 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
             noise_E[:, neurons_to_plot],
             label="Noise E Conductance",
             color="g",
-            linestyle="--",
+            linestyle=":",
         )
         ax.plot(
             t,
             noise_I[:, neurons_to_plot],
             label="Noise I Conductance",
             color="r",
-            linestyle="--",
+            linestyle=":",
         )
     else:
         ax.plot(
@@ -147,10 +172,7 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
 
 
 def _plot_voltage_distribution(ax, t, state, model, neurons_to_plot=None):
-    if isinstance(model, LIFNetwork):
-        V = state.V
-    elif isinstance(model, NoisyNetwork):
-        V = state.network_state.V
+    V = _get_LIF_state(state).V
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(V.shape[1])
@@ -174,6 +196,8 @@ def plot_simulate_SNN_results(
     split_noise: bool = False,
     plot_spikes: bool = True,
     plot_voltage_distribution: bool = False,
+    neurons_to_plot: jnp.ndarray | None = None,
+    save_path: str | None = None,
 ):
     # Get results
     t = sol.ts
@@ -186,72 +210,101 @@ def plot_simulate_SNN_results(
     for ax in axs:
         ax.set_xlim(t0, t1)
 
-    _plot_membrane_potential(axs[0], t, state, model, [0])
-    _plot_conductances(axs[1], t, state, model, [0], split_noise=split_noise)
+    _plot_membrane_potential(axs[0], t, state, model, neurons_to_plot=neurons_to_plot)
+    _plot_conductances(
+        axs[1],
+        t,
+        state,
+        model,
+        neurons_to_plot=neurons_to_plot,
+        split_noise=split_noise,
+    )
     if plot_spikes:
-        _plot_spikes(axs[2], t, state, model)
+        _plot_spikes(axs[2], t, state, model, neurons_to_plot=neurons_to_plot)
     if plot_voltage_distribution:
-        _plot_voltage_distribution(axs[-1], t, state, model, [0])
+        _plot_voltage_distribution(
+            axs[-1], t, state, model, neurons_to_plot=neurons_to_plot
+        )
 
     plt.tight_layout()
-    plt.show()
+    if save_path is not None:
+        plt.savefig(save_path)
+    else:
+        plt.show()
 
 
 def plot_learning_results(
-    sol: Solution,
+    sols: Solution | list[Solution],
     model,
     t0: float,
     t1: float,
     dt0: float,
     args: dict = None,
     target_state: float = 10.0,
+    save_path: str | None = None,
 ):
-    # Get results
-    t = sol.ts
-    state: SystemState = sol.ys
-    agent_state, env_state = state.agent_state, state.environment_state
-    network_state, reward_state = agent_state.noisy_network, agent_state.reward
-
-    # Compute reward prediction error if possible
-    if args is not None and "reward_fn" in args:
-        rewards = jnp.array(
-            [
-                args["reward_fn"](ti, jax.tree.map(lambda arr: arr[i], env_state), args)
-                for i, ti in enumerate(t)
-            ]
-        )
-        RPE = jnp.squeeze(rewards) - jnp.squeeze(reward_state)
-    else:
-        RPE = None
+    if isinstance(sols, Solution):
+        sols = [sols]
 
     fig, axs = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
 
-    for ax in axs:
-        ax.set_xlim(t0, t1)
+    colors = ["b", "g", "m", "c", "r", "y", "k"]
 
-    axs[0].plot(t, env_state, label="Environment State", color="m")
-    axs[0].axhline(target_state, color="k", linestyle="--", label="Target State")
-    axs[0].set_title("Environment State ")
-    axs[0].set_ylabel("Environment State")
+    for i, sol in enumerate(sols):
+        # Get results
+        t = sol.ts
+        state: SystemState = sol.ys
+        agent_state, env_state = state.agent_state, state.environment_state
+        network_state, reward_state = agent_state.noisy_network, agent_state.reward
 
-    axs[1].plot(t, reward_state, label="Reward State", color="b")
-    axs[1].plot(t, rewards, label="Instant Rewards", color="k", linestyle="--")
-    axs[1].legend(loc="upper right")
-    axs[1].set_title("Rewards Over Time")
-    axs[1].set_ylabel("Reward")
+        # Compute reward prediction error if possible
+        if args is not None and "reward_fn" in args:
+            rewards = jnp.array(
+                [
+                    args["reward_fn"](
+                        ti, jax.tree.map(lambda arr: arr[i], env_state), args
+                    )
+                    for i, ti in enumerate(t)
+                ]
+            )
+            RPE = jnp.squeeze(rewards) - jnp.squeeze(reward_state)
+        else:
+            RPE = None
 
-    axs[2].plot(t, RPE, label="Reward Prediction Error", color="r")
-    axs[2].set_title("Reward Prediction Error")
-    axs[2].set_ylabel("RPE")
+        for ax in axs:
+            ax.set_xlim(t0, t1)
 
-    # # Plot spikes as raster plot
-    # _plot_spikes(axs[3], t, state, model)
+        axs[0].plot(t, env_state, label="Environment State", color=colors[i])
+        if i == 0:
+            axs[0].axhline(
+                target_state, color="k", linestyle="--", label="Target State"
+            )
+        axs[0].set_title("Environment State ")
+        axs[0].set_ylabel("Environment State")
 
-    # Plot exc synaptic weights over time for first neuron
-    axs[3].plot(t, network_state.network_state.W[:, 0, 1])
-    axs[3].set_title("Synaptic Weight")
-    axs[3].set_ylabel("Weight")
-    axs[3].set_xlabel("Time (s)")
+        axs[1].plot(t, reward_state, label="Reward State", color=colors[i])
+        # axs[1].plot(t, rewards, label="Instant Rewards", color="k", linestyle="--")
+        # axs[1].legend(loc="upper right")
+        axs[1].set_title("Rewards Over Time")
+        axs[1].set_ylabel("Reward")
+
+        axs[2].plot(t, RPE, label="Reward Prediction Error", color=colors[i])
+        axs[2].set_title("Reward Prediction Error")
+        axs[2].set_ylabel("RPE")
+
+        # # Plot spikes as raster plot
+        # _plot_spikes(axs[3], t, state, model)
+
+        # Plot exc synaptic weights over time for first neuron
+        axs[3].plot(t, network_state.network_state.W[:, 0, 1], color=colors[i])
+        axs[3].set_title("Synaptic Weight")
+        axs[3].set_ylabel("Weight")
+        axs[3].set_xlabel("Time (s)")
 
     plt.tight_layout()
-    plt.show()
+
+    if save_path is not None:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
