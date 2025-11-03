@@ -10,9 +10,9 @@ from adaptive_SNN.models import (
     SystemState,
 )
 from adaptive_SNN.visualization.utils import (
-    plot_conductances,
-    plot_membrane_potential,
-    plot_spikes_raster,
+    _plot_conductances,
+    _plot_membrane_potential,
+    _plot_spikes_raster,
 )
 
 mpl.rcParams["savefig.directory"] = "../figures"
@@ -41,8 +41,8 @@ def plot_simulate_SNN_results(
     for ax in axs:
         ax.set_xlim(t0, t1)
 
-    plot_membrane_potential(axs[0], t, state, model, neurons_to_plot=neurons_to_plot)
-    plot_conductances(
+    _plot_membrane_potential(axs[0], t, state, model, neurons_to_plot=neurons_to_plot)
+    _plot_conductances(
         axs[1],
         t,
         state,
@@ -51,7 +51,7 @@ def plot_simulate_SNN_results(
         split_noise=split_noise,
     )
     if plot_spikes:
-        plot_spikes_raster(axs[2], t, state, model, neurons_to_plot=neurons_to_plot)
+        _plot_spikes_raster(axs[2], t, state, model, neurons_to_plot=neurons_to_plot)
     if plot_voltage_distribution:
         plot_voltage_distribution(
             axs[-1], t, state, model, neurons_to_plot=neurons_to_plot

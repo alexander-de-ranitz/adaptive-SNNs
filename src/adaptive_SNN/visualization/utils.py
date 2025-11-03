@@ -68,7 +68,7 @@ def get_noisy_network_model(model):
 # ======================================================================
 
 
-def plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
+def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
     lif_state = get_LIF_state(state)
     V = lif_state.V
     S = lif_state.S
@@ -89,7 +89,7 @@ def plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
     ax.set_title("Neuron Membrane Potential")
 
 
-def plot_spikes_raster(ax, t, state, model, neurons_to_plot=None):
+def _plot_spikes_raster(ax, t, state, model, neurons_to_plot=None):
     lif_network = get_LIF_model(model)
     lif_state = get_LIF_state(state)
 
@@ -122,7 +122,7 @@ def plot_spikes_raster(ax, t, state, model, neurons_to_plot=None):
         )
 
 
-def plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=False):
+def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=False):
     base_network = get_LIF_model(model)
     network_state = get_LIF_state(state)
 
@@ -201,7 +201,7 @@ def plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fal
     ax.set_title("Total Conductances")
 
 
-def plot_voltage_distribution(ax, t, state, model, neurons_to_plot=None):
+def _plot_voltage_distribution(ax, t, state, model, neurons_to_plot=None):
     V = get_LIF_state(state).V
 
     if neurons_to_plot is None:
