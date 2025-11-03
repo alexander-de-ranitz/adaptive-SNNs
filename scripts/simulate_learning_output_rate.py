@@ -16,9 +16,7 @@ from adaptive_SNN.models import (
 from adaptive_SNN.models.environment import SpikeRateEnvironment
 from adaptive_SNN.models.reward import RewardModel
 from adaptive_SNN.solver import simulate_noisy_SNN
-from adaptive_SNN.visualization.plotting import (
-    plot_learning_results_multiple,
-)
+from adaptive_SNN.visualization import plot_learning_results
 
 
 def main():
@@ -122,7 +120,7 @@ def main():
         # plot_learning_results(sol, model, t0, t1, dt0, args, save_path=f"../figures/learning_output_rate_{i}" + ".png")
 
     print("Plotting all results together...")
-    plot_learning_results_multiple(
+    plot_learning_results(
         sols,
         model,
         t0,
