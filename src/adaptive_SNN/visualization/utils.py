@@ -127,7 +127,7 @@ def plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fal
     network_state = get_LIF_state(state)
 
     N_neurons = base_network.N_neurons
-    W = network_state.W
+    W = jnp.where(~jnp.isfinite(network_state.W), 0.0, network_state.W)
     G = network_state.G
     exc_mask = base_network.excitatory_mask
 
