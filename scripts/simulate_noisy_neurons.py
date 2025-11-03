@@ -4,13 +4,13 @@ from jax import numpy as jnp
 
 from adaptive_SNN.models import OUP, LIFNetwork, NoisyNetwork
 from adaptive_SNN.solver import simulate_noisy_SNN
-from adaptive_SNN.visualization.plotting import plot_simulate_SNN_results
+from adaptive_SNN.visualization import plot_simulate_SNN_results
 
 
 def main():
     t0 = 0
     t1 = 0.5
-    dt0 = 0.001
+    dt0 = 1e-4
     key = jr.PRNGKey(1)
 
     N_neurons = 1
@@ -19,8 +19,12 @@ def main():
         N_neurons=N_neurons, N_inputs=0, fully_connected_input=True, key=key, dt=dt0
     )
     key, _ = jr.split(key)
-    noise_E_model = OUP(theta=50.0, noise_scale=50e-9, mean=25 * 1e-9, dim=N_neurons)
-    noise_I_model = OUP(theta=50.0, noise_scale=50e-9, mean=50 * 1e-9, dim=N_neurons)
+    noise_E_model = OUP(
+        tau=neuron_model.tau_E, noise_scale=50e-9, mean=25 * 1e-9, dim=N_neurons
+    )
+    noise_I_model = OUP(
+        tau=neuron_model.tau_I, noise_scale=50e-9, mean=50 * 1e-9, dim=N_neurons
+    )
     model = NoisyNetwork(
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,

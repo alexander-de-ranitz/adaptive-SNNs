@@ -28,8 +28,8 @@ def main():
         key=key,
     )
     key, _ = jr.split(key)
-    noise_E_model = OUP(theta=0.0, noise_scale=0e-8, mean=0e-8, dim=N_neurons)
-    noise_I_model = OUP(theta=0.0, noise_scale=0e-8, mean=0e-8, dim=N_neurons)
+    noise_E_model = OUP(tau=0.0, noise_scale=0e-8, mean=0e-8, dim=N_neurons)
+    noise_I_model = OUP(tau=0.0, noise_scale=0e-8, mean=0e-8, dim=N_neurons)
     model = NoisyNetwork(
         neuron_model=neuron_model,
         noise_E_model=noise_E_model,

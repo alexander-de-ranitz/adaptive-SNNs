@@ -247,7 +247,7 @@ def test_OUP_drift():
     initial_state = jnp.array([1.0, -1.0, 0.5])
 
     drift = model.drift(0.0, initial_state, None)
-    expected_drift = -model.theta * initial_state
+    expected_drift = -model.tau * initial_state
 
     assert jnp.allclose(drift, expected_drift)
 
@@ -510,10 +510,10 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
 
     # OU drifts are -theta * state
     assert jnp.allclose(
-        noisy_network_drift.noise_E_state, -model.noise_E.theta * noise_E_state
+        noisy_network_drift.noise_E_state, -model.noise_E.tau * noise_E_state
     )
     assert jnp.allclose(
-        noisy_network_drift.noise_I_state, -model.noise_I.theta * noise_I_state
+        noisy_network_drift.noise_I_state, -model.noise_I.tau * noise_I_state
     )
 
 
