@@ -52,6 +52,17 @@ def get_noisy_network_state(state):
         raise ValueError("Unsupported state type")
 
 
+def get_noisy_network_model(model):
+    if isinstance(model, NoisyNetwork):
+        return model
+    elif isinstance(model, Agent):
+        return model.noisy_network
+    elif isinstance(model, AgentEnvSystem):
+        return model.agent.noisy_network
+    else:
+        raise ValueError("Unsupported model type")
+
+
 # ======================================================================
 # Plotting functions- reusable functions to be used to create plots
 # ======================================================================
