@@ -12,7 +12,9 @@ def get_default_args():
     """Returns a dictionary of all zero default args for simulate_noisy_SNN."""
     return {
         "get_learning_rate": lambda t, x, args: 0.0,
-        "get_input_spikes": lambda t, x, args: jnp.zeros_like(x.V),
+        "get_input_spikes": lambda t, x, args: jnp.zeros(
+            shape=(x.W.shape[1] - x.W.shape[0],)
+        ),
         "get_desired_balance": lambda t, x, args: 0.0,
         "RPE": jnp.array(0.0),
     }
@@ -80,6 +82,8 @@ def simulate_noisy_SNN(
     @eqx.filter_jit
     def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver):
         """Runs the simulation loop."""
+
+        # TODO: nan in output? Check if ys is completely filled correctly
 
         # Utility function to save the current state
         def save_state(carry, save_fn):
