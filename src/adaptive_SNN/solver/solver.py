@@ -83,8 +83,6 @@ def simulate_noisy_SNN(
     def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver):
         """Runs the simulation loop."""
 
-        # TODO: nan in output? Check if ys is completely filled correctly
-
         # Utility function to save the current state
         def save_state(carry, save_fn):
             y, ys, save_index = carry
