@@ -53,13 +53,11 @@ def main():
     OUP_std = 0.1 * expected_syn_std
     D = 2 * (OUP_std**2) / neuron_model.tau_E
 
-    noise_E_model = OUP(tau=neuron_model.tau_E, noise_scale=D, mean=0.0, dim=N_neurons)
-    noise_I_model = OUP(tau=neuron_model.tau_I, noise_scale=0, mean=0.0, dim=N_neurons)
+    noise_model = OUP(tau=neuron_model.tau_E, noise_scale=D, mean=0.0, dim=N_neurons)
 
     network = NoisyNetwork(
         neuron_model=neuron_model,
-        noise_E_model=noise_E_model,
-        noise_I_model=noise_I_model,
+        noise_model=noise_model,
     )
     agent = Agent(
         neuron_model=network,

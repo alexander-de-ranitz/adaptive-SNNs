@@ -22,17 +22,13 @@ def test_solver_timesteps():
 
     network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key)
 
-    noise_E = DeterministicOUP(
-        theta=1.0, noise_scale=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
-    )
-    noise_I = DeterministicOUP(
-        theta=1.0, noise_scale=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
+    noise_model = DeterministicOUP(
+        tau=network.tau_E, noise_scale=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
     )
 
     model = DeterministicNoisyNeuronModel(
         neuron_model=network,
-        noise_I_model=noise_I,
-        noise_E_model=noise_E,
+        noise_model=noise_model,
         t0=t0,
         t1=t1 + dt0,
     )
@@ -77,22 +73,18 @@ def test_solver_output():
 
     N_neurons = 3
     N_inputs = 0
-    t0, t1, dt0 = 0.0, 1.0, 0.01
+    t0, t1, dt0 = 0.0, 0.01, 1e-4
     key = jr.PRNGKey(0)
 
     network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key)
 
-    noise_E = DeterministicOUP(
-        theta=1.0, noise_scale=1e-9, dim=N_neurons, t0=t0, t1=t1 + dt0
-    )
-    noise_I = DeterministicOUP(
-        theta=1.0, noise_scale=1e-9, dim=N_neurons, t0=t0, t1=t1 + dt0
+    noise_model = DeterministicOUP(
+        tau=network.tau_E, noise_scale=2e-16, dim=N_neurons, t0=t0, t1=t1 + dt0
     )
 
     model = DeterministicNoisyNeuronModel(
         neuron_model=network,
-        noise_I_model=noise_I,
-        noise_E_model=noise_E,
+        noise_model=noise_model,
         t0=t0,
         t1=t1 + dt0,
     )
@@ -107,15 +99,13 @@ def test_solver_output():
     def save_fn_custom(y: NoisyNetworkState):
         return (
             (y.network_state.V, y.network_state.G, y.network_state.S),
-            y.noise_E_state,
-            y.noise_I_state,
+            y.noise_state,
         )
 
     def save_fn_dfx(t, y: NoisyNetworkState, args):
         return (
             (y.network_state.V, y.network_state.G, y.network_state.S),
-            y.noise_E_state,
-            y.noise_I_state,
+            y.noise_state,
         )
 
     # Our method

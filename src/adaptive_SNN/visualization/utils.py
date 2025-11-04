@@ -144,8 +144,7 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
             )
 
         noisy_network_state = get_noisy_network_state(state)
-        noise_E = noisy_network_state.noise_E_state
-        noise_I = noisy_network_state.noise_I_state
+        noise = noisy_network_state.noise_state
 
         ax.plot(
             t,
@@ -161,16 +160,9 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
         )
         ax.plot(
             t,
-            noise_E[:, neurons_to_plot],
+            noise[:, neurons_to_plot],
             label="Noise E Conductance",
             color="g",
-            linestyle=":",
-        )
-        ax.plot(
-            t,
-            noise_I[:, neurons_to_plot],
-            label="Noise I Conductance",
-            color="r",
             linestyle=":",
         )
     else:
@@ -179,10 +171,9 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
             total_G_inhibitory = weighed_G_inhibitory
         else:
             noisy_network_state = get_noisy_network_state(state)
-            noise_E = noisy_network_state.noise_E_state
-            noise_I = noisy_network_state.noise_I_state
-            total_G_excitatory = weighed_G_excitatory + noise_E
-            total_G_inhibitory = weighed_G_inhibitory + noise_I
+            noise = noisy_network_state.noise_state
+            total_G_excitatory = weighed_G_excitatory + noise
+            total_G_inhibitory = weighed_G_inhibitory
 
         ax.plot(
             t,
