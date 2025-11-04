@@ -222,17 +222,14 @@ class LIFNetwork(NeuronModelABC):
         total_I_conductances = jnp.sum(
             weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
         )
-        total_E_conductances = jnp.sum(
-            weighted_conductances * self.excitatory_mask[None, :], axis=1
-        )
+        total_E_conductances = (
+            jnp.sum(weighted_conductances * self.excitatory_mask[None, :], axis=1)
+            + args["excitatory_noise"]
+        )  # Add external excitatory noise to total excitatory conductance
 
-        # Get noise from args and add to total conductances
-        total_I_conductances = jnp.clip(
-            total_I_conductances + args["inhibitory_noise"], min=0.0
-        )  # Ensure non-negative conductances
-        total_E_conductances = jnp.clip(
-            total_E_conductances + args["excitatory_noise"], min=0.0
-        )
+        # Ensure non-negative conductances
+        total_E_conductances = jnp.clip(total_E_conductances, min=0.0)
+        total_I_conductances = jnp.clip(total_I_conductances, min=0.0)
 
         # Compute total recurrent current
         recurrent_current = total_I_conductances * (
@@ -248,13 +245,6 @@ class LIFNetwork(NeuronModelABC):
         learning_rate = args["get_learning_rate"](t, state, args)
         RPE = args.get("RPE", jnp.array(0.0))
         E_noise = jnp.outer(args["excitatory_noise"], self.excitatory_mask)
-
-        # No learning of inhibitory weights for now
-        # TODO: If desired, implement inhibitory weight learning
-        # I_noise = jnp.outer(
-        #                 args["inhibitory_noise"],
-        #                 jnp.invert(self.excitatory_mask),
-        #             )
 
         dW = (
             learning_rate
