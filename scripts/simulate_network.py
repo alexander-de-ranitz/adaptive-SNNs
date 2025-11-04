@@ -12,7 +12,10 @@ from adaptive_SNN.models import (
 from adaptive_SNN.models.environment import SpikeRateEnvironment
 from adaptive_SNN.models.reward import RewardModel
 from adaptive_SNN.solver import simulate_noisy_SNN
-from adaptive_SNN.visualization import plot_voltage_spectrum
+from adaptive_SNN.visualization import (
+    plot_frequency_analysis,
+    plot_simulate_SNN_results,
+)
 
 
 def main():
@@ -22,6 +25,12 @@ def main():
     key = jr.PRNGKey(1)
     N_neurons = 1
     N_inputs = 2
+
+    # Define input parameters
+    exc_rate = 5000
+    exc_to_inh_ratio = 4.0
+    inh_rate = exc_rate / exc_to_inh_ratio
+    rate = jnp.array([exc_rate, inh_rate])  # firing rate in Hz
 
     # Set up models
     neuron_model = LIFNetwork(
@@ -34,11 +43,18 @@ def main():
         key=key,
     )
 
-    # noise_E_model = OUP(theta=250.0, noise_scale=1e-7, mean=0.0, dim=N_neurons)
-    # noise_I_model = OUP(theta=250.0, noise_scale=1e-7, mean=0.0, dim=N_neurons)
+    expected_syn_std = jnp.sqrt(
+        0.5
+        * exc_rate
+        * neuron_model.tau_E
+        * (neuron_model.synaptic_increment**2)
+        * (neuron_model.input_weight**2)
+    )
+    OUP_std = 0.1 * expected_syn_std
+    D = 2 * (OUP_std**2) / neuron_model.tau_E
 
-    noise_E_model = OUP(tau=250.0, noise_scale=0, mean=0.0, dim=N_neurons)
-    noise_I_model = OUP(tau=250.0, noise_scale=0, mean=0.0, dim=N_neurons)
+    noise_E_model = OUP(tau=neuron_model.tau_E, noise_scale=D, mean=0.0, dim=N_neurons)
+    noise_I_model = OUP(tau=neuron_model.tau_I, noise_scale=0, mean=0.0, dim=N_neurons)
 
     network = NoisyNetwork(
         neuron_model=neuron_model,
@@ -58,12 +74,6 @@ def main():
     )
     solver = dfx.EulerHeun()
     init_state = model.initial
-
-    # Define input parameters
-    exc_rate = 5000
-    exc_to_inh_ratio = 4.0
-    inh_rate = exc_rate / exc_to_inh_ratio
-    rate = jnp.array([exc_rate, inh_rate])  # firing rate in Hz
 
     target_state = 10.0  # Target output state
 
@@ -86,44 +96,11 @@ def main():
         model, solver, t0, t1, dt0, init_state, save_every_n_steps=1, args=args
     )
 
-    # print("Plotting results...")
-    # plot_simulate_SNN_results(
-    #     sol, model, t0, t1, dt0, args, neurons_to_plot=jnp.array([0])
-    # )
-
-    plot_voltage_spectrum(sol, model, t0, t1, dt0, neurons_to_plot=jnp.array([0]))
-
-    W = sol.ys.agent_state.noisy_network.network_state.W
-    G = sol.ys.agent_state.noisy_network.network_state.G
-    exc_mask = model.agent.noisy_network.base_network.excitatory_mask
-    weighed_G_inhibitory = jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1)
-    weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1)
-    print(
-        "Mean conductances: = "
-        + str(jnp.nanmean(weighed_G_excitatory[:, 0]))
-        + ", "
-        + str(jnp.nanmean(weighed_G_inhibitory[:, 0]))
+    print("Plotting results...")
+    plot_simulate_SNN_results(
+        sol, model, t0, t1, dt0, args, neurons_to_plot=jnp.array([0])
     )
-    print(
-        "Conductance stds: = "
-        + str(jnp.nanstd(weighed_G_excitatory[:, 0]))
-        + ", "
-        + str(jnp.nanstd(weighed_G_inhibitory[:, 0]))
-    )
-    expected_E_conductance = (
-        model.agent.noisy_network.base_network.tau_E
-        * model.agent.noisy_network.base_network.synaptic_increment
-        * exc_rate
-        * jnp.sum(W[-1, 0, :] * exc_mask)
-    )
-    print("Expected excitatory conductance: " + str(expected_E_conductance))
-    expected_I_conductance = (
-        model.agent.noisy_network.base_network.tau_I
-        * model.agent.noisy_network.base_network.synaptic_increment
-        * inh_rate
-        * jnp.sum(W[-1, 0, :] * jnp.invert(exc_mask))
-    )
-    print("Expected inhibitory conductance: " + str(expected_I_conductance))
+    plot_frequency_analysis(sol, model, t0, t1, dt0, neurons_to_plot=jnp.array([0]))
 
 
 if __name__ == "__main__":

@@ -12,14 +12,6 @@ def main():
     t1 = 10
     dt0 = 1e-4
 
-    # # From Destexhe, 2001
-    # tau = 2.6  # 2.6 ms
-    # mean = 18e-9  # 18 nS
-    # sigma = 3.5e-9  # 3.5 nS
-    # D = 2 * sigma / tau
-
-    # noise_model = OUP(theta=tau, noise_scale=D, mean=mean, dim=2)
-
     def run_and_plot_OU_process(tau, D):
         noise_model = OUP(tau=tau, noise_scale=D, mean=0.0, dim=2)
 
@@ -50,9 +42,7 @@ def main():
             plt.plot(t, x[:, i], label=labels[i], color=colors[i])
             print(f"{labels[i]} mean: {jnp.mean(x[:, i])}, std: {jnp.std(x[:, i])}")
 
-    run_and_plot_OU_process(tau=1 / 250, D=1e-7)
-    run_and_plot_OU_process(tau=1 / 250 * 4, D=1e-7 / 4.0)
-
+    run_and_plot_OU_process(tau=3e-3, D=1e-7)
     plt.legend()
     plt.xlabel("Time")
     plt.ylabel("Conductance")
