@@ -18,8 +18,8 @@ mpl.rcParams["savefig.directory"] = "../figures"
 
 def main():
     t0 = 0
-    t1 = 1.0
-    dt0 = 1e-5
+    t1 = 5.0
+    dt0 = 1e-4
     key = jr.PRNGKey(1)
     N_neurons = 1
     N_inputs = 2
@@ -34,13 +34,13 @@ def main():
         key=key,
     )
     key, _ = jr.split(key)
-    noise_E_model = OUP(tau=250.0, noise_scale=100e-9, mean=0.0, dim=N_neurons)
-    noise_I_model = OUP(tau=250.0, noise_scale=100e-9, mean=0.0, dim=N_neurons)
+    noise_model = OUP(
+        tau=neuron_model.tau_E, noise_scale=2e-16, mean=0.0, dim=N_neurons
+    )
 
     model = NoisyNetwork(
         neuron_model=neuron_model,
-        noise_E_model=noise_E_model,
-        noise_I_model=noise_I_model,
+        noise_model=noise_model,
     )
 
     solver = dfx.EulerHeun()
