@@ -59,13 +59,13 @@ def _plot_conductance_frequency_spectrum(
     # Plot the empirical and expected spectrum of the noise
     if plot_noise:
         noisy_network_state = get_noisy_network_state(state)
-        noise_E = noisy_network_state.noise_E_state
-        noise_signals = [noise_E[:, i] for i in neurons_to_plot]
+        noise = noisy_network_state.noise_state
+        noise_signals = [noise[:, i] for i in neurons_to_plot]
         noise_labels = [f"Neuron {i + 1} Noise E Conductance" for i in neurons_to_plot]
         _plot_frequency_spectrum(ax, t, noise_signals, noise_labels)
 
         # Plot expected PSD for OU process
-        noise_model = get_noisy_network_model(model).noise_E
+        noise_model = get_noisy_network_model(model).noise_model
         expected_PSD = (
             lambda f: 2
             * noise_model.noise_scale
