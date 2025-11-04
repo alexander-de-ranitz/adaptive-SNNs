@@ -229,7 +229,7 @@ def test_input_current():
 
 def test_OUP_shapes():
     dim = 3
-    model = make_OUP_model(dim=dim, theta=0.1, noise_scale=0.3)
+    model = make_OUP_model(dim=dim, tau=0.1, noise_scale=0.3)
     initial_state = model.initial
 
     assert initial_state.shape == (dim,)
@@ -243,22 +243,22 @@ def test_OUP_shapes():
 
 def test_OUP_drift():
     dim = 3
-    model = make_OUP_model(dim=dim, theta=0.1, noise_scale=0.3)
+    model = make_OUP_model(dim=dim, tau=0.1, noise_scale=0.3)
     initial_state = jnp.array([1.0, -1.0, 0.5])
 
     drift = model.drift(0.0, initial_state, None)
-    expected_drift = -model.tau * initial_state
+    expected_drift = -1.0 / model.tau * (initial_state - model.mean)
 
     assert jnp.allclose(drift, expected_drift)
 
 
 def test_OUP_diffusion():
     dim = 3
-    model = make_OUP_model(dim=dim, theta=0.1, noise_scale=0.3)
+    model = make_OUP_model(dim=dim, tau=0.1, noise_scale=0.3)
     initial_state = jnp.array([1.0, -1.0, 0.5])
 
     diffusion = model.diffusion(0.0, initial_state, None)
-    expected_diffusion = jnp.eye(dim) * model.noise_scale
+    expected_diffusion = jnp.eye(dim) * jnp.sqrt(model.noise_scale)
 
     assert jnp.allclose(diffusion, expected_diffusion)
 
@@ -269,7 +269,7 @@ def test_OUP_convergence():
     mean = jnp.array([0.5, -0.5, 1.0])
     dim = 3
 
-    noise_model = make_OUP_model(dim=dim, theta=1, noise_scale=0, mean=mean)
+    noise_model = make_OUP_model(dim=dim, tau=1, noise_scale=0, mean=mean)
     solver = dfx.EulerHeun()
     terms = noise_model.terms(key)
     init_state = jnp.array([1.0, 2.0, -3.0])
@@ -292,7 +292,7 @@ def test_OUP_zero_mean():
     key = jr.PRNGKey(0)
     dim = 3
 
-    noise_model = make_OUP_model(dim=dim, theta=1, noise_scale=0.1)
+    noise_model = make_OUP_model(dim=dim, tau=1, noise_scale=0.1)
     solver = dfx.EulerHeun()
     terms = noise_model.terms(key)
     init_state = jnp.array([0.0, 0.0, 0.0])
@@ -329,14 +329,12 @@ def test_weight_plasticity():
 
     # Define deterministic noise and RPE
     E_noise = (jnp.arange(N, dtype=jnp.float32) + 1.0) * model.synaptic_increment
-    I_noise = (jnp.arange(N, dtype=jnp.float32) + 0.5) * model.synaptic_increment
     RPE_value = 2.0
 
     args = make_default_args(
         N,
         0,
         excitatory_noise=E_noise,
-        inhibitory_noise=I_noise,
         RPE=RPE_value,
         get_learning_rate=lambda t, x, a: 0.1,
     )
@@ -383,13 +381,11 @@ def test_excitatory_noise_only_affects_voltage_correctly():
     state = make_baseline_state(model)
 
     noise_E = jnp.arange(N, dtype=state.V.dtype)
-    noise_I = jnp.zeros((N,), dtype=state.V.dtype)
 
     args = make_default_args(
         N,
         0,
         excitatory_noise=noise_E,
-        inhibitory_noise=noise_I,
     )
 
     derivs = model.drift(0.0, state, args)
@@ -403,63 +399,11 @@ def test_excitatory_noise_only_affects_voltage_correctly():
     assert jnp.all(dG == 0)
 
 
-def test_inhibitory_noise_only_affects_voltage_correctly():
-    N = 5
-    model = make_LIF_model(N_neurons=N, N_inputs=0, key=jr.PRNGKey(1))
-    state = make_baseline_state(model)
-
-    noise_E = jnp.zeros((N,), dtype=state.V.dtype)
-    noise_I = jnp.linspace(0.0, 1.0, N, dtype=state.V.dtype)
-
-    args = make_default_args(
-        N,
-        0,
-        excitatory_noise=noise_E,
-        inhibitory_noise=noise_I,
-    )
-
-    derivs = model.drift(0.0, state, args)
-    dv, dG = derivs.V, derivs.G
-
-    expected = (
-        noise_I * (model.reversal_potential_I - state.V)
-    ) / model.membrane_capacitance
-
-    assert jnp.allclose(dv, expected)
-    assert jnp.all(dG == 0)
-
-
-def test_both_noises_add_linearly():
-    N = 6
-    model = make_LIF_model(N_neurons=N, N_inputs=0, key=jr.PRNGKey(2))
-    state = make_baseline_state(model)
-
-    noise_E = jnp.linspace(0.1, 2.5, N, dtype=state.V.dtype)
-    noise_I = jnp.linspace(0.0, 1.0, N, dtype=state.V.dtype)
-
-    args = make_default_args(
-        N,
-        0,
-        excitatory_noise=noise_E,
-        inhibitory_noise=noise_I,
-    )
-
-    derivs = model.drift(0.0, state, args)
-    dv = derivs.V
-
-    expected = (
-        noise_I * (model.reversal_potential_I - state.V)
-        + noise_E * (model.reversal_potential_E - state.V)
-    ) / model.membrane_capacitance
-
-    assert jnp.allclose(dv, expected)
-
-
 def test_noise_is_unique():
     N = 5
     key = jr.PRNGKey(3)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_scale=0.5, theta=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_scale=0.5, tau=1.0, key=key
     )
 
     initial_state = model.initial
@@ -468,30 +412,25 @@ def test_noise_is_unique():
     terms = model.terms(jr.PRNGKey(0))
 
     y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, args, None, False)
-    noise_E_state = y1.noise_E_state
-    noise_I_state = y1.noise_I_state
+    noise_state = y1.noise_state
 
-    assert not jnp.all(noise_E_state == noise_I_state)
-    assert not jnp.all(noise_E_state == 0)
-    assert not jnp.all(noise_I_state == 0)
-    assert jnp.unique(noise_E_state).size > 1
-    assert jnp.unique(noise_I_state).size > 1
+    assert not jnp.all(noise_state == 0)
+    assert jnp.unique(noise_state).size > 1
 
 
 def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     N = 5
     key = jr.PRNGKey(4)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_scale=0.5, theta=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_scale=0.5, tau=1.0, key=key
     )
 
     network = model.base_network
     network_state = make_baseline_state(network)
     args = make_default_args(N, 0)
 
-    noise_E_state = jnp.arange(N, dtype=network_state.V.dtype)
-    noise_I_state = jnp.arange(N, dtype=network_state.V.dtype)[::-1]
-    x = make_noisy_state(network_state, noise_E_state, noise_I_state)
+    noise_state = jnp.arange(N, dtype=network_state.V.dtype)
+    x = make_noisy_state(network_state, noise_state)
 
     noisy_network_drift = model.drift(0.0, x, args)
     network_drift = noisy_network_drift.network_state
@@ -499,8 +438,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
 
     V_now = network_state.V
     expected_dv = (
-        noise_I_state * (network.reversal_potential_I - V_now)
-        + noise_E_state * (network.reversal_potential_E - V_now)
+        noise_state * (network.reversal_potential_E - V_now)
     ) / network.membrane_capacitance
 
     assert jnp.allclose(dV, expected_dv)
@@ -508,12 +446,10 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     assert jnp.all(dS == 0)
     assert jnp.all(dW == 0)
 
-    # OU drifts are -theta * state
+    # OU drift is -1/tau * (state - mean)
     assert jnp.allclose(
-        noisy_network_drift.noise_E_state, -model.noise_E.tau * noise_E_state
-    )
-    assert jnp.allclose(
-        noisy_network_drift.noise_I_state, -model.noise_I.tau * noise_I_state
+        noisy_network_drift.noise_state,
+        -1.0 / model.noise_model.tau * (noise_state - model.noise_model.mean),
     )
 
 
@@ -521,14 +457,13 @@ def test_NoisyNeuronModel_diffusion():
     N = 5
     key = jr.PRNGKey(5)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_scale=0.5, theta=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_scale=0.5, tau=1.0, key=key
     )
 
     network = model.base_network
     network_state = make_baseline_state(network)
-    noise_E_state = jnp.arange(N, dtype=network_state.V.dtype)
-    noise_I_state = jnp.arange(N, dtype=network_state.V.dtype)[::-1]
-    initial_state = make_noisy_state(network_state, noise_E_state, noise_I_state)
+    noise_state = jnp.arange(N, dtype=network_state.V.dtype)
+    initial_state = make_noisy_state(network_state, noise_state)
     args = make_default_args(N, 0)
 
     noisy_network_diff = model.diffusion(0.0, initial_state, args).pytree
@@ -546,12 +481,10 @@ def test_NoisyNeuronModel_diffusion():
     assert jnp.allclose(dG, 0.0)
     assert jnp.allclose(dW, 0.0)
 
-    # OU diffusions are identity * noise_scale
+    # OU diffusion is identity * sqrt(noise_scale)
     assert jnp.allclose(
-        noisy_network_diff.noise_E_state, jnp.eye(N) * model.noise_E.noise_scale
-    )
-    assert jnp.allclose(
-        noisy_network_diff.noise_I_state, jnp.eye(N) * model.noise_I.noise_scale
+        noisy_network_diff.noise_state,
+        jnp.eye(N) * jnp.sqrt(model.noise_model.noise_scale),
     )
 
 

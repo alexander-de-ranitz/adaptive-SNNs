@@ -40,21 +40,18 @@ def make_LIF_model(
     )
 
 
-def make_OUP_model(dim=3, theta=1.0, noise_scale=0.3, mean=0.0):
+def make_OUP_model(dim=3, tau=1.0, noise_scale=0.3, mean=0.0):
     """Create an Ornstein-Uhlenbeck Process model with configurable parameters."""
-    return OUP(tau=theta, noise_scale=noise_scale, mean=mean, dim=dim)
+    return OUP(tau=tau, noise_scale=noise_scale, mean=mean, dim=dim)
 
 
 def make_Noisy_LIF_model(
-    N_neurons=10, N_inputs=3, noise_scale=0.0, theta=1.0, dt=0.1e-3, key=jr.PRNGKey(0)
+    N_neurons=10, N_inputs=3, noise_scale=0.0, tau=1.0, dt=0.1e-3, key=jr.PRNGKey(0)
 ):
     """Create a NoisyNetwork with LIF neurons and OU noise processes."""
     network = make_LIF_model(N_neurons, N_inputs, dt=dt, key=key)
-    noise_E = OUP(tau=theta, noise_scale=noise_scale, dim=N_neurons)
-    noise_I = OUP(tau=theta, noise_scale=noise_scale, dim=N_neurons)
-    return NoisyNetwork(
-        neuron_model=network, noise_I_model=noise_I, noise_E_model=noise_E
-    )
+    noise_model = OUP(tau=tau, noise_scale=noise_scale, dim=N_neurons)
+    return NoisyNetwork(neuron_model=network, noise_model=noise_model)
 
 
 # ============================================================================
@@ -96,16 +93,12 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
     return state
 
 
-def make_noisy_state(
-    network_state: LIFState, noise_E=None, noise_I=None
-) -> NoisyNetworkState:
-    """Create a NoisyNetworkState from a LIFState and optional noise states."""
+def make_noisy_state(network_state: LIFState, noise_state=None) -> NoisyNetworkState:
+    """Create a NoisyNetworkState from a LIFState and optional noise state."""
     N_neurons = network_state.V.shape[0]
-    if noise_E is None:
-        noise_E = jnp.zeros((N_neurons,))
-    if noise_I is None:
-        noise_I = jnp.zeros((N_neurons,))
-    return NoisyNetworkState(network_state, noise_E, noise_I)
+    if noise_state is None:
+        noise_state = jnp.zeros((N_neurons,))
+    return NoisyNetworkState(network_state, noise_state)
 
 
 # ============================================================================
@@ -123,7 +116,6 @@ def make_default_args(N_neurons, N_inputs, **overrides):
     """
     args = {
         "excitatory_noise": jnp.zeros((N_neurons,)),
-        "inhibitory_noise": jnp.zeros((N_neurons,)),
         "RPE": jnp.array([0.0]),
         "get_input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
         "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
@@ -162,13 +154,13 @@ class DeterministicOUP(OUP):
 
     def __init__(
         self,
-        theta: float = 1.0,
+        tau: float = 1.0,
         noise_scale: float = 1,
         dim: int = 1,
         t0: float = 0.0,
         t1: float = 1.0,
     ):
-        super().__init__(theta=theta, noise_scale=noise_scale, dim=dim)
+        super().__init__(tau=tau, noise_scale=noise_scale, dim=dim)
         self.t0 = t0
         self.t1 = t1
 
@@ -196,12 +188,11 @@ class DeterministicNoisyNeuronModel(NoisyNetwork):
     def __init__(
         self,
         neuron_model,
-        noise_I_model,
-        noise_E_model,
+        noise_model,
         t0: float = 0.0,
         t1: float = 1.0,
     ):
-        super().__init__(neuron_model, noise_I_model, noise_E_model)
+        super().__init__(neuron_model, noise_model)
         self.t0 = t0
         self.t1 = t1
 
