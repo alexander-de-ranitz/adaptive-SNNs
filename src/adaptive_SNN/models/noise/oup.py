@@ -1,13 +1,14 @@
 import diffrax as dfx
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from adaptive_SNN.models.base import NoiseModelABC
+
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class OUP(eqx.Module):
+class OUP(NoiseModelABC):
     tau: float | Array = 1.0
     noise_scale: float | Array = 1.0
     mean: float | Array = 0.0
