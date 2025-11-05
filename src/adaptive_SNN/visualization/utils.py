@@ -75,7 +75,7 @@ def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
     S = lif_state.S
 
     if neurons_to_plot is None:
-        neurons_to_plot = jnp.arange(V.shape[0])
+        neurons_to_plot = jnp.arange(V.shape[1])
 
     # Plot membrane potentials
     for i in neurons_to_plot:
@@ -188,7 +188,6 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
             label="Total I Conductance",
             color="r",
         )
-    ax.legend(loc="upper right")
     ax.set_ylabel("Total Conductance (S)")
     ax.set_title("Total Conductances")
 
