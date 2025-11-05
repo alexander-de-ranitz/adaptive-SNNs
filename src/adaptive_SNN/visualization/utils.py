@@ -5,6 +5,7 @@ from adaptive_SNN.models import (
     AgentEnvSystem,
     AgentState,
     LIFNetwork,
+    LIFState,
     NoisyNetwork,
     NoisyNetworkState,
     SystemState,
@@ -16,7 +17,7 @@ from adaptive_SNN.models import (
 
 
 def get_LIF_state(state):
-    if isinstance(state, LIFNetwork):
+    if isinstance(state, LIFState):
         return state
     elif isinstance(state, NoisyNetworkState):
         return state.network_state
