@@ -26,7 +26,7 @@ def get_LIF_state(state):
     elif isinstance(state, SystemState):
         return state.agent_state.noisy_network.network_state
     else:
-        raise ValueError("Unsupported state type")
+        raise ValueError(f"Unsupported state type: {type(state)}")
 
 
 def get_LIF_model(model):
@@ -39,7 +39,7 @@ def get_LIF_model(model):
     elif isinstance(model, AgentEnvSystem):
         return model.agent.noisy_network.base_network
     else:
-        raise ValueError("Unsupported model type")
+        raise ValueError(f"Unsupported model type: {type(model)}")
 
 
 def get_noisy_network_state(state):
@@ -50,7 +50,7 @@ def get_noisy_network_state(state):
     elif isinstance(state, SystemState):
         return state.agent_state.noisy_network
     else:
-        raise ValueError("Unsupported state type")
+        raise ValueError(f"Unsupported state type: {type(state)}")
 
 
 def get_noisy_network_model(model):
@@ -61,7 +61,7 @@ def get_noisy_network_model(model):
     elif isinstance(model, AgentEnvSystem):
         return model.agent.noisy_network
     else:
-        raise ValueError("Unsupported model type")
+        raise ValueError(f"Unsupported model type: {type(model)}")
 
 
 # ======================================================================
