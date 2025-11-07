@@ -109,6 +109,7 @@ def compute_charge_ratio(t, state, model) -> Array:
     exc_mask = base_network.excitatory_mask
 
     dt = t[1] - t[0]
+    W = jnp.where(jnp.isfinite(W), W, 0.0)
     weighed_G_inhibitory = jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1)
     weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1) + noise
 
@@ -121,5 +122,8 @@ def compute_charge_ratio(t, state, model) -> Array:
         * dt
     )
 
-    ratio = jnp.abs(total_inhibitory_charge / (total_excitatory_charge + 1e-9))
+    # TODO: this does not account for leak conductance current
+    # Might be easier to use the voltage trace directly to compute total charge?
+
+    ratio = jnp.abs(total_inhibitory_charge / (total_excitatory_charge))
     return ratio
