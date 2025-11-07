@@ -374,11 +374,14 @@ class LIFNetwork(NeuronModelABC):
         return state
 
     def clip_weights(self, t, state, args):
-        """Clip weights to be non-negative."""
+        """Clip weights to be non-negative.
+
+        Only applied to existing connections (weights != -inf).
+        """
         return eqx.tree_at(
             lambda s: s.W,
             state,
-            jnp.clip(state.W, min=0.0),
+            jnp.where(jnp.isfinite(state.W), jnp.clip(state.W, min=0.0), state.W),
         )
 
     def get_delayed_spikes(self, state: LIFState) -> Array:
