@@ -55,7 +55,8 @@ class LIFNetwork(NeuronModelABC):
     refractory_period: float = 2.0 * 1e-3  # ms
     mean_synaptic_delay: float = 1.5 * 1e-3  # ms
 
-    input_weight: float  # Weight of input spikes
+    input_weight: float  # Mean input weight
+    rec_weight: float  # Mean recurrent weight
     fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
     N_neurons: int
     N_inputs: int
@@ -72,9 +73,9 @@ class LIFNetwork(NeuronModelABC):
         dt,
         N_neurons: int,
         N_inputs: int = 0,
-        input_neuron_types: Array = None,  # Binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
         fully_connected_input: bool = True,
         input_weight: float = 1.0,
+        rec_weight: float = 1.0,
         key: jr.PRNGKey = jr.PRNGKey(0),
     ):
         """Initialize LIF network model.
@@ -82,16 +83,17 @@ class LIFNetwork(NeuronModelABC):
         Args:
             N_neurons: Number of neurons in the network
             N_inputs: Number of input neurons
-            input_neuron_types: Binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory). If None, all input neurons are excitatory.
             fully_connected_input: If True, all input neurons connect to all neurons with weight input_weight
-            input_weight: Weight of input spikes
+            input_weight: Mean weight of input synapses
+            rec_weight: Mean weight of recurrent synapses
             dt: Timestep size for simulation (s)
-            key: JAX random key for weight initialization
+            key: JAX random key for initialization
         """
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
         self.fully_connected_input = fully_connected_input
         self.input_weight = input_weight
+        self.rec_weight = rec_weight
         self.dt = dt
 
         key, subkey = jr.split(key)
@@ -107,9 +109,15 @@ class LIFNetwork(NeuronModelABC):
             ),
         )
 
-        # If no input neuron types provided, assume all input neurons are excitatory
-        if input_neuron_types is None:
-            input_neuron_types = jnp.ones((N_inputs,), dtype=bool)
+        # Set input neuron types, 80% excitatory, 20% inhibitory
+        N_E_inputs = jnp.int32(jnp.floor(N_inputs * 0.8))
+        N_I_inputs = N_inputs - N_E_inputs
+        input_neuron_types = jnp.concatenate(
+            [
+                jnp.ones(shape=(N_E_inputs,), dtype=bool),
+                jnp.zeros(shape=(N_I_inputs,), dtype=bool),
+            ]
+        )
 
         self.excitatory_mask = jnp.concatenate(
             [neuron_types, input_neuron_types], dtype=bool
@@ -123,13 +131,13 @@ class LIFNetwork(NeuronModelABC):
         key, subkey = jr.split(key)
         delays = self.mean_synaptic_delay * (
             1.0
-            + 0.1
+            + 0.2
             * jr.normal(subkey, shape=(self.N_neurons, self.N_neurons + self.N_inputs))
         )
         delays = jnp.clip(
             delays,
             min=0.5 * self.mean_synaptic_delay,
-            max=2.0 * self.mean_synaptic_delay,
+            max=1.5 * self.mean_synaptic_delay,
         )  # Avoid too small or too large
         self.synaptic_delay_matrix = delays
 
@@ -150,22 +158,45 @@ class LIFNetwork(NeuronModelABC):
         key, subkey = jr.split(key)
 
         # Initialize weights with random sparse connectivity with no self-connections or double connections
-        # The weights are drawn from a normal distribution around with mean 1 and std 0.1
-        num_possible_connections = self.N_neurons * (self.N_neurons + self.N_inputs)
-        num_connections = int(num_possible_connections * self.connection_prob)
-        weights = jnp.abs(
-            1 + 0.1 * jr.normal(key, (self.N_neurons, self.N_neurons + self.N_inputs))
-        ) * jr.permutation(
+        # The weights are drawn from a normal distribution around with mean 1 and std 0.2
+        num_rec_connections = jnp.int32(self.N_neurons**2 * self.connection_prob)
+        rec_weights = (
+            self.rec_weight
+            * jnp.clip(
+                1 + 0.2 * jr.normal(key, (self.N_neurons, self.N_neurons)),
+                min=0.5,
+                max=1.5,
+            )
+            * jr.permutation(
+                subkey,
+                jnp.concatenate(
+                    [
+                        jnp.ones(num_rec_connections),
+                        jnp.zeros(self.N_neurons**2 - num_rec_connections),
+                    ]
+                ),
+            ).reshape(self.N_neurons, self.N_neurons)
+        )
+
+        # Remove self-connections
+        rec_weights = jnp.fill_diagonal(rec_weights, 0.0, inplace=False)
+
+        key, subkey = jr.split(key)
+        N_input_connections = jnp.int32(
+            self.N_neurons * self.N_inputs * self.connection_prob
+        )
+        input_weights = jr.permutation(
             subkey,
             jnp.concatenate(
                 [
-                    jnp.ones(num_connections),
-                    jnp.zeros(num_possible_connections - num_connections),
+                    jnp.ones(N_input_connections) * self.input_weight,
+                    jnp.zeros(self.N_neurons * self.N_inputs - N_input_connections),
                 ]
             ),
-        ).reshape(self.N_neurons, self.N_neurons + self.N_inputs)
+        ).reshape(self.N_neurons, self.N_inputs)
 
-        weights = jnp.fill_diagonal(weights, 0.0, inplace=False)  # No self-connections
+        weights = jnp.concatenate([rec_weights, input_weights], axis=1)
+
         weights = jnp.where(
             weights == 0.0, -jnp.inf, weights
         )  # Non existing connections have weight -inf
