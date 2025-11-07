@@ -420,13 +420,27 @@ class LIFNetwork(NeuronModelABC):
         weights = jnp.where(
             state.W == -jnp.inf, 0.0, state.W
         )  # Treat non-existing connections as weight 0 for balance computation
-        excitatory_weights = jnp.sum(weights * self.excitatory_mask[None, :], axis=1)
-        inhibitory_weights = jnp.sum(
-            weights * jnp.invert(self.excitatory_mask[None, :]), axis=1
+
+        # Create masks for existing connections
+        existing_E = jnp.isfinite(state.W) & self.excitatory_mask[None, :]
+        existing_I = jnp.isfinite(state.W) & ~self.excitatory_mask[None, :]
+
+        N_E_connections = jnp.sum(existing_E, axis=1)
+        N_I_connections = jnp.sum(existing_I, axis=1)
+
+        mean_excitatory_weights = jnp.sum(weights * existing_E, axis=1) / (
+            N_E_connections + 1e-12
         )
-        balance = inhibitory_weights / (
-            excitatory_weights + 1e-12
-        )  # Avoid division by zero
+        mean_inhibitory_weights = jnp.sum(weights * existing_I, axis=1) / (
+            N_I_connections + 1e-12
+        )
+
+        balance = mean_inhibitory_weights / (mean_excitatory_weights + 1e-12)
+
+        # In case either a neuron does not have both E and I connections, the balance is not defined
+        balance = jnp.where(
+            (N_E_connections == 0) | (N_I_connections == 0), jnp.nan, balance
+        )
         return balance
 
     def force_balanced_weights(self, t, state, args):
