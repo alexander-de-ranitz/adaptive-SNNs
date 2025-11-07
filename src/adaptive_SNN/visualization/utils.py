@@ -91,6 +91,7 @@ def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
 
 
 def _plot_spikes_raster(ax, t, state, model, neurons_to_plot=None):
+    # TODO: use neurons_to_plot
     lif_network = get_LIF_model(model)
     lif_state = get_LIF_state(state)
 
