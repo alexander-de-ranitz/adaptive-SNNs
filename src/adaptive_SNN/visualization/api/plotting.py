@@ -1,18 +1,25 @@
 import jax
-import jax.numpy as jnp
 import matplotlib as mpl
 from diffrax import Solution
+from jax import numpy as jnp
 from matplotlib import pyplot as plt
 
 from adaptive_SNN.models import (
+    AgentEnvSystem,
     LIFNetwork,
     NoisyNetwork,
     SystemState,
 )
-from adaptive_SNN.visualization.utils import (
+from adaptive_SNN.utils.metrics import compute_CV_ISI
+from adaptive_SNN.visualization.utils.adapters import get_LIF_model, get_LIF_state
+from adaptive_SNN.visualization.utils.components import (
+    _plot_conductance_frequency_spectrum,
     _plot_conductances,
+    _plot_ISI_distribution,
     _plot_membrane_potential,
+    _plot_spike_rates,
     _plot_spikes_raster,
+    _plot_voltage_distribution,
 )
 
 mpl.rcParams["savefig.directory"] = "../figures"
@@ -23,7 +30,6 @@ def plot_simulate_SNN_results(
     model: LIFNetwork | NoisyNetwork,
     t0: float,
     t1: float,
-    dt: float,
     split_noise: bool = False,
     plot_spikes: bool = True,
     plot_voltage_distribution: bool = False,
@@ -66,7 +72,7 @@ def plot_simulate_SNN_results(
 
 def plot_learning_results(
     sols: Solution | list[Solution],
-    model,
+    model: AgentEnvSystem,
     t0: float,
     t1: float,
     dt: float,
@@ -136,3 +142,118 @@ def plot_learning_results(
         plt.close()
     else:
         plt.show()
+
+
+def plot_network_stats(
+    sol: Solution,
+    model,
+    t0: float,
+    t1: float,
+    dt: float,
+):
+    """Plot various network statistics including ISI distribution."""
+    lif_model = get_LIF_model(model)
+
+    fig, axs = plt.subplots(2, 2, figsize=(6, 6))
+    _plot_ISI_distribution(
+        axs[0][0],
+        sol,
+        model,
+        t0,
+        t1,
+        dt,
+        neurons_to_plot=jnp.arange(lif_model.N_neurons),
+        color="blue",
+        label="Recurrent Neurons",
+        alpha=0.7,
+    )
+    CV_ISI = compute_CV_ISI(get_LIF_state(sol.ys).S[:, : lif_model.N_neurons])
+    axs[0][0].set_title(
+        f"Inter-Spike Interval (ISI) Distribution (CV={jnp.nanmean(CV_ISI):.2f})"
+    )
+
+    _plot_ISI_distribution(
+        axs[0][1],
+        sol,
+        model,
+        t0,
+        t1,
+        dt,
+        neurons_to_plot=jnp.arange(
+            lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
+        ),
+        color="red",
+        label="Input Neurons",
+        alpha=0.7,
+    )
+    CV_ISI = compute_CV_ISI(get_LIF_state(sol.ys).S[:, lif_model.N_neurons :])
+    axs[0][1].set_title(
+        f"Inter-Spike Interval (ISI) Distribution (CV={jnp.nanmean(CV_ISI):.2f})"
+    )
+
+    axs[1][0].set_title("Spike Raster Plot")
+    _plot_spikes_raster(axs[1][0], sol.ts, sol.ys, model)
+
+    _plot_spike_rates(
+        axs[1][1],
+        sol,
+        model,
+        t0,
+        t1,
+        dt,
+        neurons_to_plot=jnp.arange(lif_model.N_neurons),
+        color="blue",
+        label="Recurrent Neurons",
+    )
+    _plot_spike_rates(
+        axs[1][1],
+        sol,
+        model,
+        t0,
+        t1,
+        dt,
+        neurons_to_plot=jnp.arange(
+            lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
+        ),
+        color="red",
+        label="Input Neurons",
+    )
+    axs[1][1].set_title("Spike Rates Over Time")
+    axs[1][1].legend()
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_frequency_analysis(
+    sol,
+    model,
+    t0: float,
+    t1: float,
+    dt0: float,
+    neurons_to_plot: jnp.ndarray | None = None,
+):
+    t = sol.ts
+    state = sol.ys
+    V = get_LIF_state(state).V
+
+    if neurons_to_plot is None:
+        neurons_to_plot = jnp.arange(V.shape[1])
+
+    fig, axs = plt.subplots(3, 1, figsize=(8, 8))
+
+    # Plot membrane potential
+    _plot_membrane_potential(axs[0], t, state, model, neurons_to_plot=neurons_to_plot)
+    axs[0].set_title("Neuron Membrane Potential")
+
+    # Plot voltage distribution
+    _plot_voltage_distribution(axs[1], t, state, model, neurons_to_plot=neurons_to_plot)
+    axs[1].set_title("Voltage Distribution")
+
+    # Plot freq spectrum
+    _plot_conductance_frequency_spectrum(
+        axs[2], t, state, model, neurons_to_plot=neurons_to_plot, plot_noise=True
+    )
+    axs[2].set_title("Conductance Frequency Spectrum")
+
+    plt.tight_layout()
+    plt.show()
