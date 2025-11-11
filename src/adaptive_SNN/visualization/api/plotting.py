@@ -28,17 +28,17 @@ mpl.rcParams["savefig.directory"] = "../figures"
 def plot_simulate_SNN_results(
     sol: Solution,
     model: LIFNetwork | NoisyNetwork,
-    t0: float,
-    t1: float,
     split_noise: bool = False,
     plot_spikes: bool = True,
     plot_voltage_distribution: bool = False,
     neurons_to_plot: jnp.ndarray | None = None,
     save_path: str | None = None,
+    **plot_kwargs,
 ):
     # Get results
     t = sol.ts
-    state = sol.ys
+    t0 = t[0]
+    t1 = t[-1]
 
     n_axs = 2 + int(plot_spikes) + int(plot_voltage_distribution)
 
@@ -47,20 +47,23 @@ def plot_simulate_SNN_results(
     for ax in axs:
         ax.set_xlim(t0, t1)
 
-    _plot_membrane_potential(axs[0], t, state, model, neurons_to_plot=neurons_to_plot)
+    _plot_membrane_potential(
+        axs[0], sol, model, neurons_to_plot=neurons_to_plot, **plot_kwargs
+    )
     _plot_conductances(
         axs[1],
-        t,
-        state,
+        sol,
         model,
         neurons_to_plot=neurons_to_plot,
         split_noise=split_noise,
     )
     if plot_spikes:
-        _plot_spikes_raster(axs[2], t, state, model, neurons_to_plot=neurons_to_plot)
+        _plot_spikes_raster(
+            axs[2], sol, model, neurons_to_plot=neurons_to_plot, **plot_kwargs
+        )
     if plot_voltage_distribution:
-        plot_voltage_distribution(
-            axs[-1], t, state, model, neurons_to_plot=neurons_to_plot
+        _plot_voltage_distribution(
+            axs[-1], sol, model, neurons_to_plot=neurons_to_plot, **plot_kwargs
         )
 
     plt.tight_layout()
@@ -73,9 +76,6 @@ def plot_simulate_SNN_results(
 def plot_learning_results(
     sols: Solution | list[Solution],
     model: AgentEnvSystem,
-    t0: float,
-    t1: float,
-    dt: float,
     args: dict = None,
     target_state: float = 10.0,
     save_path: str | None = None,
@@ -90,6 +90,9 @@ def plot_learning_results(
     for i, sol in enumerate(sols):
         # Get results
         t = sol.ts
+        t0 = t[0]
+        t1 = t[-1]
+
         state: SystemState = sol.ys
         agent_state, env_state = state.agent_state, state.environment_state
         network_state, reward_state = agent_state.noisy_network, agent_state.reward
@@ -147,9 +150,6 @@ def plot_learning_results(
 def plot_network_stats(
     sol: Solution,
     model,
-    t0: float,
-    t1: float,
-    dt: float,
 ):
     """Plot various network statistics including ISI distribution."""
     lif_model = get_LIF_model(model)
@@ -159,9 +159,6 @@ def plot_network_stats(
         axs[0][0],
         sol,
         model,
-        t0,
-        t1,
-        dt,
         neurons_to_plot=jnp.arange(lif_model.N_neurons),
         color="blue",
         label="Recurrent Neurons",
@@ -176,9 +173,6 @@ def plot_network_stats(
         axs[0][1],
         sol,
         model,
-        t0,
-        t1,
-        dt,
         neurons_to_plot=jnp.arange(
             lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
         ),
@@ -192,15 +186,12 @@ def plot_network_stats(
     )
 
     axs[1][0].set_title("Spike Raster Plot")
-    _plot_spikes_raster(axs[1][0], sol.ts, sol.ys, model)
+    _plot_spikes_raster(axs[1][0], sol, model)
 
     _plot_spike_rates(
         axs[1][1],
         sol,
         model,
-        t0,
-        t1,
-        dt,
         neurons_to_plot=jnp.arange(lif_model.N_neurons),
         color="blue",
         label="Recurrent Neurons",
@@ -209,9 +200,6 @@ def plot_network_stats(
         axs[1][1],
         sol,
         model,
-        t0,
-        t1,
-        dt,
         neurons_to_plot=jnp.arange(
             lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
         ),
@@ -227,12 +215,8 @@ def plot_network_stats(
 def plot_frequency_analysis(
     sol,
     model,
-    t0: float,
-    t1: float,
-    dt0: float,
     neurons_to_plot: jnp.ndarray | None = None,
 ):
-    t = sol.ts
     state = sol.ys
     V = get_LIF_state(state).V
 
@@ -242,16 +226,16 @@ def plot_frequency_analysis(
     fig, axs = plt.subplots(3, 1, figsize=(8, 8))
 
     # Plot membrane potential
-    _plot_membrane_potential(axs[0], t, state, model, neurons_to_plot=neurons_to_plot)
+    _plot_membrane_potential(axs[0], sol, model, neurons_to_plot=neurons_to_plot)
     axs[0].set_title("Neuron Membrane Potential")
 
     # Plot voltage distribution
-    _plot_voltage_distribution(axs[1], t, state, model, neurons_to_plot=neurons_to_plot)
+    _plot_voltage_distribution(axs[1], sol, model, neurons_to_plot=neurons_to_plot)
     axs[1].set_title("Voltage Distribution")
 
     # Plot freq spectrum
     _plot_conductance_frequency_spectrum(
-        axs[2], t, state, model, neurons_to_plot=neurons_to_plot, plot_noise=True
+        axs[2], sol, model, neurons_to_plot=neurons_to_plot, plot_noise=True
     )
     axs[2].set_title("Conductance Frequency Spectrum")
 
