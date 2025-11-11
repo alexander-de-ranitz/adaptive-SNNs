@@ -5,6 +5,7 @@ from adaptive_SNN.models import (
     AgentEnvSystem,
     AgentState,
     LIFNetwork,
+    LIFState,
     NoisyNetwork,
     NoisyNetworkState,
     SystemState,
@@ -16,7 +17,7 @@ from adaptive_SNN.models import (
 
 
 def get_LIF_state(state):
-    if isinstance(state, LIFNetwork):
+    if isinstance(state, LIFState):
         return state
     elif isinstance(state, NoisyNetworkState):
         return state.network_state
@@ -25,7 +26,7 @@ def get_LIF_state(state):
     elif isinstance(state, SystemState):
         return state.agent_state.noisy_network.network_state
     else:
-        raise ValueError("Unsupported state type")
+        raise ValueError(f"Unsupported state type: {type(state)}")
 
 
 def get_LIF_model(model):
@@ -38,7 +39,7 @@ def get_LIF_model(model):
     elif isinstance(model, AgentEnvSystem):
         return model.agent.noisy_network.base_network
     else:
-        raise ValueError("Unsupported model type")
+        raise ValueError(f"Unsupported model type: {type(model)}")
 
 
 def get_noisy_network_state(state):
@@ -49,7 +50,7 @@ def get_noisy_network_state(state):
     elif isinstance(state, SystemState):
         return state.agent_state.noisy_network
     else:
-        raise ValueError("Unsupported state type")
+        raise ValueError(f"Unsupported state type: {type(state)}")
 
 
 def get_noisy_network_model(model):
@@ -60,7 +61,7 @@ def get_noisy_network_model(model):
     elif isinstance(model, AgentEnvSystem):
         return model.agent.noisy_network
     else:
-        raise ValueError("Unsupported model type")
+        raise ValueError(f"Unsupported model type: {type(model)}")
 
 
 # ======================================================================
@@ -74,7 +75,7 @@ def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
     S = lif_state.S
 
     if neurons_to_plot is None:
-        neurons_to_plot = jnp.arange(V.shape[0])
+        neurons_to_plot = jnp.arange(V.shape[1])
 
     # Plot membrane potentials
     for i in neurons_to_plot:
@@ -90,6 +91,7 @@ def _plot_membrane_potential(ax, t, state, model, neurons_to_plot=None):
 
 
 def _plot_spikes_raster(ax, t, state, model, neurons_to_plot=None):
+    # TODO: use neurons_to_plot
     lif_network = get_LIF_model(model)
     lif_state = get_LIF_state(state)
 
@@ -187,7 +189,6 @@ def _plot_conductances(ax, t, state, model, neurons_to_plot=None, split_noise=Fa
             label="Total I Conductance",
             color="r",
         )
-    ax.legend(loc="upper right")
     ax.set_ylabel("Total Conductance (S)")
     ax.set_title("Total Conductances")
 
