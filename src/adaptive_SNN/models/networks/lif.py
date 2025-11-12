@@ -277,12 +277,12 @@ class LIFNetwork(NeuronModelABC):
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
         RPE = args.get("RPE", jnp.array(0.0))
-        E_noise = jnp.outer(args["excitatory_noise"], self.excitatory_mask)
+        noise_per_synapse = jnp.outer(E_noise, self.excitatory_mask)
 
         dW = (
             learning_rate
             * RPE
-            * (E_noise / self.synaptic_increment)
+            * (noise_per_synapse / self.synaptic_increment)
             * (G / self.synaptic_increment)
         )  # Since W is in arbitrary units (not nS), scale by synaptic increment to get a sensible scale
         dW = jnp.where(
