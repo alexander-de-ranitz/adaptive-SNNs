@@ -253,9 +253,11 @@ class LIFNetwork(NeuronModelABC):
         total_I_conductances = jnp.sum(
             weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
         )
+
+        E_noise = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
         total_E_conductances = (
             jnp.sum(weighted_conductances * self.excitatory_mask[None, :], axis=1)
-            + args["excitatory_noise"]
+            + E_noise
         )  # Add external excitatory noise to total excitatory conductance
 
         # Ensure non-negative conductances
