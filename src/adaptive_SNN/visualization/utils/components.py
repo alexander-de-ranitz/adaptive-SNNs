@@ -68,6 +68,7 @@ def _plot_spikes_raster(
     ax.eventplot(spike_times_per_neuron, colors="black", linelengths=0.8, **plot_kwargs)
     ax.set_ylabel("Neuron")
     ax.set_xlabel("Time (s)")
+    ax.set_xlim(t[0], t[-1])
     ax.set_title("Spike Raster Plot")
 
     if N_inputs > 0:
@@ -209,6 +210,8 @@ def _plot_ISI_distribution(
     spike_times = jnp.flatnonzero(spikes)
     ISIs = jnp.diff(spike_times) * dt  # Convert to time using dt
     ax.hist(ISIs, bins=50, density=True, **plot_kwargs)
+    ax.set_xlabel("Inter-Spike Interval (s)")
+    ax.set_ylabel("Density")
 
 
 def _plot_spike_rates(
@@ -219,7 +222,7 @@ def _plot_spike_rates(
     moving_window_duration: float = 0.1,
     **plot_kwargs,
 ):
-    """Plot the spike rate over time for the network.
+    """Plot the mean network spike rate over time.
 
     The spike rate is computed using a moving window centered at the current timepoint.
     """
@@ -246,6 +249,69 @@ def _plot_spike_rates(
     ax.plot(t, rec_spike_rate, **plot_kwargs)
     ax.set_ylabel("Spike Rate (Hz)")
     ax.set_title("Network Spike Rate")
+
+
+def _plot_spike_rate_distributions(
+    ax: Axes,
+    sol: Solution,
+    model,
+    neurons_to_plot: Array | None = None,
+    separate_rec_and_input: bool = True,
+    **plot_kwargs,
+):
+    """Plot the distribution of mean spike rates across neurons."""
+    lif_state = get_LIF_state(sol.ys)
+    lif_model = get_LIF_model(model)
+
+    t = sol.ts
+
+    if neurons_to_plot is not None and separate_rec_and_input:
+        raise ValueError(
+            "Cannot both specify neurons_to_plot and set separate_rec_and_input to True."
+        )
+
+    if neurons_to_plot is None:
+        neurons_to_plot = jnp.arange(lif_model.N_neurons + lif_model.N_inputs)
+        separate_rec_and_input = True
+
+    if not separate_rec_and_input:
+        spikes = lif_state.S[:, neurons_to_plot]
+        spike_rates = jnp.sum(spikes, axis=0) / (t[-1] - t[0])
+        ax.hist(spike_rates, bins=30, **plot_kwargs)
+        ax.set_xlabel("Spike Rate (Hz)")
+        ax.set_ylabel("Count")
+        ax.set_title("Spike Rate Distribution")
+    else:
+        rec_neurons = jnp.arange(lif_model.N_neurons)
+        input_neurons = jnp.arange(
+            lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
+        )
+
+        spikes_rec = lif_state.S[:, rec_neurons]
+        spike_rates_rec = jnp.sum(spikes_rec, axis=0) / (t[-1] - t[0])
+        ax.hist(
+            spike_rates_rec,
+            bins=30,
+            alpha=0.7,
+            label="Recurrent Neurons",
+            color="blue",
+            **plot_kwargs,
+        )
+
+        spikes_input = lif_state.S[:, input_neurons]
+        spike_rates_input = jnp.sum(spikes_input, axis=0) / (t[-1] - t[0])
+        ax.hist(
+            spike_rates_input,
+            bins=30,
+            alpha=0.7,
+            label="Input Neurons",
+            color="red",
+            **plot_kwargs,
+        )
+        ax.set_xlabel("Spike Rate (Hz)")
+        ax.set_title("Spike Rate Distribution")
+        ax.set_ylabel("Count")
+        ax.legend()
 
 
 def _plot_frequency_spectrum(
