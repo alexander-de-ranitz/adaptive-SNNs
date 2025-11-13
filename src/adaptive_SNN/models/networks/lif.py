@@ -142,7 +142,9 @@ class LIFNetwork(NeuronModelABC):
         self.synaptic_delay_matrix = delays
 
         # Compute buffer size based on max delay
-        self.buffer_size = (jnp.ceil(jnp.max(delays) / self.dt) + 1).astype(jnp.int32)
+        self.buffer_size = int(
+            jnp.ceil(jnp.max(delays) / self.dt) + 1
+        )  # .astype(jnp.int32)
 
     @property
     def initial(self, key: jr.PRNGKey = jr.PRNGKey(0)):
@@ -368,7 +370,7 @@ class LIFNetwork(NeuronModelABC):
             ),
         )
 
-    def update(self, t, x, args):
+    def update(self, t, x: LIFState, args):
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         state = self.spike_and_reset(t, x, args)
         state = self.force_balanced_weights(t, state, args)
