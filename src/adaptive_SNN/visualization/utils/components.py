@@ -48,14 +48,13 @@ def _plot_spikes_raster(
     neurons_to_plot: Array | None = None,
     **plot_kwargs,
 ):
-    # TODO: use neurons_to_plot to filter
     lif_network = get_LIF_model(model)
     lif_state = get_LIF_state(sol.ys)
 
-    N_neurons = lif_network.N_neurons
-    N_inputs = lif_network.N_inputs
-    exc_mask = lif_network.excitatory_mask
-    spikes = lif_state.S
+    if neurons_to_plot is None:
+        neurons_to_plot = jnp.arange(lif_network.N_neurons)
+
+    spikes = lif_state.S[:, neurons_to_plot]
 
     t = sol.ts
     dt = t[1] - t[0]
@@ -70,19 +69,6 @@ def _plot_spikes_raster(
     ax.set_xlabel("Time (s)")
     ax.set_xlim(t[0], t[-1])
     ax.set_title("Spike Raster Plot")
-
-    if N_inputs > 0:
-        # Shade background to distinguish input vs. main neurons
-        # This assumes that all exc/inh inputs are grouped together at the end of the neuron list
-        N_exc_input = jnp.sum(exc_mask[N_neurons:])
-        N_inh_input = N_inputs - N_exc_input
-        ax.axhspan(-0.5, N_inh_input - 0.5, facecolor="#E8BFB5", alpha=0.3)
-        ax.axhspan(
-            N_inh_input - 0.5,
-            N_inh_input + N_exc_input - 0.5,
-            facecolor="#B5D6E8",
-            alpha=0.3,
-        )
 
 
 def _plot_conductances(
@@ -247,8 +233,9 @@ def _plot_spike_rates(
         / jnp.size(neurons_to_plot)
     )
     ax.plot(t, rec_spike_rate, **plot_kwargs)
+    ax.set_xlabel("Time (s)")
     ax.set_ylabel("Spike Rate (Hz)")
-    ax.set_title("Network Spike Rate")
+    ax.set_title("Mean Network Spike Rate")
 
 
 def _plot_spike_rate_distributions(
@@ -256,7 +243,6 @@ def _plot_spike_rate_distributions(
     sol: Solution,
     model,
     neurons_to_plot: Array | None = None,
-    separate_rec_and_input: bool = True,
     **plot_kwargs,
 ):
     """Plot the distribution of mean spike rates across neurons."""
@@ -264,54 +250,20 @@ def _plot_spike_rate_distributions(
     lif_model = get_LIF_model(model)
 
     t = sol.ts
-
-    if neurons_to_plot is not None and separate_rec_and_input:
-        raise ValueError(
-            "Cannot both specify neurons_to_plot and set separate_rec_and_input to True."
-        )
-
     if neurons_to_plot is None:
-        neurons_to_plot = jnp.arange(lif_model.N_neurons + lif_model.N_inputs)
-        separate_rec_and_input = True
+        neurons_to_plot = jnp.arange(lif_model.N_neurons)
 
-    if not separate_rec_and_input:
-        spikes = lif_state.S[:, neurons_to_plot]
-        spike_rates = jnp.sum(spikes, axis=0) / (t[-1] - t[0])
-        ax.hist(spike_rates, bins=30, **plot_kwargs)
-        ax.set_xlabel("Spike Rate (Hz)")
-        ax.set_ylabel("Count")
-        ax.set_title("Spike Rate Distribution")
-    else:
-        rec_neurons = jnp.arange(lif_model.N_neurons)
-        input_neurons = jnp.arange(
-            lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
-        )
-
-        spikes_rec = lif_state.S[:, rec_neurons]
-        spike_rates_rec = jnp.sum(spikes_rec, axis=0) / (t[-1] - t[0])
-        ax.hist(
-            spike_rates_rec,
-            bins=30,
-            alpha=0.7,
-            label="Recurrent Neurons",
-            color="blue",
-            **plot_kwargs,
-        )
-
-        spikes_input = lif_state.S[:, input_neurons]
-        spike_rates_input = jnp.sum(spikes_input, axis=0) / (t[-1] - t[0])
-        ax.hist(
-            spike_rates_input,
-            bins=30,
-            alpha=0.7,
-            label="Input Neurons",
-            color="red",
-            **plot_kwargs,
-        )
-        ax.set_xlabel("Spike Rate (Hz)")
-        ax.set_title("Spike Rate Distribution")
-        ax.set_ylabel("Count")
-        ax.legend()
+    spikes = lif_state.S[:, neurons_to_plot]
+    spike_rates = jnp.sum(spikes, axis=0) / (t[-1] - t[0])
+    ax.hist(
+        spike_rates,
+        bins=jnp.arange(0, jnp.ceil(jnp.max(spike_rates)), step=1 / (t[-1] - t[0])),
+        density=True,
+        **plot_kwargs,
+    )
+    ax.set_xlabel("Spike Rate (Hz)")
+    ax.set_ylabel("Count")
+    ax.set_title("Spike Rate Distribution")
 
 
 def _plot_frequency_spectrum(
