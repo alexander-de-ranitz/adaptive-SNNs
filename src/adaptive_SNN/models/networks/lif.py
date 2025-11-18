@@ -44,7 +44,7 @@ class LIFNetwork(NeuronModelABC):
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_capacitance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
-    connection_prob: float = 0.1
+    connection_prob: float = 0.2
     reversal_potential_E: float = 0.0  # mV
     reversal_potential_I: float = -75.0 * 1e-3  # mV
     tau_E: float = 2.0 * 1e-3  # ms
@@ -54,6 +54,10 @@ class LIFNetwork(NeuronModelABC):
     V_reset: float = -60.0 * 1e-3  # mV
     refractory_period: float = 2.0 * 1e-3  # ms
     mean_synaptic_delay: float = 1.5 * 1e-3  # ms
+    fraction_excitatory_recurrent: float = (
+        0.8  # Fraction of excitatory recurrent neurons
+    )
+    fraction_excitatory_input: float = 1.0  # Fraction of excitatory input neurons
 
     input_weight: float  # Mean input weight
     rec_weight: float  # Mean recurrent weight
@@ -76,6 +80,8 @@ class LIFNetwork(NeuronModelABC):
         fully_connected_input: bool = True,
         input_weight: float = 1.0,
         rec_weight: float = 1.0,
+        fraction_excitatory_recurrent: float = 0.8,
+        fraction_excitatory_input: float = 1.0,
         key: jr.PRNGKey = jr.PRNGKey(0),
     ):
         """Initialize LIF network model.
@@ -94,6 +100,8 @@ class LIFNetwork(NeuronModelABC):
         self.fully_connected_input = fully_connected_input
         self.input_weight = input_weight
         self.rec_weight = rec_weight
+        self.fraction_excitatory_recurrent = fraction_excitatory_recurrent
+        self.fraction_excitatory_input = fraction_excitatory_input
         self.dt = dt
 
         key, subkey = jr.split(key)
@@ -103,14 +111,23 @@ class LIFNetwork(NeuronModelABC):
             subkey,
             jnp.concatenate(
                 [
-                    jnp.ones((int(0.8 * N_neurons),), dtype=bool),
-                    jnp.zeros((N_neurons - int(0.8 * N_neurons),), dtype=bool),
+                    jnp.ones(
+                        (int(jnp.round(fraction_excitatory_recurrent * N_neurons)),),
+                        dtype=bool,
+                    ),
+                    jnp.zeros(
+                        (
+                            N_neurons
+                            - int(jnp.round(fraction_excitatory_recurrent * N_neurons)),
+                        ),
+                        dtype=bool,
+                    ),
                 ]
             ),
         )
 
         # Set input neuron types, 80% excitatory, 20% inhibitory
-        N_E_inputs = jnp.int32(jnp.floor(N_inputs * 0.8))
+        N_E_inputs = int(jnp.round(N_inputs * self.fraction_excitatory_input))
         N_I_inputs = N_inputs - N_E_inputs
         input_neuron_types = jnp.concatenate(
             [
@@ -161,7 +178,7 @@ class LIFNetwork(NeuronModelABC):
 
         # Initialize weights with random sparse connectivity with no self-connections or double connections
         # The weights are drawn from a normal distribution around with mean 1 and std 0.2
-        num_rec_connections = jnp.int32(self.N_neurons**2 * self.connection_prob)
+        num_rec_connections = int(self.N_neurons**2 * self.connection_prob)
         rec_weights = (
             self.rec_weight
             * jnp.clip(
@@ -184,7 +201,7 @@ class LIFNetwork(NeuronModelABC):
         rec_weights = jnp.fill_diagonal(rec_weights, 0.0, inplace=False)
 
         key, subkey = jr.split(key)
-        N_input_connections = jnp.int32(
+        N_input_connections = int(
             self.N_neurons * self.N_inputs * self.connection_prob
         )
         input_weights = jr.permutation(
