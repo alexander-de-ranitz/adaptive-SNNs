@@ -67,7 +67,7 @@ class LIFNetwork(NeuronModelABC):
     excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
     synaptic_time_constants: Array  # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
     synaptic_delay_matrix: (
-        Array  # Matrix of synaptic delays (N_neurons, N_neurons + N_inputs) in seconds
+        Array  # Matrix of synaptic delays (N_neurons, N_neurons) in seconds
     )
     buffer_size: int  # Size of spike history buffer
     dt: float  # Timestep size for simulation in seconds, used for delay buffer
@@ -146,22 +146,12 @@ class LIFNetwork(NeuronModelABC):
         # Set synaptic delays
         # TODO: Tune this properly
         key, subkey = jr.split(key)
-        delays = self.mean_synaptic_delay * (
-            1.0
-            + 0.2
-            * jr.normal(subkey, shape=(self.N_neurons, self.N_neurons + self.N_inputs))
-        )
-        delays = jnp.clip(
-            delays,
-            min=0.5 * self.mean_synaptic_delay,
-            max=1.5 * self.mean_synaptic_delay,
-        )  # Avoid too small or too large
-        self.synaptic_delay_matrix = delays
+        self.synaptic_delay_matrix = jr.uniform(subkey, shape=(N_neurons, N_neurons), minval=0.0, maxval= 2 * self.mean_synaptic_delay)
 
         # Compute buffer size based on max delay
         self.buffer_size = int(
-            jnp.ceil(jnp.max(delays) / self.dt) + 1
-        )  # .astype(jnp.int32)
+            jnp.ceil(jnp.max(self.synaptic_delay_matrix) / self.dt) + 1
+        )
 
     @property
     def initial(self, key: jr.PRNGKey = jr.PRNGKey(0)):
@@ -170,7 +160,7 @@ class LIFNetwork(NeuronModelABC):
             jnp.zeros((self.N_neurons,), dtype=default_float) + self.resting_potential
         )
         conductance_init = jnp.zeros(
-            (self.N_neurons, self.N_neurons + self.N_inputs), dtype=default_float
+            jnp.ceil(jnp.max(self.synaptic_delay_matrix) / self.dt) + 1
         )
         spikes_init = jnp.zeros((self.N_neurons + self.N_inputs,), dtype=default_float)
 
@@ -201,9 +191,7 @@ class LIFNetwork(NeuronModelABC):
         rec_weights = jnp.fill_diagonal(rec_weights, 0.0, inplace=False)
 
         key, subkey = jr.split(key)
-        N_input_connections = int(
-            self.N_neurons * self.N_inputs * self.connection_prob
-        )
+        N_input_connections = int(self.N_neurons * self.N_inputs * self.connection_prob)
         input_weights = jr.permutation(
             subkey,
             jnp.concatenate(
