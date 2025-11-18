@@ -17,6 +17,7 @@ from adaptive_SNN.visualization.utils.components import (
     _plot_conductances,
     _plot_ISI_distribution,
     _plot_membrane_potential,
+    _plot_spike_rate_distributions,
     _plot_spike_rates,
     _plot_spikes_raster,
     _plot_voltage_distribution,
@@ -150,11 +151,12 @@ def plot_learning_results(
 def plot_network_stats(
     sol: Solution,
     model,
+    save_path: str | None = None,
 ):
     """Plot various network statistics including ISI distribution."""
     lif_model = get_LIF_model(model)
 
-    fig, axs = plt.subplots(2, 2, figsize=(6, 6))
+    fig, axs = plt.subplots(3, 2, figsize=(6, 6))
     _plot_ISI_distribution(
         axs[0][0],
         sol,
@@ -164,52 +166,34 @@ def plot_network_stats(
         label="Recurrent Neurons",
         alpha=0.7,
     )
-    CV_ISI = compute_CV_ISI(get_LIF_state(sol.ys).S[:, : lif_model.N_neurons])
-    axs[0][0].set_title(
-        f"Inter-Spike Interval (ISI) Distribution (CV={jnp.nanmean(CV_ISI):.2f})"
-    )
 
-    _plot_ISI_distribution(
-        axs[0][1],
+    CV_ISI = compute_CV_ISI(get_LIF_state(sol.ys).S)
+    CV_ISI = CV_ISI[~jnp.isnan(CV_ISI)]
+    axs[0][1].hist(CV_ISI, bins=20, color="k")
+    axs[0][1].set_title("CV of ISI Distribution")
+    axs[0][1].set_xlabel("CV of ISI")
+    axs[0][1].set_ylabel("Count")
+
+    _plot_spike_rate_distributions(
+        axs[1][0],
         sol,
         model,
-        neurons_to_plot=jnp.arange(
-            lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
-        ),
-        color="red",
-        label="Input Neurons",
-        alpha=0.7,
-    )
-    CV_ISI = compute_CV_ISI(get_LIF_state(sol.ys).S[:, lif_model.N_neurons :])
-    axs[0][1].set_title(
-        f"Inter-Spike Interval (ISI) Distribution (CV={jnp.nanmean(CV_ISI):.2f})"
     )
 
-    axs[1][0].set_title("Spike Raster Plot")
-    _plot_spikes_raster(axs[1][0], sol, model)
+    _plot_spikes_raster(axs[2][0], sol, model)
 
     _plot_spike_rates(
-        axs[1][1],
+        axs[2][1],
         sol,
         model,
-        neurons_to_plot=jnp.arange(lif_model.N_neurons),
-        color="blue",
-        label="Recurrent Neurons",
     )
-    _plot_spike_rates(
-        axs[1][1],
-        sol,
-        model,
-        neurons_to_plot=jnp.arange(
-            lif_model.N_neurons, lif_model.N_neurons + lif_model.N_inputs
-        ),
-        color="red",
-        label="Input Neurons",
-    )
-    axs[1][1].set_title("Spike Rates Over Time")
-    axs[1][1].legend()
+
     plt.tight_layout()
-    plt.show()
+    if save_path is not None:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_frequency_analysis(
