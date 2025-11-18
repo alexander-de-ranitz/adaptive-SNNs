@@ -19,7 +19,7 @@ def compute_CV_ISI(spikes) -> Array:
 
     for neuron_idx in range(num_neurons):
         spike_times = jnp.nonzero(spikes[:, neuron_idx] == 1)[0]
-        if len(spike_times) < 2:
+        if len(spike_times) <= 2:
             CV_ISI = CV_ISI.at[neuron_idx].set(
                 jnp.nan
             )  # Not enough spikes to compute ISI
@@ -129,71 +129,75 @@ def compute_charge_ratio(t, state, model) -> Array:
     return ratio
 
 
-def compute_synchrony(spikes: Array, bin_width_ms: float = 2.0, dt: float = 0.1, n_pairs: int = 250) -> float:
+def compute_synchrony(
+    spikes: Array, bin_width_ms: float = 2.0, dt: float = 0.1, n_pairs: int = 250
+) -> float:
     """Compute the average synchrony of neural population activity using correlation coefficients.
-    
+
     Synchrony for a pair of neurons is measured by the correlation coefficient of their spike counts
-    in time bins. This function computes the average correlation coefficient for a set of disjoint 
+    in time bins. This function computes the average correlation coefficient for a set of disjoint
     neuron pairs.
-    
+
     Args:
         spikes (Array): A binary array of shape (num_time_steps, num_neurons) indicating spike occurrences.
         bin_width_ms (float): Width of time bins in milliseconds (default: 2.0 ms).
         dt (float): Time step in milliseconds (default: 0.1 ms).
         n_pairs (int): Number of disjoint neuron pairs to sample (default: 250).
-    
+
     Returns:
         float: The average correlation coefficient across the sampled neuron pairs.
     """
     num_time_steps, num_neurons = spikes.shape
-    
+
     # Calculate the number of time steps per bin
     steps_per_bin = int(bin_width_ms / dt)
-    
+
     # Calculate the number of complete bins
     n_bins = num_time_steps // steps_per_bin
-    
+
     # Truncate spikes to fit complete bins
     truncated_steps = n_bins * steps_per_bin
     spikes_truncated = spikes[:truncated_steps, :]
-    
+
     # Reshape to bins and sum spikes within each bin for all neurons
     # Shape: (n_bins, num_neurons)
-    spike_counts = spikes_truncated.reshape(n_bins, steps_per_bin, num_neurons).sum(axis=1)
-    
+    spike_counts = spikes_truncated.reshape(n_bins, steps_per_bin, num_neurons).sum(
+        axis=1
+    )
+
     # Determine the number of pairs to sample (limited by available neurons)
     max_pairs = num_neurons // 2
     n_pairs_actual = min(n_pairs, max_pairs)
-    
+
     # Create disjoint pairs by pairing neurons sequentially
     # Shuffle indices to randomize pairing
     indices = jnp.arange(num_neurons)
     # For deterministic behavior, we'll use the first 2*n_pairs_actual neurons
-    neuron_pairs = indices[:2 * n_pairs_actual].reshape(n_pairs_actual, 2)
-    
+    neuron_pairs = indices[: 2 * n_pairs_actual].reshape(n_pairs_actual, 2)
+
     # Compute correlation coefficients for each pair
     correlations = []
     for i in range(n_pairs_actual):
         neuron_i, neuron_j = neuron_pairs[i]
-        
+
         # Get spike counts for this pair
         counts_i = spike_counts[:, neuron_i]
         counts_j = spike_counts[:, neuron_j]
-        
+
         # Compute correlation coefficient: Corr = Cov / sqrt(Var_i * Var_j)
         cov = jnp.cov(counts_i, counts_j)[0, 1]
         var_i = jnp.var(counts_i)
         var_j = jnp.var(counts_j)
-        
+
         # Avoid division by zero
         if var_i > 0 and var_j > 0:
             corr = cov / jnp.sqrt(var_i * var_j)
             correlations.append(corr)
         else:
             correlations.append(jnp.nan)
-    
+
     # Compute average correlation, ignoring NaN values
     correlations = jnp.array(correlations)
     avg_correlation = jnp.nanmean(correlations)
-    
+
     return float(avg_correlation)
