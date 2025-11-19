@@ -1,5 +1,6 @@
 from adaptive_SNN.visualization.api.plotting import (
     plot_frequency_analysis,
+    plot_learning_detailed,
     plot_learning_results,
     plot_network_stats,
     plot_noise_STA,
@@ -12,4 +13,5 @@ __all__ = [
     "plot_frequency_analysis",
     "plot_network_stats",
     "plot_noise_STA",
+    "plot_learning_detailed",
 ]
