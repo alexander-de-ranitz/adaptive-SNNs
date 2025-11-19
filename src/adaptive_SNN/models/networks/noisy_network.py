@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from adaptive_SNN.models.base import NeuronModelABC, NoiseModelABC
-from adaptive_SNN.models.networks.lif import LIFState
+from adaptive_SNN.models.networks.lif import LIFNetwork, LIFState
 from adaptive_SNN.utils.operators import MixedPyTreeOperator
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -46,7 +46,13 @@ class NoisyNetwork(NeuronModelABC):
     def diffusion(self, t, state: NoisyNetworkState, args):
         network_state, noise_state = (state.network_state, state.noise_state)
         network_diffusion = self.base_network.diffusion(t, network_state, args)
-        noise_diffusion = self.noise_model.diffusion(t, noise_state, args)
+
+        # The noise diffusion is state-dependent; compute it here and pass it to the noise model via args
+        noise_args = {
+            **args,
+            "noise_std": self.compute_desired_noise_std(t, state, args),
+        }
+        noise_diffusion = self.noise_model.diffusion(t, noise_state, noise_args)
         return MixedPyTreeOperator(
             NoisyNetworkState(network_diffusion, noise_diffusion)
         )
@@ -69,3 +75,32 @@ class NoisyNetwork(NeuronModelABC):
     def update(self, t, state: NoisyNetworkState, args):
         new_network_state = self.base_network.update(t, state.network_state, args)
         return NoisyNetworkState(new_network_state, state.noise_state)
+
+    def compute_desired_noise_std(self, t, state: NoisyNetworkState, args):
+        """For each neuron, compute the desired scale of the noise to be added.
+
+        The desired level of noise scales with the total weighted input to the neuron. Weighted with a hyperparameter-defined factor.
+        The returned noise scale represents the standard deviation of the noise to be added to each neuron.
+
+        Returns:
+            Array: Noise scale for each neuron.
+        """
+        # TODO: Should we compute this instead?
+        assumed_firing_rate = 5000.0  # We assume input neurons fire at 10 Hz on average
+
+        # Compute the variance of the conductance fluctuations per neuron due to synaptic input
+        # based on Campbell's theorem (see Papoulis, 2002)
+        W = jnp.where(jnp.isfinite(state.network_state.W), state.network_state.W, 0.0)
+
+        # Only consider excitatory weights for noise computation
+        W = W * self.base_network.excitatory_mask[None, :]
+
+        synaptic_variance = (
+            0.5
+            * jnp.square(W).sum(axis=1)
+            * assumed_firing_rate
+            * LIFNetwork.synaptic_increment**2
+            * LIFNetwork.tau_E
+        )
+
+        return jnp.sqrt(synaptic_variance) * args.get("noise_scale_hyperparam", 0.0)
