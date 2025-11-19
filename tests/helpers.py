@@ -42,7 +42,7 @@ def make_LIF_model(
 
 def make_OUP_model(dim=3, tau=1.0, noise_scale=0.3, mean=0.0):
     """Create an Ornstein-Uhlenbeck Process model with configurable parameters."""
-    return OUP(tau=tau, noise_scale=noise_scale, mean=mean, dim=dim)
+    return OUP(tau=tau, noise_std=noise_scale, mean=mean, dim=dim)
 
 
 def make_Noisy_LIF_model(
@@ -50,7 +50,7 @@ def make_Noisy_LIF_model(
 ):
     """Create a NoisyNetwork with LIF neurons and OU noise processes."""
     network = make_LIF_model(N_neurons, N_inputs, dt=dt, key=key)
-    noise_model = OUP(tau=tau, noise_scale=noise_scale, dim=N_neurons)
+    noise_model = OUP(tau=tau, noise_std=noise_scale, dim=N_neurons)
     return NoisyNetwork(neuron_model=network, noise_model=noise_model)
 
 

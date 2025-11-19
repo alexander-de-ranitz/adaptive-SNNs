@@ -11,7 +11,11 @@ from adaptive_SNN.models import (
     SystemState,
 )
 from adaptive_SNN.utils.metrics import compute_CV_ISI
-from adaptive_SNN.visualization.utils.adapters import get_LIF_model, get_LIF_state
+from adaptive_SNN.visualization.utils.adapters import (
+    get_LIF_model,
+    get_LIF_state,
+    get_noisy_network_state,
+)
 from adaptive_SNN.visualization.utils.components import (
     _plot_conductance_frequency_spectrum,
     _plot_conductances,
@@ -36,6 +40,10 @@ def plot_simulate_SNN_results(
     save_path: str | None = None,
     **plot_kwargs,
 ):
+    """Plot the results of a noisy SNN simulation.
+
+    Solution state must contain the LIFState's V, S, W, and G. If NoisyNetwork, also noise_state.
+    """
     # Get results
     t = sol.ts
     t0 = t[0]
@@ -43,7 +51,7 @@ def plot_simulate_SNN_results(
 
     n_axs = 2 + int(plot_spikes) + int(plot_voltage_distribution)
 
-    fig, axs = plt.subplots(n_axs, 1, figsize=(10, 8), sharex=False)
+    fig, axs = plt.subplots(n_axs, 1, figsize=(10, 8), sharex=True)
 
     for ax in axs:
         ax.set_xlim(t0, t1)
@@ -223,5 +231,61 @@ def plot_frequency_analysis(
     )
     axs[2].set_title("Conductance Frequency Spectrum")
 
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_noise_STA(
+    sol,
+    model,
+    neurons_to_plot: jnp.ndarray | None = None,
+    noise_std: float | None = None,
+):
+    """Plot the spike-triggered average (STA) of the noise process
+
+    Providing the noise_level allows overlaying the analytical noise distribution for comparison.
+    """
+    state = sol.ys
+    lif_state = get_LIF_state(state)
+    noise_state = get_noisy_network_state(state).noise_state
+
+    if neurons_to_plot is None:
+        neurons_to_plot = jnp.arange(lif_state.S.shape[1])
+
+    fig, ax = plt.subplots(1, 1)
+
+    spike_times = jnp.nonzero(lif_state.S[:, neurons_to_plot])
+    data = []
+    for i, neuron_idx in enumerate(neurons_to_plot):
+        neuron_spike_times = spike_times[i]
+        neuron_noise = noise_state[:, neuron_idx]
+        noise_values_at_spikes = neuron_noise[neuron_spike_times]
+        data.append(noise_values_at_spikes)
+
+    ax.hist(
+        jnp.concatenate(data),
+        bins=10,
+        density=True,
+        histtype="stepfilled",
+        label="Noise distribution at spike times",
+        alpha=0.7,
+        color="darkgreen",
+    )
+
+    # Plot the analytical noise distribution for comparison
+    # note that this assumes constant noise std over time
+    if noise_std is not None:
+        x = jnp.linspace(-4 * noise_std, 4 * noise_std, 100)
+        pdf = (1 / (noise_std * jnp.sqrt(2 * jnp.pi))) * jnp.exp(
+            -0.5 * (x / noise_std) ** 2
+        )
+        ax.plot(
+            x, pdf, color="k", linestyle="--", label="Analytical Noise Distribution"
+        )
+        ax.legend()
+
+    plt.title("Distribution of Noise Values at Spike Times")
+    plt.xlabel("Noise Value")
+    plt.ylabel("Density")
     plt.tight_layout()
     plt.show()

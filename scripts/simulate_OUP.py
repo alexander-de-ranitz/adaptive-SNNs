@@ -13,7 +13,7 @@ def main():
     dt0 = 1e-4
 
     def run_and_plot_OU_process(tau, D):
-        noise_model = OUP(tau=tau, noise_scale=D, mean=0.0, dim=2)
+        noise_model = OUP(tau=tau, noise_std=D, mean=0.0, dim=2)
 
         expected_std = jnp.sqrt(D * tau / 2)
 

@@ -450,11 +450,14 @@ class LIFNetwork(NeuronModelABC):
         G_new = G.at[:, : self.N_neurons].add(delayed_spikes * self.synaptic_increment)
 
         # Update conductances from input spikes
-        input_spikes = args[
-            "get_input_spikes"
-        ](
-            t, state, args
-        )  # Input spikes should be (N_neurons, N_inputs), N_input spikes per neuron (independent)
+        input_spikes = args["get_input_spikes"](t, state, args)
+
+        # Check input_spikes shape, to catch when using old shape assumptions
+        if input_spikes.shape != (self.N_neurons, self.N_inputs):
+            raise ValueError(
+                f"Input spikes shape {input_spikes.shape} does not match expected shape {(self.N_neurons, self.N_inputs)}"
+            )
+
         G_new = G_new.at[:, self.N_neurons :].add(
             input_spikes * self.synaptic_increment
         )

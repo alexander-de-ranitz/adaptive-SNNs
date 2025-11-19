@@ -10,7 +10,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 class OUP(NoiseModelABC):
     tau: float | Array = 1.0
-    noise_scale: float | Array = 1.0
+    noise_std: float | Array = 1.0
     mean: float | Array = 0.0
     dim: int = 1
 
@@ -22,7 +22,8 @@ class OUP(NoiseModelABC):
         return -1.0 / self.tau * (x - self.mean)
 
     def diffusion(self, t, x, args):
-        return jnp.eye(x.shape[0]) * jnp.sqrt(self.noise_scale)
+        noise_std = args.get("noise_std", self.noise_std)
+        return jnp.eye(x.shape[0]) * noise_std * jnp.sqrt(2.0 / self.tau)
 
     @property
     def noise_shape(self):

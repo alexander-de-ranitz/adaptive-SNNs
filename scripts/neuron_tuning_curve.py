@@ -70,10 +70,10 @@ def main():
                 D = compute_oup_diffusion_coefficient(
                     target_std=syn_std_E * noise_factor, tau=neuron_model.tau_E
                 )
-                noise_model = OUP(tau=neuron_model.tau_E, noise_scale=D, dim=N_neurons)
+                noise_model = OUP(tau=neuron_model.tau_E, noise_std=D, dim=N_neurons)
 
                 key, _ = jr.split(key)
-                noise_model = OUP(tau=neuron_model.tau_E, noise_scale=D, dim=N_neurons)
+                noise_model = OUP(tau=neuron_model.tau_E, noise_std=D, dim=N_neurons)
 
                 model = NoisyNetwork(
                     neuron_model=neuron_model,
