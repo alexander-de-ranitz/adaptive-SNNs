@@ -258,7 +258,7 @@ def test_OUP_diffusion():
     initial_state = jnp.array([1.0, -1.0, 0.5])
 
     diffusion = model.diffusion(0.0, initial_state, None)
-    expected_diffusion = jnp.eye(dim) * jnp.sqrt(model.noise_scale)
+    expected_diffusion = jnp.eye(dim) * jnp.sqrt(model.noise_std)
 
     assert jnp.allclose(diffusion, expected_diffusion)
 
