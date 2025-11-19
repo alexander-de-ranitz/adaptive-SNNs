@@ -73,7 +73,7 @@ def main():
             "noise_scale_hyperparam": noise_level,
         }
 
-        def save_fn(state: NoisyNetworkState):
+        def save_fn(t, state: NoisyNetworkState, args):
             return save_part_of_state(state, S=True, noise_state=True, V=True)
 
         sol = simulate_noisy_SNN(
@@ -83,9 +83,8 @@ def main():
             t1,
             dt0,
             init_state,
-            save_at=dfx.SaveAt(t0=True, t1=True, steps=True),
+            save_at=dfx.SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
             args=args,
-            save_fn=save_fn,
         )
 
         sols.append(sol)
