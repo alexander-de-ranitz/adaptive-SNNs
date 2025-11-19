@@ -47,7 +47,7 @@ def main():
             D = 0.0
 
             noise_model = OUP(
-                tau=neuron_model.tau_E, noise_scale=0 * D, mean=0.0, dim=N_neurons
+                tau=neuron_model.tau_E, noise_std=0 * D, mean=0.0, dim=N_neurons
             )
 
             model = NoisyNetwork(
