@@ -2,6 +2,7 @@ import jax
 import matplotlib as mpl
 from diffrax import Solution
 from jax import numpy as jnp
+from jaxtyping import Array
 from matplotlib import pyplot as plt
 
 from adaptive_SNN.models import (
@@ -21,6 +22,7 @@ from adaptive_SNN.visualization.utils.components import (
     _plot_conductances,
     _plot_ISI_distribution,
     _plot_membrane_potential,
+    _plot_noise_distribution_STA,
     _plot_spike_rate_distributions,
     _plot_spike_rates,
     _plot_spikes_raster,
@@ -236,56 +238,124 @@ def plot_frequency_analysis(
 
 
 def plot_noise_STA(
-    sol,
+    sols,
     model,
     neurons_to_plot: jnp.ndarray | None = None,
-    noise_std: float | None = None,
+    noise_levels: float | list | None = None,
 ):
     """Plot the spike-triggered average (STA) of the noise process
 
     Providing the noise_level allows overlaying the analytical noise distribution for comparison.
     """
-    state = sol.ys
-    lif_state = get_LIF_state(state)
-    noise_state = get_noisy_network_state(state).noise_state
+    if not isinstance(sols, list):
+        sols = [sols]
+        noise_levels = [noise_levels]
+
+    fig, axs = plt.subplots(len(sols), 1, figsize=(6, 2 * len(sols)))
 
     if neurons_to_plot is None:
-        neurons_to_plot = jnp.arange(lif_state.S.shape[1])
+        neurons_to_plot = jnp.arange(get_LIF_model(model).N_neurons)
 
-    fig, ax = plt.subplots(1, 1)
+    for i, sol in enumerate(sols):
+        ax = axs[i] if len(sols) > 1 else axs
 
-    spike_times = jnp.nonzero(lif_state.S[:, neurons_to_plot])
-    data = []
-    for i, neuron_idx in enumerate(neurons_to_plot):
-        neuron_spike_times = spike_times[i]
-        neuron_noise = noise_state[:, neuron_idx]
-        noise_values_at_spikes = neuron_noise[neuron_spike_times]
-        data.append(noise_values_at_spikes)
-
-    ax.hist(
-        jnp.concatenate(data),
-        bins=10,
-        density=True,
-        histtype="stepfilled",
-        label="Noise distribution at spike times",
-        alpha=0.7,
-        color="darkgreen",
-    )
-
-    # Plot the analytical noise distribution for comparison
-    # note that this assumes constant noise std over time
-    if noise_std is not None:
-        x = jnp.linspace(-4 * noise_std, 4 * noise_std, 100)
-        pdf = (1 / (noise_std * jnp.sqrt(2 * jnp.pi))) * jnp.exp(
-            -0.5 * (x / noise_std) ** 2
+        _plot_noise_distribution_STA(
+            ax,
+            sol,
+            model,
+            neurons_to_plot=neurons_to_plot,
+            noise_std=model.compute_desired_noise_std(
+                0,
+                model.initial,
+                {
+                    "noise_scale_hyperparam": noise_levels[i]
+                    if noise_levels is not None
+                    else None
+                },
+            ),
         )
-        ax.plot(
-            x, pdf, color="k", linestyle="--", label="Analytical Noise Distribution"
-        )
-        ax.legend()
 
-    plt.title("Distribution of Noise Values at Spike Times")
-    plt.xlabel("Noise Value")
-    plt.ylabel("Density")
+        lif_state = get_LIF_state(sol.ys)
+        noise_state = get_noisy_network_state(sol.ys).noise_state
+
+        CV_ISI = compute_CV_ISI(lif_state.S)[0]  # Compute CV ISI for first neuron
+        corr = jnp.corrcoef(noise_state.flatten(), lif_state.V[:, 0].flatten())[0, 1]
+        ax.set_title(
+            rf"Noise Level = {noise_levels[i]} $\sigma_{{\mathrm{{syn}}}}$ | CV ISI =  {CV_ISI:.2f} | Corr(V, Noise) = {corr:.2f}"
+        )
+        ax.set_xlabel("Noise Value")
+        ax.set_ylabel("Density")
     plt.tight_layout()
     plt.show()
+
+
+def plot_learning_detailed(
+    sol: Solution,
+    model: AgentEnvSystem,
+    args: dict,
+    neurons_to_plot: Array | None = None,
+    save_path: str | None = None,
+    target_state: float | None = None,
+    **plot_kwargs,
+):
+    # Get results
+    t = sol.ts
+    t0 = t[0]
+    t1 = t[-1]
+
+    fig, axs = plt.subplots(5, 1, figsize=(10, 8), sharex=True)
+
+    for ax in axs:
+        ax.set_xlim(t0, t1)
+
+    state: SystemState = sol.ys
+    agent_state, env_state = state.agent_state, state.environment_state
+    network_state, reward_state = agent_state.noisy_network, agent_state.reward
+
+    # Compute reward prediction error if possible
+    if args is not None and "reward_fn" in args:
+        rewards = jnp.array(
+            [
+                args["reward_fn"](ti, jax.tree.map(lambda arr: arr[i], env_state), args)
+                for i, ti in enumerate(t)
+            ]
+        )
+        RPE = jnp.squeeze(rewards) - jnp.squeeze(reward_state)
+    else:
+        RPE = None
+
+    for ax in axs:
+        ax.set_xlim(t0, t1)
+
+    axs[0].plot(t, env_state, label="Environment State")
+    if target_state is not None:
+        axs[0].axhline(target_state, color="k", linestyle="--", label="Target State")
+    axs[0].set_title("Environment State ")
+    axs[0].set_ylabel("Environment State")
+
+    axs[1].plot(t, RPE, label="Reward Prediction Error")
+    axs[1].set_title("Reward Prediction Error")
+    axs[1].set_ylabel("RPE")
+
+    _plot_membrane_potential(
+        axs[2], sol, model, neurons_to_plot=neurons_to_plot, **plot_kwargs
+    )
+    _plot_conductances(
+        axs[3],
+        sol,
+        model,
+        neurons_to_plot=neurons_to_plot,
+        split_noise=True,
+    )
+
+    # Plot exc synaptic weights over time for first neuron
+    axs[4].plot(t, network_state.network_state.W[:, 0, 1])
+    axs[4].set_title("Synaptic Weight")
+    axs[4].set_ylabel("Weight")
+    axs[4].set_xlabel("Time (s)")
+
+    plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(save_path)
+    else:
+        plt.show()

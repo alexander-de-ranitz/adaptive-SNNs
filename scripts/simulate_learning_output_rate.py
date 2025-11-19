@@ -4,6 +4,7 @@ import time
 import diffrax as dfx
 import equinox as eqx
 import jax.random as jr
+from diffrax import SaveAt
 from jax import numpy as jnp
 
 from adaptive_SNN.models import (
@@ -142,7 +143,7 @@ def main():
                     t1,
                     dt,
                     init,
-                    save_every_n_steps=1000,
+                    save_at=SaveAt(ts=jnp.linspace(t0, t1, 1000)),
                     args=args,
                     save_fn=save_fn,
                     key=key,
