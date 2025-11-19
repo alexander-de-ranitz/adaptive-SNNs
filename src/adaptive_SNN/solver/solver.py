@@ -52,6 +52,7 @@ def simulate_noisy_SNN(
         y0: Initial PyTree state.
         save_every_n_steps: After how many steps to save state (>=1).
         save_fn: Optional function `fn(y) -> state_to_save' used to determine how to save the state (e.g. only save part of the current state, or some summary statistics). If None, saves the full state.
+                    if the function returns None, no states are saved and only the final state is returned.
         args: Extra args passed to solver/model (PyTree or None).
         key: Optional PRNG key. If None, a default key is used.
 
@@ -82,50 +83,13 @@ def simulate_noisy_SNN(
 
     terms = model.terms(key)
 
-    @eqx.filter_jit
-    def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver):
-        """Runs the simulation loop."""
+    y_final, ys = run_simulation(
+        times, y0, ys, save_mask, save_fn, terms, args, model, solver
+    )
 
-        # Utility function to save the current state
-        def save_state(carry, save_fn):
-            y, ys, save_index = carry
-            ys = jax.tree_util.tree_map(
-                lambda arr, v: arr.at[save_index].set(v), ys, save_fn(y)
-            )
-            return (y, ys, save_index + 1)
-
-        def step(i, carry):
-            """Inner loop of the simulation. Takes one step and saves if needed."""
-            y, ys, save_index = carry
-
-            # Take a step
-            t_start = times[i]
-            t_end = times[i + 1]
-            y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
-            y = model.update(t_end, y, args)
-
-            # Is save_mask true at this index? If so, save, else do nothing
-            y, ys, save_index = jax.lax.cond(
-                save_mask[i + 1],  # + 1 because we already stepped
-                lambda c: save_state(c, save_fn),
-                lambda c: c,
-                (y, ys, save_index),
-            )
-
-            return (y, ys, save_index)
-
-        # Save the initial state if needed
-        y0, ys, save_index = jax.lax.cond(
-            save_mask[0], lambda c: save_state(c, save_fn), lambda c: c, (y0, ys, 0)
-        )
-
-        # Loop over all intervals
-        y_final, ys, save_index = jax.lax.fori_loop(
-            0, times.size - 1, step, (y0, ys, save_index)
-        )
-        return ys
-
-    ys = run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver)
+    # If no states were saved, return the final state
+    if ys is None:
+        ys = y_final
 
     return Solution(
         t0=t0,
@@ -140,3 +104,47 @@ def simulate_noisy_SNN(
         made_jump=None,
         event_mask=None,
     )
+
+
+@eqx.filter_jit
+def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver):
+    """Runs the simulation loop."""
+
+    # Utility function to save the current state
+    def save_state(carry, save_fn):
+        y, ys, save_index = carry
+        ys = jax.tree_util.tree_map(
+            lambda arr, v: arr.at[save_index].set(v), ys, save_fn(y)
+        )
+        return (y, ys, save_index + 1)
+
+    def step(i, carry):
+        """Inner loop of the simulation. Takes one step and saves if needed."""
+        y, ys, save_index = carry
+
+        # Take a step
+        t_start = times[i]
+        t_end = times[i + 1]
+        y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
+        y = model.update(t_end, y, args)
+
+        # Is save_mask true at this index? If so, save, else do nothing
+        y, ys, save_index = jax.lax.cond(
+            save_mask[i + 1],  # + 1 because we already stepped
+            lambda c: save_state(c, save_fn),
+            lambda c: c,
+            (y, ys, save_index),
+        )
+
+        return (y, ys, save_index)
+
+    # Save the initial state if needed
+    y0, ys, save_index = jax.lax.cond(
+        save_mask[0], lambda c: save_state(c, save_fn), lambda c: c, (y0, ys, 0)
+    )
+
+    # Loop over all intervals
+    y_final, ys, save_index = jax.lax.fori_loop(
+        0, times.size - 1, step, (y0, ys, save_index)
+    )
+    return y_final, ys
