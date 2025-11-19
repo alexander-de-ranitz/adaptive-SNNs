@@ -1,5 +1,3 @@
-from typing import Callable
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -31,7 +29,6 @@ def simulate_noisy_SNN(
     dt0: float,
     y0: PyTree,
     save_at: SaveAt,
-    save_fn: Callable = None,
     args: PyTree = None,
     key: jr.PRNGKey = jr.PRNGKey(0),
 ):
@@ -41,6 +38,7 @@ def simulate_noisy_SNN(
     Given a model, a solver, an initial state, and a time interval, simulates the model
     from `t0` to `t1` using fixed step size `dt0`. The state is saved as specified in SaveAt (see https://docs.kidger.site/diffrax/api/saveat/).
     Note that this solver might not interpret the SaveAt object indentically to diffrax. In particular, only a single SubSaveAt is currently supported in save_at.subs.
+    Furthermore, the function `fn` in SaveAt is assumed to produce an output shape that is constant over time, i.e., the output shape does not depend on `t` or `y`.
 
     Notes:
       - Final interval may be shorter than `dt0` if (t1 - t0) is not an integer multiple of dt0.
@@ -52,9 +50,6 @@ def simulate_noisy_SNN(
         dt0: Nominal step size.
         y0: Initial PyTree state.
         save_at: SaveAt object specifying when to save states.
-
-        save_fn: Optional function `fn(y) -> state_to_save' used to determine how to save the state (e.g. only save part of the current state, or some summary statistics). If None, saves the full state.
-                    if the function returns None, no states are saved and only the final state is returned.
         args: Extra args passed to solver/model (PyTree or None).
         key: Optional PRNG key. If None, a default key is used.
 
@@ -64,10 +59,6 @@ def simulate_noisy_SNN(
     # Args are the default args, overridden by any user-provided args
     args = {**DEFAULT_ARGS, **(args or {})}
 
-    # Default save function is identity
-    if save_fn is None:
-        save_fn = lambda y: y
-
     # Compute time grid
     n_steps = jnp.floor((t1 - t0) / dt0).astype(int)
     times = t0 + dt0 * jnp.arange(n_steps + 1)  # Add 1 for t1
@@ -76,7 +67,8 @@ def simulate_noisy_SNN(
     n_saves = jnp.sum(save_mask)
 
     # Preallocate storage for results
-    y0_to_save = save_fn(y0)
+    save_fn = save_at.subs.fn
+    y0_to_save = save_fn(0.0, y0, args)
     ys = jax.tree_util.tree_map(
         lambda x: jnp.empty((n_saves, *x.shape), x.dtype), y0_to_save
     )
@@ -111,10 +103,10 @@ def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver
     """Runs the simulation loop."""
 
     # Utility function to save the current state
-    def save_state(carry, save_fn):
+    def save_state(carry, t, save_fn):
         y, ys, save_index = carry
         ys = jax.tree_util.tree_map(
-            lambda arr, v: arr.at[save_index].set(v), ys, save_fn(y)
+            lambda arr, v: arr.at[save_index].set(v), ys, save_fn(t, y, args)
         )
         return (y, ys, save_index + 1)
 
@@ -131,7 +123,7 @@ def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver
         # Is save_mask true at this index? If so, save, else do nothing
         y, ys, save_index = jax.lax.cond(
             save_mask[i + 1],  # + 1 because we already stepped
-            lambda c: save_state(c, save_fn),
+            lambda c: save_state(c, t_end, save_fn),
             lambda c: c,
             (y, ys, save_index),
         )
@@ -140,7 +132,10 @@ def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver
 
     # Save the initial state if needed
     y0, ys, save_index = jax.lax.cond(
-        save_mask[0], lambda c: save_state(c, save_fn), lambda c: c, (y0, ys, 0)
+        save_mask[0],
+        lambda c: save_state(c, times[0], save_fn),
+        lambda c: c,
+        (y0, ys, 0),
     )
 
     # Loop over all intervals
