@@ -7,17 +7,20 @@ import jax.random as jr
 from diffrax import RESULTS, Euler, Solution
 from jaxtyping import PyTree
 
-
-def get_default_args():
-    """Returns a dictionary of all zero default args for simulate_noisy_SNN."""
-    return {
-        "get_learning_rate": lambda t, x, args: 0.0,
-        "get_input_spikes": lambda t, x, args: jnp.zeros(
-            shape=(x.W.shape[1] - x.W.shape[0],)
-        ),
-        "get_desired_balance": lambda t, x, args: 0.0,
-        "RPE": jnp.array(0.0),
-    }
+# Default args for simulate_noisy_SNN, can be overridden by user-provided args
+# provided here for convenience, such that you only need to specify the args relevant to the experiment
+# note that is important that these are saved outside of the function definition to avoid recompilation on each call
+DEFAULT_ARGS = {
+    "get_learning_rate": lambda t, x, args: 0.0,
+    "get_input_spikes": lambda t, x, args: jnp.zeros(
+        shape=(
+            x.W.shape[0],
+            x.W.shape[1] - x.W.shape[0],
+        )  # shape = (n_neurons, n_inputs)
+    ),
+    "get_desired_balance": lambda t, x, args: 0.0,
+    "RPE": jnp.array(0.0),
+}
 
 
 def simulate_noisy_SNN(
@@ -56,7 +59,7 @@ def simulate_noisy_SNN(
         diffrax.Solution with (ts, ys) containing saved times and states.
     """
     # Args are the default args, overridden by any user-provided args
-    args = {**get_default_args(), **(args or {})}
+    args = {**DEFAULT_ARGS, **(args or {})}
 
     # Default save function is identity
     if save_fn is None:
