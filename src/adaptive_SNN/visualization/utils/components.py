@@ -2,7 +2,9 @@ import jax.numpy as jnp
 from diffrax import Solution
 from jaxtyping import Array
 from matplotlib.pyplot import Axes
+from scipy.optimize import curve_fit
 from scipy.signal import welch
+from scipy.stats import norm
 
 from adaptive_SNN.models import LIFNetwork
 from adaptive_SNN.visualization.utils.adapters import (
@@ -30,13 +32,14 @@ def _plot_membrane_potential(
 
     # Plot membrane potentials
     for i in neurons_to_plot:
+        offset = i * 20  # Offset different neurons for visibility
         spike_times = t[S[:, i] > 0]
         ax.vlines(
-            spike_times,
-            V[:, i][S[:, i] > 0] * 1e3,
-            -40,
+            spike_times, offset + V[:, i][S[:, i] > 0] * 1e3, offset - 40, colors="k"
         )
-        ax.plot(t, V[:, i] * 1e3, label=f"Neuron {i + 1} V", **plot_kwargs)
+        ax.plot(
+            t, offset + V[:, i] * 1e3, c="k", label=f"Neuron {i + 1} V", **plot_kwargs
+        )
     ax.set_ylabel("Membrane Potential (mV)")
     ax.set_title("Neuron Membrane Potential")
 
@@ -150,7 +153,7 @@ def _plot_conductances(
             color="r",
             **plot_kwargs,
         )
-    ax.set_ylabel("Total Conductance (S)")
+    ax.set_ylabel("Conductance (S)")
     ax.set_title("Total Conductances")
 
 
@@ -164,20 +167,52 @@ def _plot_voltage_distribution(
     V = get_LIF_state(sol.ys).V
 
     if neurons_to_plot is None:
-        neurons_to_plot = jnp.arange(V.shape[1])
+        neurons_to_plot = jnp.array([0])
 
     for i in neurons_to_plot:
-        ax.hist(
+        counts, bin_edges, _ = ax.hist(
             V[:, i] * 1e3,
             bins=50,
             alpha=0.5,
-            label=f"Neuron {i + 1}",
             density=True,
+            histtype="stepfilled",
+            color="darkgreen",
+            label="Measured distribution",
+            **plot_kwargs,
+        )
+
+        # Fit a Gaussian to the voltage distribution
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+        def gaussian(
+            x,
+            mu,
+            sigma,
+        ):
+            return norm.pdf(x, mu, sigma)
+
+        (mu, sigma), _ = curve_fit(
+            gaussian,
+            bin_centers,
+            counts,
+            p0=[jnp.mean(V[:, i] * 1e3), jnp.std(V[:, i] * 1e3)],
+        )
+        x = jnp.linspace(mu - 4 * sigma, mu + 4 * sigma, 100)
+        pdf = (1 / (sigma * jnp.sqrt(2 * jnp.pi))) * jnp.exp(
+            -0.5 * ((x - mu) / sigma) ** 2
+        )
+        ax.plot(
+            x,
+            pdf,
+            linestyle="--",
+            c="k",
+            label="Gaussian least squares fit",
             **plot_kwargs,
         )
     ax.set_xlabel("Membrane Potential (mV)")
     ax.set_ylabel("Density")
     ax.set_title("Membrane Potential Distribution")
+    ax.legend()
     ax.set_xlim(jnp.min(V) * 1e3 - 5, jnp.max(V) * 1e3 + 5)
 
 
@@ -338,11 +373,9 @@ def _plot_conductance_frequency_spectrum(
 
         # Plot expected PSD for OU process
         noise_model = get_noisy_network_model(model).noise_model
-        expected_PSD = (
-            lambda f: 2
-            * noise_model.noise_scale
-            * noise_model.tau**2
-            / (1 + (2 * jnp.pi * f * noise_model.tau) ** 2)
+        # Note: PSD is not normalized
+        expected_PSD = lambda f: noise_model.tau**2 / (
+            1 + (2 * jnp.pi * f * noise_model.tau) ** 2
         )
         f_vals = jnp.linspace(0, 150, 150)
         ax.plot(

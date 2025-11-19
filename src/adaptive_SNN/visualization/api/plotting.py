@@ -40,6 +40,10 @@ def plot_simulate_SNN_results(
     save_path: str | None = None,
     **plot_kwargs,
 ):
+    """Plot the results of a noisy SNN simulation.
+
+    Solution state must contain the LIFState's V, S, W, and G. If NoisyNetwork, also noise_state.
+    """
     # Get results
     t = sol.ts
     t0 = t[0]
@@ -47,7 +51,7 @@ def plot_simulate_SNN_results(
 
     n_axs = 2 + int(plot_spikes) + int(plot_voltage_distribution)
 
-    fig, axs = plt.subplots(n_axs, 1, figsize=(10, 8), sharex=False)
+    fig, axs = plt.subplots(n_axs, 1, figsize=(10, 8), sharex=True)
 
     for ax in axs:
         ax.set_xlim(t0, t1)
