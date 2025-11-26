@@ -11,59 +11,38 @@ from helpers import (
     make_OUP_model,
 )
 
-from adaptive_SNN.models import (
-    LIFState,
-)
 
+def test_initial_state():
+    N_neurons, N_inputs = 10, 3
+    model = make_LIF_model(N_neurons=N_neurons, N_inputs=N_inputs)
+    state = model.initial
 
-def assert_state_shapes(state: LIFState, N_neurons: int, N_inputs: int):
-    """Assert that all state components have correct shapes."""
     assert state.V.shape == (N_neurons,)
-    assert state.S.shape == (N_neurons + N_inputs,)
+    assert state.S.shape == (N_neurons,)
     assert state.W.shape == (N_neurons, N_neurons + N_inputs)
     assert state.G.shape == (N_neurons, N_neurons + N_inputs)
     assert state.time_since_last_spike.shape == (N_neurons,)
-
-
-def assert_drift_shapes(drift: LIFState, N_neurons: int, N_inputs: int):
-    """Assert that drift terms have correct shapes."""
-    assert drift.V.shape == (N_neurons,)
-    assert drift.S.shape == (N_neurons + N_inputs,)
-    assert drift.W.shape == (N_neurons, N_neurons + N_inputs)
-    assert drift.G.shape == (N_neurons, N_neurons + N_inputs)
-
-
-def assert_diffusion_shapes(diffusion, N_neurons: int, N_inputs: int):
-    """Assert that diffusion terms have correct shapes."""
-    diff = diffusion.pytree
-    assert diff.V.matrix.shape == (N_neurons,)
-    assert diff.S.matrix.shape == (N_neurons + N_inputs,)
-    assert diff.W.matrix.shape == (N_neurons, N_neurons + N_inputs)
-    assert diff.G.matrix.shape == (N_neurons, N_neurons + N_inputs)
-
-
-# ============================================================================
-def test_initial_state():
-    N, N_inputs = 10, 3
-    model = make_LIF_model(N_neurons=N, N_inputs=N_inputs)
-    init_state = model.initial
-
-    assert_state_shapes(init_state, N, N_inputs)
-    assert model.excitatory_mask.shape == (N + N_inputs,)
-    assert model.synaptic_time_constants.shape == (N + N_inputs,)
+    assert state.spike_buffer.shape == (model.buffer_size, N_neurons)
 
 
 def test_drift_diffusion_shapes():
-    N, N_inputs = 10, 3
-    model = make_LIF_model(N_neurons=N, N_inputs=N_inputs)
+    N_neurons, N_inputs = 10, 3
+    model = make_LIF_model(N_neurons=N_neurons, N_inputs=N_inputs)
     state = model.initial
-    args = make_default_args(N, N_inputs)
+    args = make_default_args(N_neurons, N_inputs)
 
     drift = model.drift(0.0, state, args)
-    diffusion = model.diffusion(0.0, state, args)
+    diff = model.diffusion(0.0, state, args).pytree
 
-    assert_drift_shapes(drift, N, N_inputs)
-    assert_diffusion_shapes(diffusion, N, N_inputs)
+    assert drift.V.shape == (N_neurons,)
+    assert drift.S.shape == (N_neurons,)
+    assert drift.W.shape == (N_neurons, N_neurons + N_inputs)
+    assert drift.G.shape == (N_neurons, N_neurons + N_inputs)
+
+    assert diff.V.matrix.shape == (N_neurons,)
+    assert diff.S.matrix.shape == (N_neurons,)
+    assert diff.W.matrix.shape == (N_neurons, N_neurons + N_inputs)
+    assert diff.G.matrix.shape == (N_neurons, N_neurons + N_inputs)
 
 
 def test_noise_shape():
@@ -72,7 +51,7 @@ def test_noise_shape():
     noise_shape = model.noise_shape
 
     assert noise_shape.V.shape == (N,)
-    assert noise_shape.S.shape == (N + N_inputs,)
+    assert noise_shape.S.shape == (N,)
     assert noise_shape.W.shape == (N, N + N_inputs)
     assert noise_shape.G.shape == (N, N + N_inputs)
 
@@ -148,6 +127,11 @@ def test_recurrent_current():
         )
         excitatory_mask = jnp.array(excitatory_mask, dtype=bool)
         object.__setattr__(model, "excitatory_mask", excitatory_mask)
+        object.__setattr__(
+            model,
+            "synaptic_time_constants",
+            jnp.where(model.excitatory_mask, model.tau_E, model.tau_I),
+        )
 
         # Set specific weights and conductances
         weights = jnp.zeros((N, N))
@@ -229,7 +213,7 @@ def test_input_current():
 
 def test_OUP_shapes():
     dim = 3
-    model = make_OUP_model(dim=dim, tau=0.1, noise_scale=0.3)
+    model = make_OUP_model(dim=dim, tau=0.1, noise_std=0.3)
     initial_state = model.initial
 
     assert initial_state.shape == (dim,)
@@ -243,7 +227,7 @@ def test_OUP_shapes():
 
 def test_OUP_drift():
     dim = 3
-    model = make_OUP_model(dim=dim, tau=0.1, noise_scale=0.3)
+    model = make_OUP_model(dim=dim, tau=0.1, noise_std=0.3)
     initial_state = jnp.array([1.0, -1.0, 0.5])
 
     drift = model.drift(0.0, initial_state, None)
@@ -254,11 +238,11 @@ def test_OUP_drift():
 
 def test_OUP_diffusion():
     dim = 3
-    model = make_OUP_model(dim=dim, tau=0.1, noise_scale=0.3)
+    model = make_OUP_model(dim=dim, tau=0.1, noise_std=0.3)
     initial_state = jnp.array([1.0, -1.0, 0.5])
 
     diffusion = model.diffusion(0.0, initial_state, None)
-    expected_diffusion = jnp.eye(dim) * jnp.sqrt(model.noise_std)
+    expected_diffusion = jnp.eye(dim) * model.noise_std * jnp.sqrt(2.0 / model.tau)
 
     assert jnp.allclose(diffusion, expected_diffusion)
 
@@ -269,7 +253,7 @@ def test_OUP_convergence():
     mean = jnp.array([0.5, -0.5, 1.0])
     dim = 3
 
-    noise_model = make_OUP_model(dim=dim, tau=1, noise_scale=0, mean=mean)
+    noise_model = make_OUP_model(dim=dim, tau=1, noise_std=0, mean=mean)
     solver = dfx.EulerHeun()
     terms = noise_model.terms(key)
     init_state = jnp.array([1.0, 2.0, -3.0])
@@ -292,7 +276,7 @@ def test_OUP_zero_mean():
     key = jr.PRNGKey(0)
     dim = 3
 
-    noise_model = make_OUP_model(dim=dim, tau=1, noise_scale=0.1)
+    noise_model = make_OUP_model(dim=dim, tau=1, noise_std=0.1)
     solver = dfx.EulerHeun()
     terms = noise_model.terms(key)
     init_state = jnp.array([0.0, 0.0, 0.0])
@@ -321,6 +305,11 @@ def test_weight_plasticity():
     # Override excitatory mask for test
     excitatory_mask = jnp.array([True, False, True, False], dtype=bool)
     object.__setattr__(model, "excitatory_mask", excitatory_mask)
+    object.__setattr__(
+        model,
+        "synaptic_time_constants",
+        jnp.where(model.excitatory_mask, model.tau_E, model.tau_I),
+    )
 
     # Set up state with specific conductances
     G = jnp.zeros((N, N))
@@ -403,11 +392,11 @@ def test_noise_is_unique():
     N = 5
     key = jr.PRNGKey(3)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_scale=0.5, tau=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
     initial_state = model.initial
-    args = make_default_args(N, 0)
+    args = make_default_args(N, 0, noise_scale_hyperparam=0.5)
     solver = dfx.EulerHeun()
     terms = model.terms(jr.PRNGKey(0))
 
@@ -422,7 +411,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     N = 5
     key = jr.PRNGKey(4)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_scale=0.5, tau=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
     network = model.base_network
@@ -457,14 +446,15 @@ def test_NoisyNeuronModel_diffusion():
     N = 5
     key = jr.PRNGKey(5)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_scale=0.5, tau=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
     network = model.base_network
-    network_state = make_baseline_state(network)
+    full_weights = jnp.ones((N, N + network.N_inputs))
+    network_state = make_baseline_state(network, W=full_weights)
     noise_state = jnp.arange(N, dtype=network_state.V.dtype)
     initial_state = make_noisy_state(network_state, noise_state)
-    args = make_default_args(N, 0)
+    args = make_default_args(N, 0, noise_scale_hyperparam=0.1)
 
     noisy_network_diff = model.diffusion(0.0, initial_state, args).pytree
     network_diff = noisy_network_diff.network_state.pytree
@@ -481,11 +471,11 @@ def test_NoisyNeuronModel_diffusion():
     assert jnp.allclose(dG, 0.0)
     assert jnp.allclose(dW, 0.0)
 
-    # OU diffusion is identity * sqrt(noise_scale)
-    assert jnp.allclose(
-        noisy_network_diff.noise_state,
-        jnp.eye(N) * jnp.sqrt(model.noise_model.noise_scale),
+    desired_noise_std = model.compute_desired_noise_std(0.0, initial_state, args)
+    expected_noise_diffusion = (
+        jnp.eye(N) * desired_noise_std * jnp.sqrt(2.0 / model.noise_model.tau)
     )
+    assert jnp.allclose(noisy_network_diff.noise_state, expected_noise_diffusion)
 
 
 def test_spike_generation():
@@ -543,24 +533,27 @@ def test_spike_generation_with_input():
     state = make_baseline_state(model, V=V)
 
     def input_spikes_fn(t, x, args):
-        return jnp.array([1.0, 0.0, 0.0])
+        spike_vec = jnp.array([1.0, 0.0, 0.0])
+        return jnp.broadcast_to(spike_vec, (N_neurons, N_inputs))
 
     args = make_default_args(N_neurons, N_inputs, get_input_spikes=input_spikes_fn)
 
     new_state = model.spike_and_reset(0.0, state, args=args)
     V_new, spikes, W_new, G_new = new_state.V, new_state.S, new_state.W, new_state.G
 
-    expected_spikes = jnp.array([0, 0, 1, 0, 1, 0, 0], dtype=bool)
+    expected_spikes = jnp.array([0, 0, 1, 0], dtype=bool)
     expected_V_new = new_state.V.at[2].set(model.V_reset)
 
     assert jnp.allclose(spikes, expected_spikes)
     assert jnp.allclose(V_new, expected_V_new)
-    assert jnp.allclose(
-        G_new[[0, 1, 3, 4, 0, 1, 2, 3], [2, 2, 2, 2, 4, 4, 4, 4]],
-        model.synaptic_increment,
-        atol=1e-10,
-    )  # Check synaptic increments where expected
-    assert jnp.allclose(G_new[:, jnp.invert(expected_spikes)], 0.0, atol=1e-10)
+
+    recurrent_G = G_new[:, : model.N_neurons]
+    input_G = G_new[:, model.N_neurons :]
+
+    assert jnp.allclose(recurrent_G[:, 2], model.synaptic_increment)
+    assert jnp.allclose(recurrent_G[:, jnp.array([0, 1, 3])], 0.0, atol=1e-10)
+    assert jnp.allclose(input_G[:, 0], model.synaptic_increment)
+    assert jnp.allclose(input_G[:, 1:], 0.0, atol=1e-10)
     assert jnp.all(W_new == state.W)
 
     # Check conductance decay
@@ -569,7 +562,7 @@ def test_spike_generation_with_input():
     assert jnp.all(dS == 0)
     assert jnp.all(dG[:, model.N_neurons + 0] < 0)
     assert jnp.all(dG[:, model.N_neurons + 1 :] == 0)
-    assert jnp.all(dG[jnp.arange(N_neurons) != 2, 2] < 0)
+    assert jnp.all(dG[:, 2] < 0)
     assert jnp.all(dG[:, jnp.array([0, 1, 3])] == 0)
 
 
@@ -587,7 +580,7 @@ def test_force_balance_no_change():
     args = make_default_args(
         N_neurons,
         N_inputs,
-        desired_balance=lambda t, x, args: jnp.array([0.0]),  # 0.0 = no balancing
+        get_desired_balance=lambda t, x, args: jnp.array([0.0]),
     )
 
     state = model.initial
@@ -612,17 +605,22 @@ def test_force_balance_mini():
     )
 
     args = make_default_args(
-        N_neurons, N_inputs, get_desired_balance=lambda t, x, args: jnp.array([1])
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, args: jnp.array([4.5])
     )
 
-    state = model.initial
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.5).at[0, 3].set(1.0)
+    state = make_baseline_state(model, W=base_W)
+
     balance = model.compute_balance(0, state, args)
     assert balance.shape == (N_neurons,)
 
-    state = model.force_balanced_weights(0, model.initial, args=args)
+    state = model.force_balanced_weights(0, state, args=args)
     balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, args["get_desired_balance"](0, state, args))
-    assert state.W[0][2] == 2.0  # Inh weight is rescaled
+    desired_balance = args["get_desired_balance"](0, state, args)
+    assert jnp.allclose(balance_after, desired_balance)
+
+    assert state.W[0][2] == 4.5  # Inh weight is rescaled
     assert state.W[0][0] == -jnp.inf  # No self connection
     assert state.W[0][1] == 1.0 and state.W[0][1] == 1.0  # Exc weights unchanged
 
@@ -663,9 +661,7 @@ def test_synaptic_delays():
     )
 
     voltages = jnp.array([-70.0, -49.0, -45.0, -60.0]) * 1e-3
-    expected_spikes = jnp.array(
-        [0, 1, 1, 0, 0, 0], dtype=bool
-    )  # Last two are input neurons
+    expected_spikes = jnp.array([0, 1, 1, 0], dtype=bool)
     init_state = make_baseline_state(
         model,
         V=voltages,
