@@ -8,6 +8,7 @@ from jaxtyping import PyTree
 
 from adaptive_SNN.models import (
     OUP,
+    AuxiliaryInfo,
     LIFNetwork,
     LIFState,
     NoisyNetwork,
@@ -93,14 +94,21 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
     N_neurons = model.N_neurons
     N_inputs = model.N_inputs
 
+    auxiliary_info = AuxiliaryInfo(
+        firing_rate=jnp.zeros((N_neurons,)),
+        mean_E_conductance=jnp.zeros((N_neurons,)),
+        var_E_conductance=jnp.zeros((N_neurons,)),
+        time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
+        spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),
+        buffer_index=jnp.array(0, dtype=jnp.int32),
+    )
+
     state = LIFState(
         V=jnp.ones((N_neurons,)) * model.resting_potential,
         S=jnp.zeros((N_neurons,)),
         W=jnp.zeros((N_neurons, N_neurons + N_inputs)),
         G=jnp.zeros((N_neurons, N_neurons + N_inputs)),
-        time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
-        spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),
-        buffer_index=jnp.array(0, dtype=jnp.int32),
+        auxiliary_info=auxiliary_info,
     )
 
     # Apply overrides using eqx.tree_at
