@@ -22,11 +22,16 @@ class OUP(NoiseModelABC):
         return -1.0 / self.tau * (x - self.mean)
 
     def diffusion(self, t, x, args):
-        if args is None:
-            noise_std = self.noise_std
-        else:
-            noise_std = args.get("noise_std", self.noise_std)
-        return jnp.eye(x.shape[0]) * noise_std * jnp.sqrt(2.0 / self.tau)
+        # the value given in args takes precedence as this is used by the NoisyNetwork model
+        # to set state-dependent noise stds. The default is a constant noise std used otherwise.
+        noise_std = (
+            self.noise_std if args is None else args.get("noise_std", self.noise_std)
+        )
+
+        # Return diagonal diffusion matrix
+        if isinstance(noise_std, Array) and noise_std.ndim == 1:
+            return jnp.diag(noise_std) * jnp.sqrt(2.0 / self.tau)
+        return jnp.eye(self.dim) * noise_std * jnp.sqrt(2.0 / self.tau)
 
     @property
     def noise_shape(self):
