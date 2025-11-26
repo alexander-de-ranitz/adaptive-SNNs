@@ -318,6 +318,8 @@ def test_weight_plasticity():
 
     # Define deterministic noise and RPE
     E_noise = (jnp.arange(N, dtype=jnp.float32) + 1.0) * model.synaptic_increment
+    noise_std = jnp.arange(3, N + 3, dtype=state.V.dtype) * 0.1
+
     RPE_value = 2.0
 
     args = make_default_args(
@@ -326,30 +328,26 @@ def test_weight_plasticity():
         excitatory_noise=E_noise,
         RPE=RPE_value,
         get_learning_rate=lambda t, x, a: 0.1,
+        noise_std=noise_std,
     )
 
     derivs = model.drift(0.0, state, args)
     dW = derivs.W
 
     # Build expected dW
-    E_component = jnp.outer(E_noise, excitatory_mask)
-    expected_dW = (
-        0.1
-        * RPE_value
-        * E_component
-        / model.synaptic_increment
-        * G
-        / model.synaptic_increment
-    )
+    noise_per_synapse = jnp.outer(E_noise / noise_std, excitatory_mask)
+    expected_dW = 0.1 * RPE_value * noise_per_synapse * G / model.synaptic_increment
 
     assert jnp.allclose(dW, expected_dW)
     assert dW[0, 1] == 0.0  # inhibitory presynaptic neuron
+
+    # Manual sanity check to ensure elements are in the right place
     assert (
         dW[0, 2]
         == 0.1
         * RPE_value
         * E_noise[0]
-        / model.synaptic_increment
+        / noise_std[0]
         * G[0, 2]
         / model.synaptic_increment
     )
@@ -358,7 +356,7 @@ def test_weight_plasticity():
         == 0.1
         * RPE_value
         * E_noise[1]
-        / model.synaptic_increment
+        / noise_std[1]
         * G[1, 0]
         / model.synaptic_increment
     )
