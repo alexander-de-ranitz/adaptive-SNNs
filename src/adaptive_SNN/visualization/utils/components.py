@@ -66,7 +66,10 @@ def _plot_spikes_raster(
     spike_times_per_neuron = [
         jnp.nonzero(spikes[:, i])[0] * dt for i in range(spikes.shape[1])
     ][::-1]
-    ax.set_yticks(range(len(spike_times_per_neuron)))
+    if len(spike_times_per_neuron) < 10:
+        ax.set_yticks(range(len(spike_times_per_neuron)))
+    else:
+        ax.set_yticks([])
     ax.eventplot(spike_times_per_neuron, colors="black", linelengths=0.8, **plot_kwargs)
     ax.set_ylabel("Neuron")
     ax.set_xlabel("Time (s)")
