@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from adaptive_SNN.models.base import NeuronModelABC, NoiseModelABC
-from adaptive_SNN.models.networks.lif import LIFNetwork, LIFState
+from adaptive_SNN.models.networks.lif import LIFState
 from adaptive_SNN.utils.operators import MixedPyTreeOperator
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -19,6 +19,8 @@ class NoisyNetworkState(eqx.Module):
 
 
 class NoisyNetwork(NeuronModelABC):
+    min_noise_std: float = 5e-9
+
     base_network: NeuronModelABC
     noise_model: NoiseModelABC
 
@@ -85,22 +87,12 @@ class NoisyNetwork(NeuronModelABC):
         Returns:
             Array: Noise scale for each neuron.
         """
-        # TODO: Should we compute this instead?
-        assumed_firing_rate = 5000.0  # We assume input neurons fire at 10 Hz on average
+        synaptic_variance = state.network_state.auxiliary_info.var_E_conductance
 
-        # Compute the variance of the conductance fluctuations per neuron due to synaptic input
-        # based on Campbell's theorem (see Papoulis, 2002)
-        W = jnp.where(jnp.isfinite(state.network_state.W), state.network_state.W, 0.0)
-
-        # Only consider excitatory weights for noise computation
-        W = W * self.base_network.excitatory_mask[None, :]
-
-        synaptic_variance = (
-            0.5
-            * jnp.square(W).sum(axis=1)
-            * assumed_firing_rate
-            * LIFNetwork.synaptic_increment**2
-            * LIFNetwork.tau_E
-        )
-
-        return jnp.sqrt(synaptic_variance) * args.get("noise_scale_hyperparam", 0.0)
+        # Compute desired noise std using the computed variance and a hyperparameter, then clip to min value
+        noise_scale_hyperparam = args.get("noise_scale_hyperparam", 0.0)
+        if noise_scale_hyperparam == 0.0:
+            return jnp.zeros_like(synaptic_variance)
+        desired_noise_std = jnp.sqrt(synaptic_variance) * noise_scale_hyperparam
+        desired_noise_std = jnp.clip(desired_noise_std, min=self.min_noise_std)
+        return desired_noise_std
