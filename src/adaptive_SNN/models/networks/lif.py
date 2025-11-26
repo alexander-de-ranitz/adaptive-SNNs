@@ -11,6 +11,17 @@ from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
+class AuxiliaryInfo(eqx.Module):
+    """Container for auxiliary information in LIFState."""
+
+    firing_rate: Array
+    mean_E_conductance: Array
+    var_E_conductance: Array
+    time_since_last_spike: Array
+    spike_buffer: Array
+    buffer_index: Array  # Scalar array to maintain JAX compatibility
+
+
 class LIFState(eqx.Module):
     """State container for LIF network.
 
@@ -21,18 +32,14 @@ class LIFState(eqx.Module):
         S: Spike vector (N_neurons + N_inputs,)
         W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs). -inf indicates no connection
         G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
-        time_since_last_spike: Time since last spike for each neuron (N_neurons,)
-        spike_buffer: Circular buffer of past spikes (buffer_size, N_neurons + N_inputs)
-        buffer_index: Current write position in spike buffer (scalar int)
+        auxiliary_info: AuxiliaryInfo object containing additional state variables
     """
 
     V: Array
     S: Array
     W: Array
     G: Array
-    time_since_last_spike: Array
-    spike_buffer: Array
-    buffer_index: Array  # Scalar array to maintain JAX compatibility
+    auxiliary_info: AuxiliaryInfo
 
 
 class LIFNetwork(NeuronModelABC):
@@ -58,6 +65,7 @@ class LIFNetwork(NeuronModelABC):
         0.8  # Fraction of excitatory recurrent neurons
     )
     fraction_excitatory_input: float = 1.0  # Fraction of excitatory input neurons
+    EMA_tau: float = 0.3  # Time constant for firing rate exponential moving average
 
     input_weight: float  # Mean input weight
     rec_weight: float  # Mean recurrent weight
@@ -161,6 +169,12 @@ class LIFNetwork(NeuronModelABC):
     @property
     def initial(self, key: jr.PRNGKey = jr.PRNGKey(0)):
         """Return initial network state as LIFState."""
+
+        # Initialize weights
+        key, subkey = jr.split(key)
+        weights = self.initialize_weights(subkey)
+
+        # Initialize other state variables to zeros
         V_init = (
             jnp.zeros((self.N_neurons,), dtype=default_float) + self.resting_potential
         )
@@ -169,74 +183,32 @@ class LIFNetwork(NeuronModelABC):
         )
         spikes_init = jnp.zeros((self.N_neurons,), dtype=default_float)
 
-        key, subkey = jr.split(key)
-
-        # Initialize weights with random sparse connectivity with no self-connections or double connections
-        # The weights are drawn from a normal distribution around with mean 1 and std 0.2
-        num_rec_connections = int(self.N_neurons**2 * self.connection_prob)
-        rec_weights = (
-            self.rec_weight
-            * jnp.clip(
-                1 + 0.2 * jr.normal(key, (self.N_neurons, self.N_neurons)),
-                min=0.5,
-                max=1.5,
-            )
-            * jr.permutation(
-                subkey,
-                jnp.concatenate(
-                    [
-                        jnp.ones(num_rec_connections),
-                        jnp.zeros(self.N_neurons**2 - num_rec_connections),
-                    ]
-                ),
-            ).reshape(self.N_neurons, self.N_neurons)
-        )
-
-        # Remove self-connections
-        rec_weights = jnp.fill_diagonal(rec_weights, 0.0, inplace=False)
-
-        key, subkey = jr.split(key)
-        N_input_connections = int(self.N_neurons * self.N_inputs * self.connection_prob)
-        input_weights = jr.permutation(
-            subkey,
-            jnp.concatenate(
-                [
-                    jnp.ones(N_input_connections) * self.input_weight,
-                    jnp.zeros(self.N_neurons * self.N_inputs - N_input_connections),
-                ]
-            ),
-        ).reshape(self.N_neurons, self.N_inputs)
-
-        weights = jnp.concatenate([rec_weights, input_weights], axis=1)
-
-        weights = jnp.where(
-            weights == 0.0, -jnp.inf, weights
-        )  # Non existing connections have weight -inf
-
-        # If fully_connected_input is True, set all input weights to input_weight
-        if self.fully_connected_input and (self.N_inputs > 0):
-            weights = weights.at[:, self.N_neurons :].set(
-                jnp.ones(shape=(self.N_neurons, self.N_inputs)) * self.input_weight
-            )
-
+        # Initialize auxiliary info
+        firing_rate = jnp.zeros((self.N_neurons,), dtype=default_float)
         time_since_last_spike = (
             jnp.ones((self.N_neurons,), dtype=default_float) * jnp.inf
-        )
-
-        # Initialize spike delay buffer
+        )  # For refractory period, set to inf initially so neurons can spike right away
         spike_buffer = jnp.zeros(
             (self.buffer_size, self.N_neurons), dtype=default_float
         )
-        buffer_index = jnp.array(0, dtype=jnp.int32)
+        buffer_index = jnp.array(0, dtype=int)
+        mean_E_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
+        std_E_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
+        auxiliary_info = AuxiliaryInfo(
+            firing_rate=firing_rate,
+            time_since_last_spike=time_since_last_spike,
+            spike_buffer=spike_buffer,
+            buffer_index=buffer_index,
+            mean_E_conductance=mean_E_conductance,
+            var_E_conductance=std_E_conductance,
+        )
 
         return LIFState(
             V=V_init,
             S=spikes_init,
             W=weights,
             G=conductance_init,
-            time_since_last_spike=time_since_last_spike,
-            spike_buffer=spike_buffer,
-            buffer_index=buffer_index,
+            auxiliary_info=auxiliary_info,
         )
 
     def drift(self, t, state: LIFState, args) -> LIFState:
@@ -265,11 +237,12 @@ class LIFNetwork(NeuronModelABC):
         total_I_conductances = jnp.sum(
             weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
         )
-
+        synaptic_E_conductances = jnp.sum(
+            weighted_conductances * self.excitatory_mask[None, :], axis=1
+        )
         E_noise = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
         total_E_conductances = (
-            jnp.sum(weighted_conductances * self.excitatory_mask[None, :], axis=1)
-            + E_noise
+            synaptic_E_conductances + E_noise
         )  # Add external excitatory noise to total excitatory conductance
 
         # Ensure non-negative conductances
@@ -304,21 +277,45 @@ class LIFNetwork(NeuronModelABC):
         dS = jnp.zeros_like(S)  # Spikes are handled separately, so no change here
 
         d_time_since_last_spike = jnp.ones_like(
-            state.time_since_last_spike
+            state.auxiliary_info.time_since_last_spike
         )  # Time since last spike increases by 1 for all neurons
 
         dV = jnp.where(
-            state.time_since_last_spike < self.refractory_period, 0.0, dV
+            state.auxiliary_info.time_since_last_spike < self.refractory_period, 0.0, dV
         )  # Neurons in refractory period do not change their membrane potential
 
+        # Firing rate is modelled as an exponential moving average of spikes
+        d_firing_rate = -state.auxiliary_info.firing_rate / self.EMA_tau
+        d_mean_E_conductance = (
+            -state.auxiliary_info.mean_E_conductance + synaptic_E_conductances
+        ) / self.EMA_tau
+        d_var_E_conductance = (
+            -state.auxiliary_info.var_E_conductance
+            + jnp.square(
+                synaptic_E_conductances - state.auxiliary_info.mean_E_conductance
+            )
+        ) / self.EMA_tau
+
         # Buffer fields have zero derivative (updated discretely in spike_and_reset)
-        d_spike_buffer = jnp.zeros_like(state.spike_buffer)
+        d_spike_buffer = jnp.zeros_like(state.auxiliary_info.spike_buffer)
         d_buffer_index = jnp.zeros_like(
-            state.buffer_index, dtype=state.buffer_index.dtype
+            state.auxiliary_info.buffer_index,
+            dtype=state.auxiliary_info.buffer_index.dtype,
         )
 
         return LIFState(
-            dV, dS, dW, dGdt, d_time_since_last_spike, d_spike_buffer, d_buffer_index
+            V=dV,
+            S=dS,
+            W=dW,
+            G=dGdt,
+            auxiliary_info=AuxiliaryInfo(
+                firing_rate=d_firing_rate,
+                mean_E_conductance=d_mean_E_conductance,
+                var_E_conductance=d_var_E_conductance,
+                time_since_last_spike=d_time_since_last_spike,
+                spike_buffer=d_spike_buffer,
+                buffer_index=d_buffer_index,
+            ),
         )
 
     def diffusion(self, t, state: LIFState, args) -> MixedPyTreeOperator:
@@ -329,42 +326,44 @@ class LIFNetwork(NeuronModelABC):
         # In this case, all elements are ElementWiseMul operators of zeros, since we do not use noise in this model.
         # However, I wanted to keep the structure for future use, e.g. if we want to add noise to conductances or weights
         return MixedPyTreeOperator(
-            LIFState(
-                ElementWiseMul(jnp.zeros_like(state.V, dtype=default_float)),  # V noise
-                ElementWiseMul(jnp.zeros_like(state.S, dtype=default_float)),  # S noise
-                ElementWiseMul(jnp.zeros_like(state.W, dtype=default_float)),  # W noise
-                ElementWiseMul(jnp.zeros_like(state.G, dtype=default_float)),  # G noise
-                ElementWiseMul(
-                    jnp.zeros_like(state.time_since_last_spike, dtype=default_float)
-                ),  # time_since_last_spike noise
-                ElementWiseMul(
-                    jnp.zeros_like(state.spike_buffer, dtype=default_float)
-                ),  # spike_buffer noise
-                ElementWiseMul(
-                    jnp.zeros_like(state.buffer_index, dtype=state.buffer_index.dtype)
-                ),  # buffer_index noise
+            jax.tree.map(
+                lambda arr: ElementWiseMul(jnp.zeros_like(arr, dtype=default_float)),
+                state,
             )
         )
 
     @property
     def noise_shape(self):
+        auxiliary_info_shape = AuxiliaryInfo(
+            firing_rate=jax.ShapeDtypeStruct(
+                shape=(self.N_neurons,), dtype=default_float
+            ),
+            mean_E_conductance=jax.ShapeDtypeStruct(
+                shape=(self.N_neurons,), dtype=default_float
+            ),
+            var_E_conductance=jax.ShapeDtypeStruct(
+                shape=(self.N_neurons,), dtype=default_float
+            ),
+            time_since_last_spike=jax.ShapeDtypeStruct(
+                shape=(self.N_neurons,), dtype=default_float
+            ),
+            spike_buffer=jax.ShapeDtypeStruct(
+                shape=(self.buffer_size, self.N_neurons), dtype=default_float
+            ),
+            buffer_index=jax.ShapeDtypeStruct(shape=(), dtype=default_float),
+        )
         return LIFState(
-            jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
-            jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
-            jax.ShapeDtypeStruct(
+            V=jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
+            S=jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
+            G=jax.ShapeDtypeStruct(
                 shape=(self.N_neurons, self.N_neurons + self.N_inputs),
                 dtype=default_float,
             ),
-            jax.ShapeDtypeStruct(
+            W=jax.ShapeDtypeStruct(
                 shape=(self.N_neurons, self.N_neurons + self.N_inputs),
                 dtype=default_float,
             ),
-            jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
-            jax.ShapeDtypeStruct(
-                shape=(self.buffer_size, self.N_neurons),
-                dtype=default_float,
-            ),
-            jax.ShapeDtypeStruct(shape=(), dtype=default_float),
+            auxiliary_info=auxiliary_info_shape,
         )
 
     def terms(self, key):
@@ -403,7 +402,7 @@ class LIFNetwork(NeuronModelABC):
             Array of shape (N_neurons, N_neurons) with delayed spike values
         """
         # Cast buffer_index to int32 for indexing operations
-        buffer_idx = jnp.round(state.buffer_index).astype(jnp.int32)
+        buffer_idx = jnp.round(state.auxiliary_info.buffer_index).astype(jnp.int32)
 
         # For each synapse, compute which buffer index to read from
         # Convert delays from seconds to buffer timesteps
@@ -415,7 +414,7 @@ class LIFNetwork(NeuronModelABC):
         # Gather spikes from buffer for each synapse
         # Use vmap to vectorize over neurons
         def get_neuron_inputs(neuron_idx):
-            return state.spike_buffer[
+            return state.auxiliary_info.spike_buffer[
                 read_indices[neuron_idx], jnp.arange(self.N_neurons)
             ]
 
@@ -423,22 +422,22 @@ class LIFNetwork(NeuronModelABC):
         return delayed_spikes
 
     def spike_and_reset(self, t, state: LIFState, args):
-        V, _, W, G = state.V, state.S, state.W, state.G
+        V, W, G = state.V, state.W, state.G
         recurrent_spikes = (V > self.firing_threshold).astype(V.dtype)  # (N_neurons,)
         V_new = (1.0 - recurrent_spikes) * V + recurrent_spikes * self.V_reset
 
         # Cast buffer_index to int32 to ensure it's an integer for indexing
-        buffer_idx = jnp.round(state.buffer_index).astype(jnp.int32)
+        buffer_idx = jnp.round(state.auxiliary_info.buffer_index).astype(jnp.int32)
 
         # Update spike buffer with current spikes
         state = eqx.tree_at(
-            lambda s: s.spike_buffer,
+            lambda s: s.auxiliary_info.spike_buffer,
             state,
-            state.spike_buffer.at[buffer_idx].set(recurrent_spikes),
+            state.auxiliary_info.spike_buffer.at[buffer_idx].set(recurrent_spikes),
         )
-        new_buffer = state.spike_buffer
+        new_buffer = state.auxiliary_info.spike_buffer
         new_buffer_index = jnp.round(
-            (state.buffer_index + 1) % self.buffer_size
+            (state.auxiliary_info.buffer_index + 1) % self.buffer_size
         ).astype(jnp.int32)
 
         # Get delayed spikes and update conductances based on delayed activity
@@ -467,17 +466,26 @@ class LIFNetwork(NeuronModelABC):
         )  # Only update conductances for existing connections, else set to 0
 
         time_since_last_spike = jnp.where(
-            recurrent_spikes > 0, 0.0, state.time_since_last_spike
+            recurrent_spikes > 0, 0.0, state.auxiliary_info.time_since_last_spike
         )  # Reset time since last spike to 0 for neurons that spiked
 
+        firing_rate = state.auxiliary_info.firing_rate + recurrent_spikes / self.EMA_tau
+
+        auxiliary_info = AuxiliaryInfo(
+            firing_rate=firing_rate,
+            mean_E_conductance=state.auxiliary_info.mean_E_conductance,
+            var_E_conductance=state.auxiliary_info.var_E_conductance,
+            time_since_last_spike=time_since_last_spike,
+            spike_buffer=new_buffer,
+            buffer_index=new_buffer_index,
+        )
+
         return LIFState(
-            V_new,
-            recurrent_spikes,
-            W,
-            G_new,
-            time_since_last_spike,
-            new_buffer,
-            new_buffer_index,
+            V=V_new,
+            S=recurrent_spikes,
+            W=W,
+            G=G_new,
+            auxiliary_info=auxiliary_info,
         )
 
     def compute_balance(self, t, state, args):
@@ -524,3 +532,56 @@ class LIFNetwork(NeuronModelABC):
             + jnp.outer(jnp.ones(self.N_neurons), self.excitatory_mask)
         )
         return eqx.tree_at(lambda s: s.W, state, balanced_weights)
+
+    def initialize_weights(self, key: jr.PRNGKey):
+        """Initialize synaptic weight matrix with random sparse connections.
+
+        No self-connections are allowed. Non-existing connections have weight -inf.
+        """
+        key, subkey, subkey2 = jr.split(key, 3)
+        num_rec_connections = int(self.N_neurons**2 * self.connection_prob)
+        rec_weights = (
+            self.rec_weight
+            * jnp.clip(
+                1 + 0.2 * jr.normal(subkey, (self.N_neurons, self.N_neurons)),
+                min=0.5,
+                max=1.5,
+            )
+            * jr.permutation(
+                subkey2,
+                jnp.concatenate(
+                    [
+                        jnp.ones(num_rec_connections),
+                        jnp.zeros(self.N_neurons**2 - num_rec_connections),
+                    ]
+                ),
+            ).reshape(self.N_neurons, self.N_neurons)
+        )
+
+        # Remove self-connections
+        rec_weights = jnp.fill_diagonal(rec_weights, 0.0, inplace=False)
+
+        key, subkey = jr.split(key)
+        N_input_connections = int(self.N_neurons * self.N_inputs * self.connection_prob)
+        input_weights = jr.permutation(
+            subkey,
+            jnp.concatenate(
+                [
+                    jnp.ones(N_input_connections) * self.input_weight,
+                    jnp.zeros(self.N_neurons * self.N_inputs - N_input_connections),
+                ]
+            ),
+        ).reshape(self.N_neurons, self.N_inputs)
+
+        weights = jnp.concatenate([rec_weights, input_weights], axis=1)
+
+        weights = jnp.where(
+            weights == 0.0, -jnp.inf, weights
+        )  # Non existing connections have weight -inf
+
+        # If fully_connected_input is True, set all input weights to input_weight
+        if self.fully_connected_input and (self.N_inputs > 0):
+            weights = weights.at[:, self.N_neurons :].set(
+                jnp.ones(shape=(self.N_neurons, self.N_inputs)) * self.input_weight
+            )
+        return weights
