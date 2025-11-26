@@ -11,6 +11,8 @@ from helpers import (
     make_OUP_model,
 )
 
+from adaptive_SNN.utils.analytics import compute_expected_synaptic_std
+
 
 def test_initial_state():
     N_neurons, N_inputs = 10, 3
@@ -699,3 +701,27 @@ def test_synaptic_delays():
         )  # Reset conductances for next step
 
     assert num_events == 6  # 2 spikes * 3 post-synaptic targets each
+
+
+def test_noise_scaling():
+    N_neurons = 1
+    model = make_Noisy_LIF_model(
+        N_neurons=N_neurons, N_inputs=1, noise_std=1.0, tau=1.0
+    )
+
+    state = model.initial
+    noise_scale_hyperparam = 0.2
+    args = make_default_args(
+        N_neurons, 0, noise_scale_hyperparam=noise_scale_hyperparam
+    )
+
+    desired_noise_std = model.compute_desired_noise_std(0.0, state, args)
+    syn_std = compute_expected_synaptic_std(
+        1,
+        5000,  # Magic number, must match the one in compute_desired_noise_std #TODO: make this less magic
+        model.base_network.tau_E,
+        model.base_network.synaptic_increment,
+        1.0,
+    )
+
+    assert jnp.isclose(desired_noise_std, noise_scale_hyperparam * syn_std)
