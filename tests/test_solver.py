@@ -23,7 +23,7 @@ def test_solver_timesteps():
     network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key)
 
     noise_model = DeterministicOUP(
-        tau=network.tau_E, noise_scale=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
+        tau=network.tau_E, noise_std=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
     )
 
     model = DeterministicNoisyNeuronModel(
@@ -39,9 +39,9 @@ def test_solver_timesteps():
     args = make_default_args(N_neurons, N_inputs)
 
     # Our method
-    save_every = 1
+    save_at = dfx.SaveAt(subs=dfx.SubSaveAt(steps=True, t0=True, t1=True))
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_every_n_steps=save_every, args=args
+        model, solver, t0, t1, dt0, y0, save_at=save_at, args=args
     )
     sol_1_ts = sol_1.ts
 
@@ -79,7 +79,7 @@ def test_solver_output():
     network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key)
 
     noise_model = DeterministicOUP(
-        tau=network.tau_E, noise_scale=2e-16, dim=N_neurons, t0=t0, t1=t1 + dt0
+        tau=network.tau_E, noise_std=2e-16, dim=N_neurons, t0=t0, t1=t1 + dt0
     )
 
     model = DeterministicNoisyNeuronModel(
@@ -96,20 +96,15 @@ def test_solver_output():
 
     # Define a save function that extracts only the relevant parts of the state. Necessary because
     # diffrax does not update the spike buffer in the same way as our custom solver.
-    def save_fn_custom(y: NoisyNetworkState):
-        return (
-            (y.network_state.V, y.network_state.G, y.network_state.S),
-            y.noise_state,
-        )
 
-    def save_fn_dfx(t, y: NoisyNetworkState, args):
+    def save_fn(t, y: NoisyNetworkState, args):
         return (
             (y.network_state.V, y.network_state.G, y.network_state.S),
             y.noise_state,
         )
 
     # Our method
-    save_every = 1
+    save_at = dfx.SaveAt(subs=dfx.SubSaveAt(fn=save_fn, steps=True, t0=True, t1=True))
     sol_1 = simulate_noisy_SNN(
         model,
         solver,
@@ -117,14 +112,12 @@ def test_solver_output():
         t1,
         dt0,
         y0,
-        save_every_n_steps=save_every,
-        save_fn=save_fn_custom,
+        save_at=save_at,
         args=args,
     )
 
     # Direct diffrax call for comparison
     terms = model.terms(jr.PRNGKey(0))
-    saveat = dfx.SaveAt(t0=True, t1=True, steps=True, fn=save_fn_dfx)
     sol_2 = dfx.diffeqsolve(
         terms,
         solver,
@@ -132,7 +125,7 @@ def test_solver_output():
         t1=t1,
         dt0=dt0,
         y0=y0,
-        saveat=saveat,
+        saveat=save_at,
         args=args,
         adjoint=dfx.ForwardMode(),
     )

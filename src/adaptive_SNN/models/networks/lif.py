@@ -321,7 +321,7 @@ class LIFNetwork(NeuronModelABC):
             dV, dS, dW, dGdt, d_time_since_last_spike, d_spike_buffer, d_buffer_index
         )
 
-    def diffusion(self, t, state: LIFState, args) -> LIFState:
+    def diffusion(self, t, state: LIFState, args) -> MixedPyTreeOperator:
         # Our noise_shape is a pytree of 1d and 2d arrays. Diffusion must have compatible shapes.
         # since each noise value is independent, element-wise multiplication of the matrix-valued noise term is sufficient,
         # we do not need to use tensor products or similar more complex operations.

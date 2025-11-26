@@ -29,28 +29,45 @@ def make_LIF_model(
     key=jr.PRNGKey(0),
 ):
     """Create a LIFNetwork with configurable parameters."""
-    return LIFNetwork(
+    model = LIFNetwork(
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         dt=dt,
-        input_neuron_types=input_neuron_types,
         fully_connected_input=fully_connected_input,
         input_weight=input_weight,
         key=key,
     )
 
+    # For testing purposes, allow explicitely defining the types of input neurons
+    if input_neuron_types is not None and N_inputs > 0:
+        desired_types = jnp.asarray(input_neuron_types, dtype=bool)
+        if desired_types.shape != (N_inputs,):
+            raise ValueError(
+                "input_neuron_types must have shape (N_inputs,) when provided"
+            )
 
-def make_OUP_model(dim=3, tau=1.0, noise_scale=0.3, mean=0.0):
+        updated_mask = model.excitatory_mask.at[-N_inputs:].set(desired_types)
+        object.__setattr__(model, "excitatory_mask", updated_mask)
+        object.__setattr__(
+            model,
+            "synaptic_time_constants",
+            jnp.where(updated_mask, model.tau_E, model.tau_I),
+        )
+
+    return model
+
+
+def make_OUP_model(dim=3, tau=1.0, noise_std=0.3, mean=0.0):
     """Create an Ornstein-Uhlenbeck Process model with configurable parameters."""
-    return OUP(tau=tau, noise_std=noise_scale, mean=mean, dim=dim)
+    return OUP(tau=tau, noise_std=noise_std, mean=mean, dim=dim)
 
 
 def make_Noisy_LIF_model(
-    N_neurons=10, N_inputs=3, noise_scale=0.0, tau=1.0, dt=0.1e-3, key=jr.PRNGKey(0)
+    N_neurons=10, N_inputs=3, noise_std=0.0, tau=1.0, dt=0.1e-3, key=jr.PRNGKey(0)
 ):
     """Create a NoisyNetwork with LIF neurons and OU noise processes."""
     network = make_LIF_model(N_neurons, N_inputs, dt=dt, key=key)
-    noise_model = OUP(tau=tau, noise_std=noise_scale, dim=N_neurons)
+    noise_model = OUP(tau=tau, noise_std=noise_std, dim=N_neurons)
     return NoisyNetwork(neuron_model=network, noise_model=noise_model)
 
 
@@ -78,11 +95,11 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
 
     state = LIFState(
         V=jnp.ones((N_neurons,)) * model.resting_potential,
-        S=jnp.zeros((N_neurons + N_inputs,)),
+        S=jnp.zeros((N_neurons,)),
         W=jnp.zeros((N_neurons, N_neurons + N_inputs)),
         G=jnp.zeros((N_neurons, N_neurons + N_inputs)),
         time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
-        spike_buffer=jnp.zeros((model.buffer_size, N_neurons + N_inputs)),
+        spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),
         buffer_index=jnp.array(0, dtype=jnp.int32),
     )
 
@@ -117,9 +134,10 @@ def make_default_args(N_neurons, N_inputs, **overrides):
     args = {
         "excitatory_noise": jnp.zeros((N_neurons,)),
         "RPE": jnp.array([0.0]),
-        "get_input_spikes": lambda t, x, a: jnp.zeros((N_inputs,)),
+        "get_input_spikes": lambda t, x, a: jnp.zeros((N_neurons, N_inputs)),
         "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
         "get_desired_balance": lambda t, x, a: 0.0,
+        "noise_scale_hyperparam": 0.0,
     }
     args.update(overrides)
     return args
@@ -155,12 +173,12 @@ class DeterministicOUP(OUP):
     def __init__(
         self,
         tau: float = 1.0,
-        noise_scale: float = 1,
+        noise_std: float = 1.0,
         dim: int = 1,
         t0: float = 0.0,
         t1: float = 1.0,
     ):
-        super().__init__(tau=tau, noise_scale=noise_scale, dim=dim)
+        super().__init__(tau=tau, noise_std=noise_std, dim=dim)
         self.t0 = t0
         self.t1 = t1
 
