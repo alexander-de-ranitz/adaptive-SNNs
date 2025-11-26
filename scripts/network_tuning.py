@@ -5,11 +5,11 @@ from jax import numpy as jnp
 from adaptive_SNN.models import (
     OUP,
     LIFNetwork,
-    LIFState,
     NoisyNetwork,
     NoisyNetworkState,
 )
 from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_network_stats
 
 
@@ -19,7 +19,7 @@ def main():
     dt = 1e-4
     key = jr.PRNGKey(1)
 
-    N_neurons = 200
+    N_neurons = 500
     N_inputs = 100
 
     i_w = 6.0
@@ -28,7 +28,7 @@ def main():
     input_weights = [i_w * 1 / (jnp.log(N_inputs))]
     rec_weights = [r_w * 1 / (jnp.log(N_neurons * LIFNetwork.connection_prob))]
 
-    balance = 10.0
+    balance = 5.0
     input_firing_rate = 20
 
     for input_weight in input_weights:
@@ -39,16 +39,14 @@ def main():
                 N_inputs=N_inputs,
                 dt=dt,
                 fully_connected_input=True,
+                fraction_excitatory_input=1.0,
+                fraction_excitatory_recurrent=0.8,
                 input_weight=input_weight,
                 rec_weight=rec_weight,
                 key=key,
             )
 
-            D = 0.0
-
-            noise_model = OUP(
-                tau=neuron_model.tau_E, noise_std=0 * D, mean=0.0, dim=N_neurons
-            )
+            noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
 
             model = NoisyNetwork(
                 neuron_model=neuron_model,
@@ -66,18 +64,11 @@ def main():
                     input_firing_rate * dt,
                     shape=(N_neurons, N_inputs),
                 ),
+                "noise_scale_hyperparam": 0.1,
             }
 
-            def save_fn(y: NoisyNetworkState):
-                return LIFState(
-                    V=None,
-                    S=y.network_state.S,
-                    G=None,
-                    W=None,
-                    time_since_last_spike=None,
-                    buffer_index=None,
-                    spike_buffer=None,
-                )
+            def save_fn(t, y: NoisyNetworkState, args):
+                return save_part_of_state(y, S=True)
 
             print("Running simulation...")
             sol = simulate_noisy_SNN(
@@ -87,16 +78,15 @@ def main():
                 t1,
                 dt,
                 init_state,
-                save_every_n_steps=1,
+                save_at=dfx.SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
                 args=args,
-                save_fn=save_fn,
             )
 
             print("Simulation complete. Generating plots...")
             plot_network_stats(
                 sol,
                 model,
-                save_path=f"../figures/network_tuning_N{N_neurons}_iw{i_w}_rw{r_w}_balance{balance}.png",
+                save_path=f"../figures/network_tuning_N_{N_neurons}_iw{i_w}_rw{r_w}_balance{balance}.png",
             )
 
 
