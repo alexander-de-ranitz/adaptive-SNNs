@@ -262,14 +262,19 @@ class LIFNetwork(NeuronModelABC):
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
         RPE = args.get("RPE", jnp.array(0.0))
-        noise_per_synapse = jnp.outer(E_noise, self.excitatory_mask)
+
+        # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
+        noise_std = args.get("noise_std", 0.0)
+        # In case the noise std is zero (no noise), avoid division by zero and set relative noise strength to zero
+        relative_noise_strength = jnp.where(noise_std != 0.0, E_noise / noise_std, 0.0)
+
+        # Map the relative noise strength to each excitatory synapse
+        noise_per_synapse = jnp.outer(relative_noise_strength, self.excitatory_mask)
 
         dW = (
-            learning_rate
-            * RPE
-            * (noise_per_synapse / self.synaptic_increment)
-            * (G / self.synaptic_increment)
-        )  # Since W is in arbitrary units (not nS), scale by synaptic increment to get a sensible scale
+            learning_rate * RPE * noise_per_synapse * (G / self.synaptic_increment)
+        )  # Since W is in arbitrary units (not nS), scale G by synaptic increment to get a sensible scale
+
         dW = jnp.where(
             W == -jnp.inf, 0.0, dW
         )  # No weight change for non-existing connections

@@ -35,10 +35,11 @@ class NoisyNetwork(NeuronModelABC):
     def drift(self, t, state: NoisyNetworkState, args):
         network_state, noise_state = (state.network_state, state.noise_state)
 
-        # To allow the base network to access the noise state, we add it to the args
+        # To allow the base network to access the noise state and std, we add it to the args
         network_args = {
             **args,
             "excitatory_noise": noise_state,
+            "noise_std": self.compute_desired_noise_std(t, state, args),
         }
 
         network_drift = self.base_network.drift(t, network_state, network_args)
