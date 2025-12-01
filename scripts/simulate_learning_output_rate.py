@@ -131,7 +131,7 @@ def main():
                 print(f"Running simulation {i + 1}/{len(initial_weight_factors)} ...")
                 start = time.time()
 
-                def save_fn(y: SystemState):
+                def save_fn(t, y: SystemState, args):
                     return save_part_of_state(
                         y, reward=True, W=True, environment_state=True
                     )
@@ -143,9 +143,8 @@ def main():
                     t1,
                     dt,
                     init,
-                    save_at=SaveAt(ts=jnp.linspace(t0, t1, 1000)),
+                    save_at=SaveAt(fn=save_fn, ts=jnp.linspace(t0, t1, 1000)),
                     args=args,
-                    save_fn=save_fn,
                     key=key,
                 )
                 end = time.time()
