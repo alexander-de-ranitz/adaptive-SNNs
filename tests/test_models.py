@@ -11,7 +11,7 @@ from helpers import (
     make_OUP_model,
 )
 
-from adaptive_SNN.models import NoisyNetwork
+from adaptive_SNN.models import NoisyNetwork, NoisyNetworkState
 
 
 def test_initial_state():
@@ -393,8 +393,16 @@ def test_noise_is_unique():
         N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
-    initial_state = model.initial
-    args = make_default_args(N, 0, noise_scale_hyperparam=0.5)
+    initial_state: NoisyNetworkState = model.initial
+
+    # Make sure the initial network state has non-zero conductances variance so that noise > 0
+    initial_state = eqx.tree_at(
+        lambda s: s.network_state.auxiliary_info.var_E_conductance,
+        initial_state,
+        jnp.ones((N,)),
+    )
+
+    args = make_default_args(N, 0, noise_scale_hyperparam=1.0)
     solver = dfx.EulerHeun()
     terms = model.terms(jr.PRNGKey(0))
 
@@ -604,8 +612,11 @@ def test_force_balance_mini():
         key=jr.PRNGKey(7),
     )
 
+    target_balance = 2.0
     args = make_default_args(
-        N_neurons, N_inputs, get_desired_balance=lambda t, x, args: jnp.array([4.5])
+        N_neurons,
+        N_inputs,
+        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
     )
 
     base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
@@ -617,10 +628,23 @@ def test_force_balance_mini():
 
     state = model.force_balanced_weights(0, state, args=args)
     balance_after = model.compute_balance(0, state, args=args)
-    desired_balance = args["get_desired_balance"](0, state, args)
-    assert jnp.allclose(balance_after, desired_balance)
+    assert jnp.allclose(balance_after, target_balance)
 
-    assert state.W[0][2] == 4.5  # Inh weight is rescaled
+    # Compute approx. charge induced at rest for each synapse type (see Kumar, 2008)
+    # the ratio of these is what we define as the balance
+    charge_I = (
+        state.W[0][2]
+        * jnp.abs(model.reversal_potential_I - model.resting_potential)
+        * model.tau_I
+    )
+    charge_E = (
+        (state.W[0][1] + state.W[0][3])
+        / 2.0
+        * (model.reversal_potential_E - model.resting_potential)
+        * model.tau_E
+    )
+
+    assert jnp.allclose(charge_I / charge_E, target_balance)
     assert state.W[0][0] == -jnp.inf  # No self connection
     assert state.W[0][1] == 1.0 and state.W[0][1] == 1.0  # Exc weights unchanged
 
