@@ -1,74 +1,50 @@
 import diffrax as dfx
+import equinox as eqx
 import jax.random as jr
 from jax import numpy as jnp
 
 from adaptive_SNN.models import (
     OUP,
     LIFNetwork,
-    LIFState,
     NoisyNetwork,
     NoisyNetworkState,
 )
 from adaptive_SNN.solver import simulate_noisy_SNN
-from adaptive_SNN.utils.analytics import (
-    compute_expected_synaptic_std,
-    compute_oup_diffusion_coefficient,
-    compute_required_input_weight,
-)
-from adaptive_SNN.visualization import plot_network_stats
+from adaptive_SNN.utils.save_helper import save_part_of_state
+from adaptive_SNN.visualization import plot_network_stats, plot_simulate_SNN_results
 
 
 def main():
     t0 = 0
     t1 = 1.0
-    dt0 = 1e-4
-    key = jr.PRNGKey(1)
+    dt = 1e-4
+    key = jr.PRNGKey(2)
 
-    N_neurons = 100
+    N_neurons = 500
     N_inputs = 100
 
     # Define input parameters
-    target_firing_rate = 20
     input_firing_rate = 20
 
-    computed_input_weight = compute_required_input_weight(
-        target_mean_g_syn=50e-9,
-        N_inputs=jnp.ceil((N_inputs + N_neurons) * 0.8 * 0.1),
-        tau=LIFNetwork.tau_E,
-        input_rate=target_firing_rate,
-        synaptic_increment=LIFNetwork.synaptic_increment,
-    )
+    input_weight = 7.0
+    rec_weight = 7.0
 
-    # The computed input weight is way too large! This needs to be tuned
-    rec_weight = computed_input_weight * 0.15
-    input_weight = rec_weight
-
-    balance = 5.0
+    balance = 2.5
 
     # Set up models
     neuron_model = LIFNetwork(
         N_neurons=N_neurons,
         N_inputs=N_inputs,
-        dt=dt0,
-        fully_connected_input=False,
+        dt=dt,
+        fully_connected_input=True,
         input_weight=input_weight,
         rec_weight=rec_weight,
+        fraction_excitatory_input=0.8,
+        fraction_excitatory_recurrent=0.8,
         key=key,
     )
 
-    expected_syn_std = compute_expected_synaptic_std(
-        N_inputs=0.1 * (N_inputs + N_neurons),
-        input_rate=target_firing_rate,
-        tau=neuron_model.tau_E,
-        synaptic_increment=neuron_model.synaptic_increment,
-        input_weight=neuron_model.input_weight,
-    )
-    D = compute_oup_diffusion_coefficient(
-        target_std=0.2 * expected_syn_std,
-        tau=neuron_model.tau_E,
-    )
-
-    noise_model = OUP(tau=neuron_model.tau_E, noise_std=0 * D, mean=0.0, dim=N_neurons)
+    noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
 
     model = NoisyNetwork(
         neuron_model=neuron_model,
@@ -81,41 +57,45 @@ def main():
     # Define args
     args = {
         "get_desired_balance": lambda t, x, args: jnp.array([balance]),
-        "get_input_spikes": lambda t, x, args: jr.poisson(
-            jr.PRNGKey((t / dt0).astype(int)),
-            input_firing_rate * dt0,
-            shape=(N_inputs,),
+        "get_input_spikes": lambda t, x, args: jr.bernoulli(
+            jr.PRNGKey(jnp.round(t / dt).astype(int)),
+            input_firing_rate * dt,
+            shape=(N_neurons, N_inputs),
         ),
+        "noise_scale_hyperparam": 0.0,
     }
 
-    def save_fn(y: NoisyNetworkState):
-        return LIFState(
-            V=y.network_state.V,
-            S=y.network_state.S,
-            G=y.network_state.G,
-            W=y.network_state.W,
-            time_since_last_spike=None,
-            buffer_index=None,
-            spike_buffer=None,
+    def save_fn(t, y, args):
+        state: NoisyNetworkState = save_part_of_state(y, S=True, W=True, V=True, G=True)
+        state = eqx.tree_at(
+            lambda state: state.network_state.G, state, replace_fn=lambda G: G[0, :]
         )
+        state = eqx.tree_at(
+            lambda state: state.network_state.W, state, replace_fn=lambda W: W[0, :]
+        )
+        return state
 
     print("Running simulation...")
+    # with jax.profiler.trace("/tmp/jax-trace", create_perfetto_link=True):
     sol = simulate_noisy_SNN(
         model,
         solver,
         t0,
         t1,
-        dt0,
+        dt,
         init_state,
-        save_every_n_steps=1,
+        save_at=dfx.SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
         args=args,
-        save_fn=save_fn,
     )
 
     print("Simulation complete. Generating plots...")
     plot_network_stats(
         sol,
         model,
+    )
+
+    plot_simulate_SNN_results(
+        sol, model, split_noise=True, split_recurrent=True, neurons_to_plot=[0]
     )
 
 

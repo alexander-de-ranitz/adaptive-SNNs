@@ -19,7 +19,7 @@ class NoisyNetworkState(eqx.Module):
 
 
 class NoisyNetwork(NeuronModelABC):
-    min_noise_std: float = 5e-9
+    min_noise_std: float = 0e-9  # TODO: Tune this, and/or make it configurable
 
     base_network: NeuronModelABC
     noise_model: NoiseModelABC

@@ -89,6 +89,7 @@ def _plot_conductances(
     model,
     neurons_to_plot: Array | None = None,
     split_noise: bool = False,
+    split_recurrent: bool = False,
     **plot_kwargs,
 ):
     base_network = get_LIF_model(model)
@@ -101,6 +102,60 @@ def _plot_conductances(
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(N_neurons)
+
+    if split_recurrent:
+        weighed_G_excitatory = W * G * exc_mask[None, :]
+        weighed_G_inhibitory = W * G * jnp.invert(exc_mask[None, :])
+
+        if weighed_G_excitatory.ndim == 2:
+            weighed_G_excitatory = weighed_G_excitatory[:, None, :]
+            weighed_G_inhibitory = weighed_G_inhibitory[:, None, :]
+
+        total_G_excitatory_recurrent = jnp.sum(
+            weighed_G_excitatory[:, :, :N_neurons], axis=-1
+        )
+        total_G_excitatory_input = jnp.sum(
+            weighed_G_excitatory[:, :, N_neurons:], axis=-1
+        )
+        total_G_inhibitory_recurrent = jnp.sum(
+            weighed_G_inhibitory[:, :, :N_neurons], axis=-1
+        )
+        total_G_inhibitory_input = jnp.sum(
+            weighed_G_inhibitory[:, :, N_neurons:], axis=-1
+        )
+        neurons_to_plot = jnp.array(neurons_to_plot)
+        ax.plot(
+            sol.ts,
+            total_G_excitatory_recurrent[:, neurons_to_plot],
+            label="Recurrent Synaptic E Conductance",
+            color="g",
+            **plot_kwargs,
+        )
+        ax.plot(
+            sol.ts,
+            total_G_inhibitory_recurrent[:, neurons_to_plot],
+            label="Recurrent Synaptic I Conductance",
+            color="r",
+            **plot_kwargs,
+        )
+        ax.plot(
+            sol.ts,
+            total_G_excitatory_input[:, neurons_to_plot],
+            label="Input Synaptic E Conductance",
+            color="g",
+            linestyle="--",
+            **plot_kwargs,
+        )
+        ax.plot(
+            sol.ts,
+            total_G_inhibitory_input[:, neurons_to_plot],
+            label="Input Synaptic I Conductance",
+            color="r",
+            linestyle="--",
+            **plot_kwargs,
+        )
+        ax.legend()
+        return
 
     weighed_G_inhibitory = jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1)
     weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1)
