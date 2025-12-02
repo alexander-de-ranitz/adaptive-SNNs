@@ -51,14 +51,14 @@ class LIFNetwork(NeuronModelABC):
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_capacitance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
-    connection_prob: float = 0.2
+    connection_prob: float = 0.1
     reversal_potential_E: float = 0.0  # mV
-    reversal_potential_I: float = -75.0 * 1e-3  # mV
-    tau_E: float = 2.0 * 1e-3  # ms
+    reversal_potential_I: float = -80.0 * 1e-3  # mV
+    tau_E: float = 6.0 * 1e-3  # ms
     tau_I: float = 6.0 * 1e-3  # ms
     synaptic_increment: float = 1.0 * 1e-9  # nS
     firing_threshold: float = -50.0 * 1e-3  # mV
-    V_reset: float = -60.0 * 1e-3  # mV
+    V_reset: float = -70.0 * 1e-3  # mV
     refractory_period: float = 2.0 * 1e-3  # ms
     mean_synaptic_delay: float = 1.5 * 1e-3  # ms
     fraction_excitatory_recurrent: float = (
@@ -444,7 +444,7 @@ class LIFNetwork(NeuronModelABC):
 
         # Compute total excitatory synaptic conductance per neuron
         W, G = state.W, state.G
-        weighted_conductances = jnp.where(W == -jnp.inf, 0.0, W) * G
+        weighted_conductances = jnp.where(jnp.isfinite(W), W, 0.0) * G
         total_E_conductance_per_neuron = jnp.sum(
             weighted_conductances * self.excitatory_mask[None, :], axis=1
         )
@@ -622,7 +622,16 @@ class LIFNetwork(NeuronModelABC):
             N_I_connections + 1e-12
         )
 
-        balance = mean_inhibitory_weights / (mean_excitatory_weights + 1e-12)
+        balance = (
+            mean_inhibitory_weights
+            * jnp.abs(self.reversal_potential_I - self.resting_potential)
+            * self.tau_I
+        ) / (
+            mean_excitatory_weights
+            * jnp.abs(self.reversal_potential_E - self.resting_potential)
+            * self.tau_E
+            + 1e-12
+        )
 
         # In case either a neuron does not have both E and I connections, the balance is not defined
         balance = jnp.where(
