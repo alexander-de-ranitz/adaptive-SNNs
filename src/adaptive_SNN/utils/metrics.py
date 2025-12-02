@@ -5,11 +5,12 @@ from adaptive_SNN.models.networks.lif import LIFNetwork
 from adaptive_SNN.models.networks.noisy_network import NoisyNetwork
 
 
-def compute_CV_ISI(spikes) -> Array:
+def compute_CV_ISI(spikes: Array, ts: Array) -> Array:
     """Compute the coefficient of variation (CV) of inter-spike intervals (ISI) for each neuron.
 
     Args:
         spikes (jnp.ndarray): A binary array of shape (num_time_steps, num_neurons) indicating spike occurrences.
+        ts (jnp.ndarray): Time array of shape (num_time_steps,).
 
     Returns:
         jnp.ndarray: An array of shape (num_neurons,) containing the CV of ISI for each neuron.
@@ -18,7 +19,7 @@ def compute_CV_ISI(spikes) -> Array:
     CV_ISI = jnp.zeros(num_neurons)
 
     for neuron_idx in range(num_neurons):
-        spike_times = jnp.nonzero(spikes[:, neuron_idx] == 1)[0]
+        spike_times = ts[jnp.nonzero(spikes[:, neuron_idx])[0]]
         if len(spike_times) <= 2:
             CV_ISI = CV_ISI.at[neuron_idx].set(
                 jnp.nan
@@ -130,7 +131,7 @@ def compute_charge_ratio(t, state, model) -> Array:
 
 
 def compute_synchrony(
-    spikes: Array, bin_width_ms: float = 2.0, dt: float = 0.1, n_pairs: int = 250
+    spikes: Array, bin_width: float = 2e-3, dt: float = 0.1e-3, n_pairs: int = 250
 ) -> float:
     """Compute the average synchrony of neural population activity using correlation coefficients.
 
@@ -140,8 +141,8 @@ def compute_synchrony(
 
     Args:
         spikes (Array): A binary array of shape (num_time_steps, num_neurons) indicating spike occurrences.
-        bin_width_ms (float): Width of time bins in milliseconds (default: 2.0 ms).
-        dt (float): Time step in milliseconds (default: 0.1 ms).
+        bin_width (float): Width of time bins in seconds (default: 2.0 ms).
+        dt (float): Time step in seconds (default: 0.1 ms).
         n_pairs (int): Number of disjoint neuron pairs to sample (default: 250).
 
     Returns:
@@ -150,7 +151,7 @@ def compute_synchrony(
     num_time_steps, num_neurons = spikes.shape
 
     # Calculate the number of time steps per bin
-    steps_per_bin = int(bin_width_ms / dt)
+    steps_per_bin = int(bin_width / dt)
 
     # Calculate the number of complete bins
     n_bins = num_time_steps // steps_per_bin
@@ -201,3 +202,32 @@ def compute_synchrony(
     avg_correlation = jnp.nanmean(correlations)
 
     return float(avg_correlation)
+
+
+def compute_network_firing_rate(
+    spikes: Array, ts: Array, moving_window_duration: float = 0.01
+) -> float:
+    """Compute the average firing rate of the network over time using a moving window approach.
+
+    Args:
+        spikes (Array): A binary array of shape (num_time_steps, num_neurons) indicating spike occurrences.
+        ts (Array): Time array of shape (num_time_steps,).
+        moving_window_duration (float): Duration of the moving window in seconds (default: 10ms).
+
+    Returns:
+        Array: The average firing rate of the network in over time.
+    """
+    total_rec_spikes_per_timestep = jnp.sum(spikes, axis=1).squeeze()
+
+    dt = ts[1] - ts[0]
+    filter_size = int(1 / dt * moving_window_duration)
+    rec_spike_rate = (
+        jnp.convolve(
+            total_rec_spikes_per_timestep,
+            jnp.ones(shape=(filter_size)),
+            mode="full",
+        )[: -(filter_size - 1)]
+        / moving_window_duration
+        / spikes.shape[1]
+    )
+    return rec_spike_rate

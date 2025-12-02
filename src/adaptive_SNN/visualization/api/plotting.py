@@ -177,7 +177,7 @@ def plot_network_stats(
         alpha=0.7,
     )
 
-    CV_ISI = compute_CV_ISI(get_LIF_state(sol.ys).S)
+    CV_ISI = compute_CV_ISI(get_LIF_state(sol.ys).S, sol.ts)
     CV_ISI = CV_ISI[~jnp.isnan(CV_ISI)]
     axs[0][1].hist(CV_ISI, bins=20, color="k")
     axs[0][1].set_title("CV of ISI Distribution")

@@ -7,6 +7,7 @@ from scipy.signal import welch
 from scipy.stats import norm
 
 from adaptive_SNN.models import LIFNetwork
+from adaptive_SNN.utils.metrics import compute_network_firing_rate
 from adaptive_SNN.visualization.utils.adapters import (
     get_LIF_model,
     get_LIF_state,
@@ -60,17 +61,22 @@ def _plot_spikes_raster(
     spikes = lif_state.S[:, neurons_to_plot]
 
     t = sol.ts
-    dt = t[1] - t[0]
 
     # Build spike times per neuron (reverse order to show I neurons at bottom)
     spike_times_per_neuron = [
-        jnp.nonzero(spikes[:, i])[0] * dt for i in range(spikes.shape[1])
+        sol.ts[jnp.nonzero(spikes[:, i])[0]] for i in range(spikes.shape[1])
     ][::-1]
     if len(spike_times_per_neuron) < 10:
         ax.set_yticks(range(len(spike_times_per_neuron)))
     else:
         ax.set_yticks([])
-    ax.eventplot(spike_times_per_neuron, colors="black", linelengths=0.8, **plot_kwargs)
+    ax.eventplot(
+        spike_times_per_neuron,
+        colors="black",
+        linelengths=0.8,
+        linewidths=0.4,
+        **plot_kwargs,
+    )
     ax.set_ylabel("Neuron")
     ax.set_xlabel("Time (s)")
     ax.set_xlim(t[0], t[-1])
@@ -230,9 +236,11 @@ def _plot_ISI_distribution(
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(lif_model.N_neurons)
 
-    spikes = lif_state.S[:, neurons_to_plot]
-    spike_times = jnp.flatnonzero(spikes)
-    ISIs = jnp.diff(spike_times) * dt  # Convert to time using dt
+    ISIs = jnp.array([])
+    for i in neurons_to_plot:
+        spikes = lif_state.S[:, i]
+        spike_times = jnp.nonzero(spikes)[0] * dt
+        ISIs = jnp.append(ISIs, jnp.diff(spike_times).flatten())
     ax.hist(ISIs, bins=50, density=True, **plot_kwargs)
     ax.set_xlabel("Inter-Spike Interval (s)")
     ax.set_ylabel("Density")
@@ -243,7 +251,7 @@ def _plot_spike_rates(
     sol: Solution,
     model,
     neurons_to_plot: Array | None = None,
-    moving_window_duration: float = 0.1,
+    moving_window_duration: float = 0.01,
     **plot_kwargs,
 ):
     """Plot the mean network spike rate over time.
@@ -254,21 +262,14 @@ def _plot_spike_rates(
     lif_model = get_LIF_model(model)
 
     t = sol.ts
-    dt = t[1] - t[0]
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(lif_model.N_neurons)
 
-    spikes = lif_state.S[:, neurons_to_plot]
-    total_rec_spikes_per_timestep = jnp.sum(spikes, axis=1).squeeze()
-    rec_spike_rate = (
-        jnp.convolve(
-            total_rec_spikes_per_timestep,
-            jnp.ones(shape=(int(1 / dt * moving_window_duration))),
-            mode="same",
-        )
-        / moving_window_duration
-        / jnp.size(neurons_to_plot)
+    rec_spike_rate = compute_network_firing_rate(
+        lif_state.S[:, neurons_to_plot],
+        t,
+        moving_window_duration,
     )
     ax.plot(t, rec_spike_rate, **plot_kwargs)
     ax.set_xlabel("Time (s)")

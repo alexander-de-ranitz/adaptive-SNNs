@@ -45,3 +45,4 @@ coverage.xml
 
 # Other
 .ruff_cache/
+data/
