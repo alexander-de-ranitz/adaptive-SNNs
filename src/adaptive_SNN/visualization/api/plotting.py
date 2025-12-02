@@ -36,6 +36,7 @@ def plot_simulate_SNN_results(
     sol: Solution,
     model: LIFNetwork | NoisyNetwork,
     split_noise: bool = False,
+    split_recurrent: bool = False,
     plot_spikes: bool = True,
     plot_voltage_distribution: bool = False,
     neurons_to_plot: jnp.ndarray | None = None,
@@ -67,6 +68,8 @@ def plot_simulate_SNN_results(
         model,
         neurons_to_plot=neurons_to_plot,
         split_noise=split_noise,
+        split_recurrent=split_recurrent,
+        **plot_kwargs,
     )
     if plot_spikes:
         _plot_spikes_raster(
@@ -278,7 +281,9 @@ def plot_noise_STA(
         lif_state = get_LIF_state(sol.ys)
         noise_state = get_noisy_network_state(sol.ys).noise_state
 
-        CV_ISI = compute_CV_ISI(lif_state.S)[0]  # Compute CV ISI for first neuron
+        CV_ISI = compute_CV_ISI(lif_state.S, sol.ts)[
+            0
+        ]  # Compute CV ISI for first neuron
         corr = jnp.corrcoef(noise_state.flatten(), lif_state.V[:, 0].flatten())[0, 1]
         ax.set_title(
             rf"Noise Level = {noise_levels[i]} $\sigma_{{\mathrm{{syn}}}}$ | CV ISI =  {CV_ISI:.2f} | Corr(V, Noise) = {corr:.2f}"
