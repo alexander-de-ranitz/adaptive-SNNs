@@ -103,12 +103,7 @@ def simulate_noisy_SNN(
 @eqx.filter_jit
 def save_state(args, save_fn, carry, t):
     """Helper to save the state at the specified index."""
-    print("Compiling save_state")
-    (
-        y,
-        ys,
-        save_index,
-    ) = carry
+    y, ys, save_index = carry
     ys = jax.tree_util.tree_map(
         lambda arr, v: arr.at[save_index].set(v), ys, save_fn(t, y, args)
     )
@@ -118,8 +113,6 @@ def save_state(args, save_fn, carry, t):
 @eqx.filter_jit
 def step(times, solver, terms, args, save_mask, model, save_fn, i, carry):
     """Inner loop of the simulation. Takes one step and saves if needed."""
-
-    print("Compiling step")
     y, ys, save_index = carry
 
     # Take a step
