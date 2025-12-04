@@ -1,3 +1,5 @@
+from functools import partial
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -99,49 +101,68 @@ def simulate_noisy_SNN(
 
 
 @eqx.filter_jit
+def save_state(args, save_fn, carry, t):
+    """Helper to save the state at the specified index."""
+    y, ys, save_index = carry
+    ys = jax.tree_util.tree_map(
+        lambda arr, v: arr.at[save_index].set(v), ys, save_fn(t, y, args)
+    )
+    return (y, ys, save_index + 1)
+
+
+@eqx.filter_jit
+def step(times, solver, terms, args, save_mask, model, save_fn, i, carry):
+    """Inner loop of the simulation. Takes one step and saves if needed."""
+    y, ys, save_index = carry
+
+    # Take a step
+    t_start = times[i]
+    t_end = times[i + 1]
+    y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
+    y = model.update(t_end, y, args)
+
+    # Is save_mask true at this index? If so, save, else do nothing
+    y, ys, save_index = jax.lax.cond(
+        save_mask[i + 1],  # + 1 because we already stepped
+        lambda c: save_state(args=args, save_fn=save_fn, carry=c, t=t_end),
+        lambda c: c,
+        (y, ys, save_index),
+    )
+
+    return (y, ys, save_index)
+
+
 def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver):
     """Runs the simulation loop."""
 
-    # Utility function to save the current state
-    def save_state(carry, t, save_fn):
-        y, ys, save_index = carry
-        ys = jax.tree_util.tree_map(
-            lambda arr, v: arr.at[save_index].set(v), ys, save_fn(t, y, args)
-        )
-        return (y, ys, save_index + 1)
-
-    def step(i, carry):
-        """Inner loop of the simulation. Takes one step and saves if needed."""
-        y, ys, save_index = carry
-
-        # Take a step
-        t_start = times[i]
-        t_end = times[i + 1]
-        y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
-        y = model.update(t_end, y, args)
-
-        # Is save_mask true at this index? If so, save, else do nothing
-        y, ys, save_index = jax.lax.cond(
-            save_mask[i + 1],  # + 1 because we already stepped
-            lambda c: save_state(c, t_end, save_fn),
-            lambda c: c,
-            (y, ys, save_index),
-        )
-
-        return (y, ys, save_index)
+    # Partially apply all fixed arguments to the step function
+    step_partial = partial(
+        step,
+        times,
+        solver,
+        terms,
+        args,
+        save_mask,
+        model,
+        save_fn,
+    )
 
     # Save the initial state if needed
     y0, ys, save_index = jax.lax.cond(
         save_mask[0],
-        lambda c: save_state(c, times[0], save_fn),
+        lambda c: save_state(args=args, save_fn=save_fn, carry=c, t=times[0]),
         lambda c: c,
         (y0, ys, 0),
     )
 
     # Loop over all intervals
     y_final, ys, save_index = jax.lax.fori_loop(
-        0, times.size - 1, step, (y0, ys, save_index)
+        0, times.size - 1, step_partial, (y0, ys, save_index)
     )
+
+    # Ensure computation is complete before returning
+    jax.tree.map(lambda x: x.block_until_ready(), (ys, y_final))
+
     return y_final, ys
 
 
