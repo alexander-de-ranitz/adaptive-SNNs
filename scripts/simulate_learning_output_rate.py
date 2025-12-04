@@ -15,7 +15,7 @@ from adaptive_SNN.models import (
     NoisyNetwork,
     SystemState,
 )
-from adaptive_SNN.models.environment import SpikeRateEnvironment
+from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.reward import RewardModel
 from adaptive_SNN.solver import simulate_noisy_SNN
 from adaptive_SNN.utils.analytics import (
