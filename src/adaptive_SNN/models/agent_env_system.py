@@ -55,7 +55,7 @@ class AgentEnvSystem(eqx.Module):
             **args,
             "network_output": agent_output,
             "env_state": env_state,
-            "env_input": agent_output,
+            "get_env_input": lambda t, x, args: agent_output,
             "reward": reward,
         }
 
@@ -87,7 +87,7 @@ class AgentEnvSystem(eqx.Module):
         agent_output = args["network_output_fn"](t, agent_state, args)
         args = {
             **args,
-            "env_input": agent_output,
+            "get_env_input": lambda t, x, args: agent_output,
         }
 
         new_agent_state = self.agent.update(t, agent_state, args)
