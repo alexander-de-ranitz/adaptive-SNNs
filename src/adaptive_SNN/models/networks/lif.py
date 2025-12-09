@@ -6,7 +6,11 @@ import jax.random as jr
 from jaxtyping import Array
 
 from adaptive_SNN.models.base import NeuronModelABC
-from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
+from adaptive_SNN.utils.operators import (
+    DefaultIfNone,
+    ElementWiseMul,
+    MixedPyTreeOperator,
+)
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
@@ -244,51 +248,49 @@ class LIFNetwork(NeuronModelABC):
         )
 
     def diffusion(self, t, state: LIFState, args) -> MixedPyTreeOperator:
-        # Our noise_shape is a pytree of 1d and 2d arrays. Diffusion must have compatible shapes.
-        # since each noise value is independent, element-wise multiplication of the matrix-valued noise term is sufficient,
-        # we do not need to use tensor products or similar more complex operations.
-        # We wrap everything in a MixedPyTreeOperator, which can handle a pytree of both Lineax operators and arrays.
-        # In this case, all elements are ElementWiseMul operators of zeros, since we do not use noise in this model.
-        # However, I wanted to keep the structure for future use, e.g. if we want to add noise to conductances or weights
+        """Define how noise enters the system
+
+        No noise is currently used, but this function is defined for compatability and future use.
+        The diffusion is defined as a Lineax operator (although it is not a linear operator in this case).
+        It is called as diffusion().mv(noise) where the noise has the shape defined by self.noise_shape.
+        The operator used here return zeros of the same shape as the state if the noise is None, else it returns
+        the element-wise multiplication of the noise with zeros. This allows for noise to be a combination of None's and arrays,
+        while ensuring the output shape exactly matches the state shape.
+
+        Args:
+            t: time
+            state: LIFState current state
+            args: dict
+
+        Returns:
+            MixedPyTreeOperator defining how noise enters the system
+        """
         return MixedPyTreeOperator(
             jax.tree.map(
-                lambda arr: ElementWiseMul(jnp.zeros_like(arr, dtype=default_float)),
+                lambda arr: DefaultIfNone(
+                    default=jnp.zeros_like(arr),
+                    else_do=ElementWiseMul(jnp.zeros_like(arr, dtype=default_float)),
+                ),
                 state,
             )
         )
 
     @property
     def noise_shape(self):
-        auxiliary_info_shape = AuxiliaryInfo(
-            firing_rate=jax.ShapeDtypeStruct(
-                shape=(self.N_neurons,), dtype=default_float
-            ),
-            mean_E_conductance=jax.ShapeDtypeStruct(
-                shape=(self.N_neurons,), dtype=default_float
-            ),
-            var_E_conductance=jax.ShapeDtypeStruct(
-                shape=(self.N_neurons,), dtype=default_float
-            ),
-            time_since_last_spike=jax.ShapeDtypeStruct(
-                shape=(self.N_neurons,), dtype=default_float
-            ),
-            spike_buffer=jax.ShapeDtypeStruct(
-                shape=(self.buffer_size, self.N_neurons), dtype=default_float
-            ),
-            buffer_index=jax.ShapeDtypeStruct(shape=(), dtype=default_float),
-        )
+        # No noise in this model, but we need to return a pytree of the same structure as the state
         return LIFState(
-            V=jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
-            S=jax.ShapeDtypeStruct(shape=(self.N_neurons,), dtype=default_float),
-            G=jax.ShapeDtypeStruct(
-                shape=(self.N_neurons, self.N_neurons + self.N_inputs),
-                dtype=default_float,
+            V=None,
+            S=None,
+            W=None,
+            G=None,
+            auxiliary_info=AuxiliaryInfo(
+                firing_rate=None,
+                mean_E_conductance=None,
+                var_E_conductance=None,
+                time_since_last_spike=None,
+                spike_buffer=None,
+                buffer_index=None,
             ),
-            W=jax.ShapeDtypeStruct(
-                shape=(self.N_neurons, self.N_neurons + self.N_inputs),
-                dtype=default_float,
-            ),
-            auxiliary_info=auxiliary_info_shape,
         )
 
     def terms(self, key):
