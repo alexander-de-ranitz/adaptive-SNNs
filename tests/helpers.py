@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from diffrax import Solution
-from jaxtyping import PyTree
+from jaxtyping import Array, PyTree
 
 from adaptive_SNN.models import (
     OUP,
@@ -14,6 +14,8 @@ from adaptive_SNN.models import (
     NoisyNetwork,
     NoisyNetworkState,
 )
+from adaptive_SNN.models.base import NeuronModelABC
+from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
 
 # ============================================================================
 # Model Creation Helpers
@@ -100,7 +102,7 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
         var_E_conductance=jnp.zeros((N_neurons,)),
         time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
         spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),
-        buffer_index=jnp.array(0, dtype=jnp.int32),
+        buffer_index=jnp.array(0.0),
     )
 
     state = LIFState(
@@ -233,4 +235,66 @@ class DeterministicNoisyNeuronModel(NoisyNetwork):
         )
         return dfx.MultiTerm(
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )
+
+
+class DummySpikingNetwork(NeuronModelABC):
+    """A dummy network model that outputs deterministic spikes at a defined rate."""
+
+    N_neurons: int
+    N_inputs: int = 0
+    buffer_size: int = 1
+    resting_potential: float = -70.0
+    dim: int = 2
+    output_rates: Array  # firing rates for each output neuron
+    dt: float  # time step size
+
+    def __init__(self, output_dim: int, output_rates: Array, dt: float):
+        self.N_neurons = output_dim
+        self.dim = output_dim
+        self.dt = dt  # needed for spike rate calculation
+        self.output_rates = output_rates  # firing rates for each output neuron
+
+    @property
+    def noise_shape(self):
+        return jax.tree.map(
+            lambda a: jax.ShapeDtypeStruct(shape=(a.shape), dtype=jnp.float32),
+            make_baseline_state(self),
+        )
+
+    @property
+    def initial(self):
+        return make_baseline_state(self)
+
+    def drift(self, t, x, args):
+        return jax.tree.map(
+            lambda arr: jnp.zeros_like(arr, dtype=arr.dtype),
+            x,
+        )
+
+    def diffusion(self, t, x, args):
+        return MixedPyTreeOperator(
+            jax.tree.map(
+                lambda arr: ElementWiseMul(jnp.zeros_like(arr, dtype=arr.dtype)),
+                x,
+            )
+        )
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )
+
+    def update(self, t, x, args):
+        # Generate spikes based on output rates
+        spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
+        return LIFState(
+            V=x.V,
+            S=spikes,
+            W=x.W,
+            G=x.G,
+            auxiliary_info=x.auxiliary_info,
         )
