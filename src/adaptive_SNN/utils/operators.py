@@ -12,6 +12,48 @@ from lineax._tags import (
 )
 
 
+class DefaultIfNone(lx.AbstractLinearOperator):
+    """Lineax operator that returns a default value if the input is None, otherwise applies another operator."""
+
+    default: Array
+    else_do: lx.AbstractLinearOperator
+    tags: frozenset[object] = eqx.field(static=True)
+
+    def __init__(
+        self,
+        default: Array,
+        else_do: lx.AbstractLinearOperator,
+        tags: frozenset[object] = (),
+    ):
+        if default.shape != else_do.out_structure().shape:
+            raise ValueError("Default shape must match else_do output shape.")
+        self.default = default
+        self.else_do = else_do
+        self.tags = frozenset(tags)
+
+    def mv(self, x):
+        if x is None:
+            return self.default
+        else:
+            return self.else_do.mv(x)
+
+    def in_structure(self):
+        return self.else_do.in_structure()
+
+    def out_structure(self):
+        return self.else_do.out_structure()
+
+    def transpose(self):
+        return DefaultIfNone(
+            self.default.T,
+            self.else_do.transpose(),
+            transpose_tags(self.tags),
+        )
+
+    def as_matrix(self):
+        raise NotImplementedError("DefaultIfNone does not support as_matrix()")
+
+
 class ElementWiseMul(lx.AbstractLinearOperator):
     """Lineax operator for element-wise multiplication with a vector/matrix/tensor.
 
@@ -137,6 +179,7 @@ class MixedPyTreeOperator(lx.AbstractLinearOperator):
 
 @lx.is_symmetric.register(MixedPyTreeOperator)
 @lx.is_symmetric.register(ElementWiseMul)
+@lx.is_symmetric.register(DefaultIfNone)
 def _(operator):
     return any(
         tag in operator.tags
