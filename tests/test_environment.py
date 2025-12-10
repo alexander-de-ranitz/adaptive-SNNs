@@ -6,6 +6,7 @@ from helpers import DummySpikingNetwork
 from adaptive_SNN.models import AgentEnvSystem, SystemState
 from adaptive_SNN.models.environments import (
     DoubleIntegrator,
+    DoubleIntegratorKickControl,
     InputTrackingEnvironment,
     SpikeRateEnvironment,
 )
@@ -112,7 +113,7 @@ def test_double_integrator_optimal_control():
         t1,
         dt0,
         y0,
-        save_at=dfx.SaveAt(t1=True),
+        save_at=dfx.SaveAt(steps=True),
         args=args,
         key=key,
     )
@@ -128,14 +129,14 @@ def test_double_integrator_simple_control():
     # Acceleration of 1 for 1 second, then 0
     args = {
         "get_env_input": lambda t, x, args: jnp.where(
-            t < 1.0, jnp.array(1.0), jnp.array(0.0)
+            t <= 1.0, jnp.array(1), jnp.array(0.0)
         )
     }
 
     solver = dfx.Euler()
     t0 = 0.0
     t1 = 5.0
-    dt0 = 0.01
+    dt0 = 0.001
     y0 = env.initial
     key = jr.PRNGKey(0)
     sol = simulate_noisy_SNN(
@@ -153,3 +154,38 @@ def test_double_integrator_simple_control():
 
     # The system should be at position 4.5 with velocity 1.0 at t=5
     assert jnp.allclose(ys[-1], jnp.array([4.5, 1.0]), atol=1e-2)
+
+
+def test_double_integrator_kick_control():
+    env = DoubleIntegratorKickControl()
+
+    # Kicks at t=1 and t=2, of size -1 and 3
+    # so we have v=-1 for 1s and v=2 for 3s, leading to final state [5.0, 2.0]
+    args = {
+        "get_env_input": lambda t, x, args: jnp.where(
+            t == 1.0, jnp.array(-1), jnp.array(0.0)
+        )
+        + jnp.where(t == 2.0, jnp.array(3), jnp.array(0.0))
+    }
+
+    solver = dfx.Euler()
+    t0 = 0.0
+    t1 = 5.0
+    dt0 = 0.001
+    y0 = env.initial
+    key = jr.PRNGKey(0)
+    sol = simulate_noisy_SNN(
+        env,
+        solver,
+        t0,
+        t1,
+        dt0,
+        y0,
+        save_at=dfx.SaveAt(t1=True),
+        args=args,
+        key=key,
+    )
+    ys = sol.ys
+
+    # The system should be at position 4.5 with velocity 1.0 at t=5
+    assert jnp.allclose(ys[-1], jnp.array([5.0, 2.0]), atol=1e-2)

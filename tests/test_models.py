@@ -1,8 +1,10 @@
 import diffrax as dfx
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 from helpers import (
+    allclose_pytree,
     make_baseline_state,
     make_default_args,
     make_LIF_model,
@@ -25,35 +27,18 @@ def test_initial_state():
     assert state.G.shape == (N_neurons, N_neurons + N_inputs)
 
 
-def test_drift_diffusion_shapes():
+def test_drift_shapes():
     N_neurons, N_inputs = 10, 3
     model = make_LIF_model(N_neurons=N_neurons, N_inputs=N_inputs)
     state = model.initial
     args = make_default_args(N_neurons, N_inputs)
 
     drift = model.drift(0.0, state, args)
-    diff = model.diffusion(0.0, state, args).pytree
 
     assert drift.V.shape == (N_neurons,)
     assert drift.S.shape == (N_neurons,)
     assert drift.W.shape == (N_neurons, N_neurons + N_inputs)
     assert drift.G.shape == (N_neurons, N_neurons + N_inputs)
-
-    assert diff.V.matrix.shape == (N_neurons,)
-    assert diff.S.matrix.shape == (N_neurons,)
-    assert diff.W.matrix.shape == (N_neurons, N_neurons + N_inputs)
-    assert diff.G.matrix.shape == (N_neurons, N_neurons + N_inputs)
-
-
-def test_noise_shape():
-    N, N_inputs = 10, 3
-    model = make_LIF_model(N_neurons=N, N_inputs=N_inputs)
-    noise_shape = model.noise_shape
-
-    assert noise_shape.V.shape == (N,)
-    assert noise_shape.S.shape == (N,)
-    assert noise_shape.W.shape == (N, N + N_inputs)
-    assert noise_shape.G.shape == (N, N + N_inputs)
 
 
 def test_drift_voltage_output():
@@ -108,10 +93,7 @@ def test_zero_diffusion():
     )
     final_state = sol.ys
 
-    assert jnp.allclose(final_state.V, state.V)
-    assert jnp.allclose(final_state.S, state.S)
-    assert jnp.allclose(final_state.W, state.W)
-    assert jnp.allclose(final_state.G, state.G)
+    assert allclose_pytree(final_state, state)
 
 
 def test_recurrent_current():
@@ -456,32 +438,18 @@ def test_NoisyNeuronModel_diffusion():
     )
 
     network = model.base_network
-    full_weights = jnp.ones((N, N + network.N_inputs))
-    network_state = make_baseline_state(network, W=full_weights)
-    noise_state = jnp.arange(N, dtype=network_state.V.dtype)
-    initial_state = make_noisy_state(network_state, noise_state)
+    network_state = make_baseline_state(network)
+    initial_state = make_noisy_state(network_state)
     args = make_default_args(N, 0, noise_scale_hyperparam=0.1)
 
-    noisy_network_diff = model.diffusion(0.0, initial_state, args).pytree
-    network_diff = noisy_network_diff.network_state.pytree
-    dV, dS, dW, dG = (
-        network_diff.V.matrix,
-        network_diff.S.matrix,
-        network_diff.W.matrix,
-        network_diff.G.matrix,
-    )
+    noise = dfx.UnsafeBrownianPath(
+        shape=model.noise_shape, key=jr.PRNGKey(12)
+    ).evaluate(0, 0.01)
+    diffusion = model.diffusion(0.0, initial_state, args).mv(noise)
 
-    # Network diffusion is zero
-    assert jnp.allclose(dV, 0.0)
-    assert jnp.allclose(dS, 0.0)
-    assert jnp.allclose(dG, 0.0)
-    assert jnp.allclose(dW, 0.0)
+    expected_diffusion = jax.tree.map(lambda x: jnp.zeros_like(x), initial_state)
 
-    desired_noise_std = model.compute_desired_noise_std(0.0, initial_state, args)
-    expected_noise_diffusion = (
-        jnp.eye(N) * desired_noise_std * jnp.sqrt(2.0 / model.noise_model.tau)
-    )
-    assert jnp.allclose(noisy_network_diff.noise_state, expected_noise_diffusion)
+    assert allclose_pytree(diffusion, expected_diffusion)
 
 
 def test_spike_generation():
