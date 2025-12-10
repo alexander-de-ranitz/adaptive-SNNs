@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from adaptive_SNN.models.base import EnvironmentABC
+from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
@@ -23,7 +24,7 @@ class InputTrackingEnvironment(EnvironmentABC):
 
     @property
     def noise_shape(self):
-        return jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float)
+        return None
 
     def drift(self, t, x, args):
         if args is None or "get_env_input" not in args:
@@ -35,7 +36,9 @@ class InputTrackingEnvironment(EnvironmentABC):
         )  # Simple dynamics towards input
 
     def diffusion(self, t, x, args):
-        return jnp.zeros((self.dim, self.dim))
+        return DefaultIfNone(
+            default=jnp.zeros_like(x), else_do=ElementWiseMul(jnp.zeros_like(x))
+        )
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(

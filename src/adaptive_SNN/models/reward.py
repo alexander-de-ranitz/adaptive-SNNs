@@ -3,6 +3,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
+
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
@@ -16,10 +18,12 @@ class RewardModel(eqx.Module):
 
     @property
     def noise_shape(self):
-        return jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float)
+        return None
 
     def diffusion(self, t, x, args):
-        return jnp.zeros((self.dim, self.dim))  # Zero diffusion for reward
+        return DefaultIfNone(
+            default=jnp.zeros_like(x), else_do=ElementWiseMul(jnp.zeros_like(x))
+        )
 
     def drift(self, t, x, args):
         if args is None or "reward" not in args:

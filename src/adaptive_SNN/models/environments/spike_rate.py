@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from adaptive_SNN.models.base import EnvironmentABC
-from adaptive_SNN.utils import ElementWiseMul
+from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
@@ -29,13 +29,15 @@ class SpikeRateEnvironment(EnvironmentABC):
 
     @property
     def noise_shape(self):
-        return jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float)
+        return None
 
     def drift(self, t, x, args):
         return -x  # Exponential decay of spike rate
 
     def diffusion(self, t, x, args):
-        return ElementWiseMul(jnp.zeros_like(x))
+        return DefaultIfNone(
+            default=jnp.zeros_like(x), else_do=ElementWiseMul(jnp.zeros_like(x))
+        )
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
