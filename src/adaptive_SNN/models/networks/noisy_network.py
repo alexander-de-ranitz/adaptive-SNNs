@@ -32,30 +32,26 @@ class NoisyNetwork(NeuronModelABC):
     def initial(self):
         return NoisyNetworkState(self.base_network.initial, self.noise_model.initial)
 
-    def drift(self, t, state: NoisyNetworkState, args):
+    def drift(self, t, state: NoisyNetworkState, args: dict):
         network_state, noise_state = (state.network_state, state.noise_state)
 
         # To allow the base network to access the noise state and std, we add it to the args
-        network_args = {
-            **args,
-            "excitatory_noise": noise_state,
-            "noise_std": self.compute_desired_noise_std(t, state, args),
-        }
+        args.update(
+            {
+                "excitatory_noise": noise_state,
+                "noise_std": self.compute_desired_noise_std(t, state, args),
+            }
+        )
 
-        network_drift = self.base_network.drift(t, network_state, network_args)
+        network_drift = self.base_network.drift(t, network_state, args)
         noise_drift = self.noise_model.drift(t, noise_state, args)
         return NoisyNetworkState(network_drift, noise_drift)
 
-    def diffusion(self, t, state: NoisyNetworkState, args):
+    def diffusion(self, t, state: NoisyNetworkState, args: dict):
         network_state, noise_state = (state.network_state, state.noise_state)
         network_diffusion = self.base_network.diffusion(t, network_state, args)
 
-        # The noise diffusion is state-dependent; compute it here and pass it to the noise model via args
-        noise_args = {
-            **args,
-            "noise_std": self.compute_desired_noise_std(t, state, args),
-        }
-        noise_diffusion = self.noise_model.diffusion(t, noise_state, noise_args)
+        noise_diffusion = self.noise_model.diffusion(t, noise_state, args)
         return MixedPyTreeOperator(
             NoisyNetworkState(network_diffusion, noise_diffusion)
         )

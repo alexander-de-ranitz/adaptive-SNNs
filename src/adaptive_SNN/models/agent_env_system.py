@@ -31,7 +31,7 @@ class AgentEnvSystem(eqx.Module):
             self.environment.initial,
         )
 
-    def drift(self, t, x: SystemState, args):
+    def drift(self, t, x: SystemState, args: dict):
         """Compute deterministic time derivatives for the combined Agent-Environment system.
 
         The state consists of (agent_state, environment_state). The args dict
@@ -51,13 +51,13 @@ class AgentEnvSystem(eqx.Module):
 
         agent_output = args["network_output_fn"](t, agent_state, args)
         reward = args["reward_fn"](t, env_state, args)
-        args = {
-            **args,
-            "network_output": agent_output,
-            "env_state": env_state,
-            "get_env_input": lambda t, x, args: agent_output,
-            "reward": reward,
-        }
+        args.update(
+            {
+                "env_state": env_state,
+                "get_env_input": lambda t, x, args: agent_output,
+                "reward": reward,
+            }
+        )
 
         env_drift = self.environment.drift(t, env_state, args)
         agent_drift = self.agent.drift(t, agent_state, args)
@@ -82,14 +82,8 @@ class AgentEnvSystem(eqx.Module):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x: SystemState, args):
+    def update(self, t, x: SystemState, args: dict):
         (agent_state, env_state) = x.agent_state, x.environment_state
-        agent_output = args["network_output_fn"](t, agent_state, args)
-        args = {
-            **args,
-            "get_env_input": lambda t, x, args: agent_output,
-        }
-
         new_agent_state = self.agent.update(t, agent_state, args)
         new_env_state = self.environment.update(t, env_state, args)
         return SystemState(new_agent_state, new_env_state)
