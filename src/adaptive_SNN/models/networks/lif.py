@@ -141,11 +141,16 @@ class LIFNetwork(NeuronModelABC):
         # Set input neuron types, 80% excitatory, 20% inhibitory
         N_E_inputs = int(jnp.round(N_inputs * self.fraction_excitatory_input))
         N_I_inputs = N_inputs - N_E_inputs
-        input_neuron_types = jnp.concatenate(
-            [
-                jnp.ones(shape=(N_E_inputs,), dtype=bool),
-                jnp.zeros(shape=(N_I_inputs,), dtype=bool),
-            ]
+
+        key, subkey = jr.split(key)
+        input_neuron_types = jr.permutation(
+            subkey,
+            jnp.concatenate(
+                [
+                    jnp.ones(shape=(N_E_inputs,), dtype=bool),
+                    jnp.zeros(shape=(N_I_inputs,), dtype=bool),
+                ]
+            ),
         )
 
         self.excitatory_mask = jnp.concatenate(
