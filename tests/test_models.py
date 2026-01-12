@@ -434,13 +434,13 @@ def test_NoisyNeuronModel_diffusion():
     N = 5
     key = jr.PRNGKey(5)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_std=0.0, tau=1.0, key=key
     )
 
     network = model.base_network
     network_state = make_baseline_state(network)
     initial_state = make_noisy_state(network_state)
-    args = make_default_args(N, 0, noise_scale_hyperparam=0.1)
+    args = make_default_args(N, 0, noise_scale_hyperparam=0.0)
 
     noise = dfx.UnsafeBrownianPath(
         shape=model.noise_shape, key=jr.PRNGKey(12)

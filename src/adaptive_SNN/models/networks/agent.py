@@ -52,15 +52,16 @@ class Agent(eqx.Module):
 
         (network_state, reward_state) = x.noisy_network, x.reward
 
-        reward = args["reward"]
+        reward = args.get("reward", 0.0)
         RPE = jnp.asarray(reward - reward_state)
 
         # Add to args for use in models
-        args = {
-            **args,
-            "RPE": RPE,
-            "reward": reward,
-        }
+        args.update(
+            {
+                "RPE": RPE,
+                "reward": reward,
+            }
+        )
 
         neuron_drift = self.noisy_network.drift(t, network_state, args)
         reward_drift = self.reward_model.drift(t, reward_state, args)

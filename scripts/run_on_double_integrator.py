@@ -10,8 +10,9 @@ from adaptive_SNN.models import (
     NoisyNetwork,
     RewardModel,
 )
-from adaptive_SNN.models.environments import DoubleIntegrator
+from adaptive_SNN.models.environments import DoubleIntegratorKickControl
 from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.utils.coding import poisson_rate_code
 from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_network_stats, plot_SDI_results
 
@@ -22,14 +23,16 @@ def main():
     dt = 1e-4
     key = jr.PRNGKey(2)
 
-    N_neurons = 500
-    N_inputs = 100
+    N_neurons = 100
+    N_background = 100
+    N_encoding = 50
+    N_inputs = N_background + N_encoding
 
     # Define input parameters
     input_firing_rate = 20
 
-    input_weight = 7.0
-    rec_weight = 7.0
+    input_weight = 4.0
+    rec_weight = 4.0
 
     balance = 2.5
 
@@ -56,19 +59,30 @@ def main():
     agent = Agent(neuron_model=noisy_model, reward_model=RewardModel(reward_rate=100))
     model = AgentEnvSystem(
         agent=agent,
-        environment=DoubleIntegrator(),
+        environment=DoubleIntegratorKickControl(),
     )
     solver = dfx.EulerHeun()
     init_state = model.initial
 
+    def get_input_spikes(t, x, args):
+        background_spikes = jr.bernoulli(
+            jr.PRNGKey(jnp.round(t / dt).astype(int)),
+            input_firing_rate * dt,
+            shape=(N_neurons, N_background),
+        )
+        encoding_spikes = 0 * poisson_rate_code(
+            rate=jnp.clip(args["env_state"].at[0].get() + 10.0, min=0.0, max=40.0),
+            dt=dt,
+            key=jr.PRNGKey(123456 + jnp.round(t / dt).astype(int)),
+            encoding_shape=(N_neurons, N_encoding),
+        )
+        spikes = jnp.hstack((background_spikes, encoding_spikes))
+        return spikes
+
     # Define args
     args = {
         "get_desired_balance": lambda t, x, args: jnp.array([balance]),
-        "get_input_spikes": lambda t, x, args: jr.bernoulli(
-            jr.PRNGKey(jnp.round(t / dt).astype(int)),
-            input_firing_rate * dt,
-            shape=(N_neurons, N_inputs),
-        ),
+        "get_input_spikes": get_input_spikes,
         "noise_scale_hyperparam": 0.1,
         "network_output_fn": lambda t, agent_state, args: jnp.sum(
             agent_state.noisy_network.network_state.S[:10]
