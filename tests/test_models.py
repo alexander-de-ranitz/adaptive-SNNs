@@ -718,6 +718,28 @@ def test_noise_scaling():
     assert jnp.isclose(desired_noise_std, expected_noise_std, atol=1e-10)
 
 
+def test_noise_variance():
+    args = {"noise_std": jnp.array(0.314)}
+    oup = make_OUP_model(dim=1, tau=6e-3)
+    sol = dfx.diffeqsolve(
+        terms=oup.terms(jr.PRNGKey(0)),
+        solver=dfx.EulerHeun(),
+        t0=0.0,
+        t1=10.0,
+        dt0=1e-4,
+        y0=oup.initial,
+        args=args,
+        adjoint=dfx.ForwardMode(),
+        max_steps=None,
+        saveat=dfx.SaveAt(ts=jnp.linspace(0, 10.0, 1000)),
+    )
+    mean_noise = jnp.mean(sol.ys, axis=0)
+    noise_std = jnp.std(sol.ys, axis=0)
+
+    assert jnp.isclose(mean_noise, 0.0, atol=noise_std / 10)
+    assert jnp.isclose(noise_std, args["noise_std"], atol=args["noise_std"] / 10)
+
+
 def test_noise_scaling_min_clip():
     N_neurons = 1
     model = make_Noisy_LIF_model(
