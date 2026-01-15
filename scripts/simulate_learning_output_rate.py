@@ -18,9 +18,6 @@ from adaptive_SNN.models import (
 from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.reward import RewardModel
 from adaptive_SNN.solver import simulate_noisy_SNN
-from adaptive_SNN.utils.analytics import (
-    compute_required_input_weight,
-)
 from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_learning_results
 
@@ -44,6 +41,7 @@ def main():
 
     lrs = [0.05, 0.2, 0.5]
     noise_levels = [0.05, 0.2, 0.5]
+    min_noise_std = 5e-9
     for lr in lrs:
         for noise_level in noise_levels:
             if os.path.exists(
@@ -55,13 +53,6 @@ def main():
                 continue
 
             print(f"Running simulations with noise level: {noise_level}")
-            input_weight = compute_required_input_weight(
-                target_mean_g_syn=50e-9,
-                N_inputs=1.0,
-                tau=LIFNetwork.tau_E,
-                input_rate=exc_rate,
-                synaptic_increment=LIFNetwork.synaptic_increment,
-            )
 
             # Set up models
             neuron_model = LIFNetwork(
@@ -69,8 +60,8 @@ def main():
                 N_inputs=N_inputs,
                 dt=dt,
                 fully_connected_input=True,
-                input_weight=input_weight,
-                fraction_excitatory_input=0.5,
+                input_weight=5.0,
+                input_types=jnp.array([1, 0]),
                 key=key,
             )
             key, _ = jr.split(key)
@@ -80,6 +71,7 @@ def main():
             network = NoisyNetwork(
                 neuron_model=neuron_model,
                 noise_model=noise_model,
+                min_noise_std=min_noise_std,
             )
 
             agent = Agent(
@@ -107,11 +99,11 @@ def main():
                     environment_state[0] - target_state
                 ),
                 "get_input_spikes": lambda t, x, args: jr.poisson(
-                    jr.PRNGKey(jnp.int32(jnp.round(t / dt))),
+                    jr.fold_in(jr.PRNGKey(0), jnp.round(t / dt).astype(int)),
                     rates * dt,
                     shape=(N_neurons, N_inputs),
                 ),
-                "get_desired_balance": lambda t, x, args: jnp.array([4.0]),
+                "get_desired_balance": lambda t, x, args: jnp.array([2.0]),
                 "noise_scale_hyperparam": noise_level,
             }
 
@@ -127,13 +119,22 @@ def main():
                     init_state,
                     get_weights(init_state) * initial_weight_factors[i],
                 )
-                key = jr.PRNGKey(i * 12345)
+                key = jr.fold_in(jr.PRNGKey(42), i)
                 print(f"Running simulation {i + 1}/{len(initial_weight_factors)} ...")
                 start = time.time()
 
                 def save_fn(t, y: SystemState, args):
                     return save_part_of_state(
-                        y, reward=True, W=True, environment_state=True
+                        y,
+                        reward=True,
+                        W=True,
+                        environment_state=True,
+                        mean_E_conductance=True,
+                        var_E_conductance=True,
+                        noise_state=True,
+                        V=True,
+                        S=True,
+                        G=True,
                     )
 
                 sol = simulate_noisy_SNN(

@@ -5,9 +5,6 @@ from jax import numpy as jnp
 
 from adaptive_SNN.models import OUP, LIFNetwork, NoisyNetwork
 from adaptive_SNN.solver import simulate_noisy_SNN
-from adaptive_SNN.utils.analytics import (
-    compute_required_input_weight,
-)
 from adaptive_SNN.visualization import plot_simulate_SNN_results
 
 
@@ -23,16 +20,11 @@ def main():
     inh_rate = exc_rate / exc_to_inh_ratio
     rates = jnp.array([exc_rate, inh_rate])  # firing rate in Hz
 
+    min_noise_std = 5e-9
     N_neurons = 1
     N_inputs = 2
 
-    input_weight = compute_required_input_weight(
-        target_mean_g_syn=50e-9,
-        N_inputs=1.0,
-        tau=LIFNetwork.tau_E,
-        input_rate=exc_rate,
-        synaptic_increment=LIFNetwork.synaptic_increment,
-    )
+    input_weight = 5.0
 
     # Set up models
     neuron_model = LIFNetwork(
@@ -48,8 +40,7 @@ def main():
     key, _ = jr.split(key)
     noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
     model = NoisyNetwork(
-        neuron_model=neuron_model,
-        noise_model=noise_model,
+        neuron_model=neuron_model, noise_model=noise_model, min_noise_std=min_noise_std
     )
 
     # Run simulation
@@ -58,7 +49,7 @@ def main():
 
     args = {
         "get_input_spikes": lambda t, x, args: jr.poisson(
-            jr.PRNGKey(jnp.int32(jnp.round(t / dt0))),
+            jr.fold_in(jr.PRNGKey(0), jnp.int32(jnp.round(t / dt0))),
             rates * dt0,
             shape=(N_neurons, N_inputs),
         ),
