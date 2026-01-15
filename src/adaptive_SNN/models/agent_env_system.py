@@ -2,7 +2,7 @@ import diffrax as dfx
 import equinox as eqx
 from jaxtyping import Array
 
-from adaptive_SNN.models.base import EnvironmentABC
+from adaptive_SNN.models.environments.base import EnvironmentABC
 from adaptive_SNN.models.networks.agent import Agent, AgentState
 from adaptive_SNN.utils.operators import MixedPyTreeOperator
 

@@ -2,7 +2,7 @@ import diffrax as dfx
 import jax
 import jax.numpy as jnp
 
-from adaptive_SNN.models.base import EnvironmentABC
+from adaptive_SNN.models.environments.base import EnvironmentABC
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32

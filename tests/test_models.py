@@ -379,7 +379,7 @@ def test_noise_is_unique():
 
     # Make sure the initial network state has non-zero conductances variance so that noise > 0
     initial_state = eqx.tree_at(
-        lambda s: s.network_state.auxiliary_info.var_E_conductance,
+        lambda s: s.network_state.var_E_conductance,
         initial_state,
         jnp.ones((N,)),
     )
@@ -486,9 +486,7 @@ def test_spike_generation():
     assert jnp.all(new_state.W == state.W)
 
     expected_time_since_last_spike = jnp.array([jnp.inf, jnp.inf, 0.0, jnp.inf, 0.0])
-    assert jnp.allclose(
-        new_state.auxiliary_info.time_since_last_spike, expected_time_since_last_spike
-    )
+    assert jnp.allclose(new_state.time_since_last_spike, expected_time_since_last_spike)
 
     # Check that voltage remains fixed after spike
     drift = model.drift(0.0, new_state, args)
@@ -668,9 +666,9 @@ def test_synaptic_delays():
     )  # Generate spikes to fill buffer
     assert jnp.all(state.S == expected_spikes)
     assert jnp.all(
-        state.auxiliary_info.spike_buffer[0] == expected_spikes
+        state.spike_buffer[0] == expected_spikes
     )  # Spikes recorded in buffer
-    assert state.auxiliary_info.buffer_index == 1  # Buffer index advanced
+    assert state.buffer_index == 1  # Buffer index advanced
     assert jnp.all(state.G == 0.0)  # No conductance change yet due to delays
 
     max_delay = jnp.max(model.synaptic_delay_matrix)
@@ -708,9 +706,7 @@ def test_noise_scaling():
     syn_var = jnp.array([20e-9])
 
     # Set variance to known value for test
-    state = eqx.tree_at(
-        lambda s: s.network_state.auxiliary_info.var_E_conductance, state, syn_var
-    )
+    state = eqx.tree_at(lambda s: s.network_state.var_E_conductance, state, syn_var)
 
     # Compute desired noise std and compare to expected
     desired_noise_std = model.compute_desired_noise_std(0.0, state, args)
@@ -720,6 +716,28 @@ def test_noise_scaling():
         "Test setup invalid: synaptic std too low"
     )
     assert jnp.isclose(desired_noise_std, expected_noise_std, atol=1e-10)
+
+
+def test_noise_variance():
+    args = {"noise_std": jnp.array(0.314)}
+    oup = make_OUP_model(dim=1, tau=6e-3)
+    sol = dfx.diffeqsolve(
+        terms=oup.terms(jr.PRNGKey(0)),
+        solver=dfx.EulerHeun(),
+        t0=0.0,
+        t1=10.0,
+        dt0=1e-4,
+        y0=oup.initial,
+        args=args,
+        adjoint=dfx.ForwardMode(),
+        max_steps=None,
+        saveat=dfx.SaveAt(ts=jnp.linspace(0, 10.0, 1000)),
+    )
+    mean_noise = jnp.mean(sol.ys, axis=0)
+    noise_std = jnp.std(sol.ys, axis=0)
+
+    assert jnp.isclose(mean_noise, 0.0, atol=noise_std / 10)
+    assert jnp.isclose(noise_std, args["noise_std"], atol=args["noise_std"] / 10)
 
 
 def test_noise_scaling_min_clip():

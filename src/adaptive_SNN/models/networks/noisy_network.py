@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.base import NeuronModelABC, NoiseModelABC
-from adaptive_SNN.models.networks.lif import LIFState
+from adaptive_SNN.models.networks.base import LIFState, NeuronModelABC
+from adaptive_SNN.models.noise.base import NoiseModelABC
 from adaptive_SNN.utils.operators import MixedPyTreeOperator
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -19,14 +19,20 @@ class NoisyNetworkState(eqx.Module):
 
 
 class NoisyNetwork(NeuronModelABC):
-    min_noise_std: float = 0e-9  # TODO: Tune this, and/or make it configurable
-
+    min_noise_std: float = 5e-9  # TODO: Tune this, and/or make it configurable
     base_network: NeuronModelABC
     noise_model: NoiseModelABC
 
-    def __init__(self, neuron_model: NeuronModelABC, noise_model: NoiseModelABC):
+    def __init__(
+        self,
+        neuron_model: NeuronModelABC,
+        noise_model: NoiseModelABC,
+        min_noise_std: float | None = None,
+    ):
         self.base_network = neuron_model
         self.noise_model = noise_model
+        if min_noise_std is not None:
+            self.min_noise_std = min_noise_std
 
     @property
     def initial(self):
@@ -84,7 +90,7 @@ class NoisyNetwork(NeuronModelABC):
         Returns:
             Array: Noise scale for each neuron.
         """
-        synaptic_variance = state.network_state.auxiliary_info.var_E_conductance
+        synaptic_variance = state.network_state.var_E_conductance
 
         # Compute desired noise std using the computed variance and a hyperparameter, then clip to min value
         noise_scale_hyperparam = args.get("noise_scale_hyperparam", 0.0)
