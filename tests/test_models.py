@@ -706,9 +706,7 @@ def test_noise_scaling():
     syn_var = jnp.array([20e-9])
 
     # Set variance to known value for test
-    state = eqx.tree_at(
-        lambda s: s.network_state.auxiliary_info.var_E_conductance, state, syn_var
-    )
+    state = eqx.tree_at(lambda s: s.network_state.var_E_conductance, state, syn_var)
 
     # Compute desired noise std and compare to expected
     desired_noise_std = model.compute_desired_noise_std(0.0, state, args)

@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.base import NoiseModelABC
+from adaptive_SNN.models.noise.base import NoiseModelABC
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
