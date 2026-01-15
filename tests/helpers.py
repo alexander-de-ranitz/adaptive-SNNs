@@ -8,13 +8,12 @@ from jaxtyping import Array, PyTree
 
 from adaptive_SNN.models import (
     OUP,
-    AuxiliaryInfo,
     LIFNetwork,
     LIFState,
     NoisyNetwork,
     NoisyNetworkState,
 )
-from adaptive_SNN.models.base import NeuronModelABC
+from adaptive_SNN.models.networks.base import NeuronModelABC
 from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
 
 # ============================================================================
@@ -96,21 +95,18 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
     N_neurons = model.N_neurons
     N_inputs = model.N_inputs
 
-    auxiliary_info = AuxiliaryInfo(
+    state = LIFState(
+        V=jnp.ones((N_neurons,)) * model.resting_potential,
+        S=jnp.zeros((N_neurons,)),
+        W=jnp.zeros((N_neurons, N_neurons + N_inputs)),
+        G=jnp.zeros((N_neurons, N_neurons + N_inputs)),
         firing_rate=jnp.zeros((N_neurons,)),
         mean_E_conductance=jnp.zeros((N_neurons,)),
         var_E_conductance=jnp.zeros((N_neurons,)),
         time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
         spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),
         buffer_index=jnp.array(0.0),
-    )
-
-    state = LIFState(
-        V=jnp.ones((N_neurons,)) * model.resting_potential,
-        S=jnp.zeros((N_neurons,)),
-        W=jnp.zeros((N_neurons, N_neurons + N_inputs)),
-        G=jnp.zeros((N_neurons, N_neurons + N_inputs)),
-        auxiliary_info=auxiliary_info,
+        features=model.init_features(),
     )
 
     # Apply overrides using eqx.tree_at
@@ -266,6 +262,9 @@ class DummySpikingNetwork(NeuronModelABC):
     def initial(self):
         return make_baseline_state(self)
 
+    def init_features(self):
+        pass
+
     def drift(self, t, x, args):
         return jax.tree.map(
             lambda arr: jnp.zeros_like(arr, dtype=arr.dtype),
@@ -291,10 +290,4 @@ class DummySpikingNetwork(NeuronModelABC):
     def update(self, t, x, args):
         # Generate spikes based on output rates
         spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
-        return LIFState(
-            V=x.V,
-            S=spikes,
-            W=x.W,
-            G=x.G,
-            auxiliary_info=x.auxiliary_info,
-        )
+        return eqx.tree_at(lambda s: s.S, x, spikes)

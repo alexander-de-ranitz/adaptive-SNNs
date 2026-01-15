@@ -379,7 +379,7 @@ def test_noise_is_unique():
 
     # Make sure the initial network state has non-zero conductances variance so that noise > 0
     initial_state = eqx.tree_at(
-        lambda s: s.network_state.auxiliary_info.var_E_conductance,
+        lambda s: s.network_state.var_E_conductance,
         initial_state,
         jnp.ones((N,)),
     )
@@ -486,9 +486,7 @@ def test_spike_generation():
     assert jnp.all(new_state.W == state.W)
 
     expected_time_since_last_spike = jnp.array([jnp.inf, jnp.inf, 0.0, jnp.inf, 0.0])
-    assert jnp.allclose(
-        new_state.auxiliary_info.time_since_last_spike, expected_time_since_last_spike
-    )
+    assert jnp.allclose(new_state.time_since_last_spike, expected_time_since_last_spike)
 
     # Check that voltage remains fixed after spike
     drift = model.drift(0.0, new_state, args)
@@ -668,9 +666,9 @@ def test_synaptic_delays():
     )  # Generate spikes to fill buffer
     assert jnp.all(state.S == expected_spikes)
     assert jnp.all(
-        state.auxiliary_info.spike_buffer[0] == expected_spikes
+        state.spike_buffer[0] == expected_spikes
     )  # Spikes recorded in buffer
-    assert state.auxiliary_info.buffer_index == 1  # Buffer index advanced
+    assert state.buffer_index == 1  # Buffer index advanced
     assert jnp.all(state.G == 0.0)  # No conductance change yet due to delays
 
     max_delay = jnp.max(model.synaptic_delay_matrix)

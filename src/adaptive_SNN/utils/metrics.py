@@ -1,7 +1,7 @@
 from jax import numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.networks.lif import LIFNetwork
+from adaptive_SNN.models.networks.base import AbstractLIFNetwork
 from adaptive_SNN.models.networks.noisy_network import NoisyNetwork
 
 
@@ -52,7 +52,7 @@ def compute_conductance_ratio(t, state, model) -> Array:
     Returns:
         jnp.ndarray: An array of shape (num_neurons,) containing the average ratio of inhibitory to excitatory conductances.
     """
-    if isinstance(model, LIFNetwork):
+    if isinstance(model, AbstractLIFNetwork):
         base_network = model
         network_state = state
 
@@ -93,13 +93,13 @@ def compute_charge_ratio(t, state, model) -> Array:
     Returns:
         jnp.ndarray: An array of shape (num_neurons,) containing the ratio of total inhibitory to excitatory charge.
     """
-    if isinstance(model, LIFNetwork):
-        base_network: LIFNetwork = model
+    if isinstance(model, AbstractLIFNetwork):
+        base_network: AbstractLIFNetwork = model
         network_state = state
 
         noise = jnp.zeros(base_network.N_neurons)
     elif isinstance(model, NoisyNetwork):
-        base_network: LIFNetwork = model.base_network
+        base_network: AbstractLIFNetwork = model.base_network
         network_state = state.network_state
 
         noise = state.noise_state
