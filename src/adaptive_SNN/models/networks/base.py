@@ -83,8 +83,8 @@ class AbstractLIFNetwork(NeuronModelABC):
     resting_potential: float = -70.0 * 1e-3  # mV
     connection_prob: float = 0.1
     reversal_potential_E: float = 0.0  # mV
-    reversal_potential_I: float = -75.0 * 1e-3  # mV
-    tau_E: float = 2.0 * 1e-3  # ms
+    reversal_potential_I: float = -80.0 * 1e-3  # mV
+    tau_E: float = 6.0 * 1e-3  # ms
     tau_I: float = 6.0 * 1e-3  # ms
     synaptic_increment: float = 1.0 * 1e-9  # nS
     firing_threshold: float = -50.0 * 1e-3  # mV
