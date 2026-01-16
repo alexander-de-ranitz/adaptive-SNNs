@@ -5,6 +5,7 @@ from jax import numpy as jnp
 
 from adaptive_SNN.models import OUP, LIFNetwork, NoisyNetwork
 from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_simulate_SNN_results
 
 
@@ -32,6 +33,8 @@ def main():
         N_inputs=N_inputs,
         fully_connected_input=True,
         fraction_excitatory_input=0.5,
+        input_types=jnp.array([1, 0]),
+        weight_std=0.0,
         input_weight=input_weight,
         key=key,
         dt=dt0,
@@ -49,13 +52,18 @@ def main():
 
     args = {
         "get_input_spikes": lambda t, x, args: jr.poisson(
-            jr.fold_in(jr.PRNGKey(0), jnp.int32(jnp.round(t / dt0))),
+            jr.fold_in(key, jnp.int32(jnp.round(t / dt0))),
             rates * dt0,
             shape=(N_neurons, N_inputs),
         ),
-        "get_desired_balance": lambda t, x, args: jnp.array([5.0]),
-        "noise_scale_hyperparam": 0.2,
+        "get_desired_balance": lambda t, x, args: jnp.array([3.0]),
+        "noise_scale_hyperparam": 0.0,
     }
+
+    def save_fn(t, state, args):
+        return save_part_of_state(
+            state, V=True, G=True, W=True, S=True, noise_state=True
+        )
 
     sol = simulate_noisy_SNN(
         model,
@@ -64,7 +72,7 @@ def main():
         t1,
         dt0,
         init_state,
-        save_at=SaveAt(t0=True, t1=True, steps=True),
+        save_at=SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
         args=args,
     )
 
