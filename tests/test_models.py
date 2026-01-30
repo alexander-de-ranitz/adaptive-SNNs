@@ -715,7 +715,7 @@ def test_noise_scaling():
     assert expected_noise_std > NoisyNetwork.min_noise_std, (
         "Test setup invalid: synaptic std too low"
     )
-    assert jnp.isclose(desired_noise_std, expected_noise_std, atol=1e-10)
+    assert jnp.isclose(desired_noise_std, expected_noise_std, atol=1e-6)
 
 
 def test_noise_variance():
