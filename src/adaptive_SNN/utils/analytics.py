@@ -1,5 +1,7 @@
 from jax import numpy as jnp
 
+from adaptive_SNN.models.networks.default_LIF import LIFNetwork
+
 
 def compute_required_input_weight(
     target_mean_g_syn: float,
@@ -158,3 +160,27 @@ def compute_required_I_conductance(
     denominator = target_mean_voltage - reversal_potential_I
     g_I = numerator / denominator
     return g_I
+
+
+def compute_input_weight_and_rate(
+    mean_E, std_E, mean_I, std_I
+) -> tuple[float, float, float, float]:
+    """Given desired means and stds for excitatory and inhibitory conductances, compute necessary input rate and weight."""
+    tau_E = LIFNetwork.tau_E
+    tau_I = LIFNetwork.tau_I
+    syn_inc = LIFNetwork.synaptic_increment
+    N_inputs = 1  # assuming one excitatory and one inhibitory input for simplicity
+
+    var_E = std_E**2
+    var_I = std_I**2
+
+    var_to_mean_E = var_E / mean_E
+    var_to_mean_I = var_I / mean_I
+
+    w_E = var_to_mean_E * 2.0 / syn_inc
+    w_I = var_to_mean_I * 2.0 / syn_inc
+
+    rate_E = mean_E / (N_inputs * tau_E * w_E * syn_inc)
+    rate_I = mean_I / (N_inputs * tau_I * w_I * syn_inc)
+
+    return rate_E, w_E, rate_I, w_I
