@@ -84,8 +84,8 @@ class NoisyNetwork(NeuronModelABC):
     def compute_desired_noise_std(self, t, state: NoisyNetworkState, args):
         """For each neuron, compute the desired scale of the noise to be added.
 
-        The desired level of noise scales with the total weighted input to the neuron. Weighted with a hyperparameter-defined factor.
-        The returned noise scale represents the standard deviation of the noise to be added to each neuron.
+        If the noise_scale_hyperparam is zero, no noise is added. Otherwise, the desired noise std is given as:
+            desired_noise_std = min_noise_std + noise_scale_hyperparam * sqrt(var_E_conductance)
 
         Returns:
             Array: Noise scale for each neuron.
@@ -97,5 +97,5 @@ class NoisyNetwork(NeuronModelABC):
         if noise_scale_hyperparam == 0.0:
             return jnp.zeros_like(synaptic_variance)
         desired_noise_std = jnp.sqrt(synaptic_variance) * noise_scale_hyperparam
-        desired_noise_std = jnp.clip(desired_noise_std, min=self.min_noise_std)
+        desired_noise_std = self.min_noise_std + desired_noise_std
         return desired_noise_std

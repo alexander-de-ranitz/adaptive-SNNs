@@ -83,8 +83,8 @@ class AbstractLIFNetwork(NeuronModelABC):
     resting_potential: float = -70.0 * 1e-3  # mV
     connection_prob: float = 0.1
     reversal_potential_E: float = 0.0  # mV
-    reversal_potential_I: float = -75.0 * 1e-3  # mV
-    tau_E: float = 2.0 * 1e-3  # ms
+    reversal_potential_I: float = -80.0 * 1e-3  # mV
+    tau_E: float = 6.0 * 1e-3  # ms
     tau_I: float = 6.0 * 1e-3  # ms
     synaptic_increment: float = 1.0 * 1e-9  # nS
     firing_threshold: float = -50.0 * 1e-3  # mV
@@ -98,6 +98,9 @@ class AbstractLIFNetwork(NeuronModelABC):
     EMA_tau: float = 0.3  # Time constant for exponential moving average of firing rate and mean/var of conductance
 
     input_weight: float  # Mean input weight
+    weight_std: (
+        float  # Standard deviation of initial weights as fraction of mean weight
+    )
     rec_weight: float  # Mean recurrent weight
     fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
     N_neurons: int
@@ -120,6 +123,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         rec_weight: float = 1.0,
         fraction_excitatory_recurrent: float = 0.8,
         fraction_excitatory_input: float = 1.0,
+        weight_std: float = 0.2,
         input_types: Array | None = None,
         key: jr.PRNGKey = jr.PRNGKey(0),
     ):
@@ -133,6 +137,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             rec_weight: Mean weight of recurrent synapses
             fraction_excitatory_recurrent: Fraction of excitatory recurrent neurons
             fraction_excitatory_input: Fraction of excitatory input neurons
+            weight_std: Standard deviation of initial weights as fraction of mean weight
             input_types: Optional array of shape (N_inputs,) with boolean values indicating whether each input neuron is excitatory (True) or inhibitory (False). If None, random assignment is used.
             key: JAX random key for initialization
         """
@@ -144,6 +149,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         self.fraction_excitatory_recurrent = fraction_excitatory_recurrent
         self.fraction_excitatory_input = fraction_excitatory_input
         self.dt = dt
+        self.weight_std = weight_std
 
         key, subkey = jr.split(key)
 
@@ -399,7 +405,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             ),
         )
 
-    def update(self, t, x: LIFState, args):
+    def update(self, t, x: LIFState, args) -> LIFState:
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         state = self.spike_and_reset(t, x, args)
         state = self.force_balanced_weights(t, state, args)
@@ -654,7 +660,8 @@ class AbstractLIFNetwork(NeuronModelABC):
         rec_weights = (
             self.rec_weight
             * jnp.clip(
-                1 + 0.2 * jr.normal(subkey, (self.N_neurons, self.N_neurons)),
+                1
+                + self.weight_std * jr.normal(subkey, (self.N_neurons, self.N_neurons)),
                 min=0.5,
                 max=1.5,
             )
