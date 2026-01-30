@@ -35,7 +35,7 @@ def main():
     noise_std = []
     # for i, noise_level in enumerate(noise_levels):
     for i, g in enumerate(gs):
-        for w in weights:
+        for j, w in enumerate(weights):
             # Set up models
             neuron_model = LIFNetwork(
                 N_neurons=N_neurons,
@@ -47,7 +47,6 @@ def main():
                 dt=dt0,
             )
 
-            key, _ = jr.split(key)
             noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
             model = NoisyNetwork(
                 neuron_model=neuron_model,
@@ -59,9 +58,12 @@ def main():
             solver = dfx.EulerHeun()
             init_state = model.initial
 
+            spike_key = jr.fold_in(jr.PRNGKey(0), i * 100 + j)
+            sim_key = jr.fold_in(jr.PRNGKey(1), i * 100 + j)
+
             args = {
                 "get_input_spikes": lambda t, x, args: jr.poisson(
-                    jr.PRNGKey(jnp.int32(500 + i * 1010101 + jnp.round(t / dt0))),
+                    jr.fold_in(spike_key, (t / dt0).astype(int)),
                     rates * dt0,
                     shape=(N_neurons, N_inputs),
                 ),
@@ -90,7 +92,7 @@ def main():
                 init_state,
                 save_at=SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
                 args=args,
-                key=jr.PRNGKey(5123 + int(w) + 42 * i),
+                key=sim_key,
             )
 
             n_spikes = jnp.sum(sol.ys.network_state.S)
