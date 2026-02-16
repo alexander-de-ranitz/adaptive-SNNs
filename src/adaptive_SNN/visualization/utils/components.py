@@ -488,7 +488,11 @@ def _plot_noise_distribution_STA(
     # Plot the analytical noise distribution for comparison
     # note that this assumes constant noise std over time
     if noise_std is not None:
+        if isinstance(noise_std, jnp.ndarray):
+            noise_std = noise_std.at[0].get()
         x = jnp.linspace(-4 * noise_std, 4 * noise_std, 100)
+        lim = (-4 * noise_std, 4 * noise_std)
+        ax.set_xlim(lim)
         pdf = (1 / (noise_std * jnp.sqrt(2 * jnp.pi))) * jnp.exp(
             -0.5 * (x / noise_std) ** 2
         )

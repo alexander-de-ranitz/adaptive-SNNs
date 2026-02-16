@@ -15,7 +15,7 @@ from adaptive_SNN.visualization import plot_noise_STA
 
 
 def main():
-    noise_levels = [0.05, 0.1, 0.5, 2.0]
+    noise_levels = [0.01, 0.05, 0.1, 0.5, 1.0]
 
     sols = []
     for noise_level in noise_levels:
@@ -48,6 +48,7 @@ def main():
             fully_connected_input=True,
             input_weight=input_weight,
             fraction_excitatory_input=0.5,
+            input_types=jnp.array([1, 0]),
             key=key,
             dt=dt0,
         )
@@ -55,8 +56,7 @@ def main():
         key, _ = jr.split(key)
         noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
         model = NoisyNetwork(
-            neuron_model=neuron_model,
-            noise_model=noise_model,
+            neuron_model=neuron_model, noise_model=noise_model, min_noise_std=0.0
         )
 
         # Run simulation
@@ -65,16 +65,18 @@ def main():
 
         args = {
             "get_input_spikes": lambda t, x, args: jr.poisson(
-                jr.PRNGKey(jnp.int32(jnp.round(t / dt0))),
+                jr.fold_in(key, (t / dt0).astype(int)),
                 rates * dt0,
                 shape=(N_neurons, N_inputs),
             ),
-            "get_desired_balance": lambda t, x, args: jnp.array([5.0]),
+            "get_desired_balance": lambda t, x, args: jnp.array([2.0]),
             "noise_scale_hyperparam": noise_level,
         }
 
         def save_fn(t, state: NoisyNetworkState, args):
-            return save_part_of_state(state, S=True, noise_state=True, V=True)
+            return save_part_of_state(
+                state, S=True, noise_state=True, V=True, var_E_conductance=True
+            )
 
         sol = simulate_noisy_SNN(
             model,

@@ -1,3 +1,4 @@
+import equinox as eqx
 import jax
 import matplotlib as mpl
 from diffrax import Solution
@@ -340,20 +341,28 @@ def plot_noise_STA(
     for i, sol in enumerate(sols):
         ax = axs[i] if len(sols) > 1 else axs
 
+        # We need to compute the (mean) desired noise std, we take the mean over the second half of the simulation to reduce transient effects
+        args = {
+            "noise_scale_hyperparam": noise_levels[i]
+            if noise_levels is not None
+            else None
+        }
+        var_E_conductance = get_LIF_state(sol.ys).var_E_conductance
+        mean_var_E = jnp.mean(
+            var_E_conductance[jnp.size(sol.ts) // 2 :, neurons_to_plot], axis=0
+        )
+        last_state = jax.tree.map(lambda v: v[-1], get_noisy_network_state(sol.ys))
+        last_state = eqx.tree_at(
+            lambda s: s.network_state.var_E_conductance, last_state, mean_var_E
+        )
+        if not isinstance(model, NoisyNetwork):
+            raise NotImplementedError(
+                "Model must be NoisyNetwork to compute noise std."
+            )
+        noise_std = model.compute_desired_noise_std(0.0, last_state, args)
+
         _plot_noise_distribution_STA(
-            ax,
-            sol,
-            model,
-            neurons_to_plot=neurons_to_plot,
-            noise_std=model.compute_desired_noise_std(
-                0,
-                model.initial,
-                {
-                    "noise_scale_hyperparam": noise_levels[i]
-                    if noise_levels is not None
-                    else None
-                },
-            ),
+            ax, sol, model, neurons_to_plot=neurons_to_plot, noise_std=noise_std
         )
 
         lif_state = get_LIF_state(sol.ys)
@@ -368,6 +377,7 @@ def plot_noise_STA(
         )
         ax.set_xlabel("Noise Value")
         ax.set_ylabel("Density")
+
     plt.tight_layout()
     plt.show()
 
