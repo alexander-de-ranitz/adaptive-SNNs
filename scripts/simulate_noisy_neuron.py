@@ -1,3 +1,5 @@
+import time
+
 import diffrax as dfx
 import jax.random as jr
 from diffrax import SaveAt
@@ -11,7 +13,7 @@ from adaptive_SNN.visualization import plot_simulate_SNN_results
 
 def main():
     t0 = 0
-    t1 = 25
+    t1 = 10
     dt0 = 1e-4
     key = jr.PRNGKey(1)
 
@@ -25,7 +27,7 @@ def main():
     N_neurons = 1
     N_inputs = 2
 
-    input_weight = 5.0
+    input_weight = 20.0
 
     # Set up models
     neuron_model = LIFNetwork(
@@ -56,7 +58,7 @@ def main():
             rates * dt0,
             shape=(N_neurons, N_inputs),
         ),
-        "get_desired_balance": lambda t, x, args: jnp.array([3.0]),
+        "get_desired_balance": lambda t, x, args: jnp.array([1.5]),
         "noise_scale_hyperparam": 0.0,
     }
 
@@ -65,6 +67,7 @@ def main():
             state, V=True, G=True, W=True, S=True, noise_state=True
         )
 
+    start = time.time()
     sol = simulate_noisy_SNN(
         model,
         solver,
@@ -75,6 +78,22 @@ def main():
         save_at=SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
         args=args,
     )
+    end = time.time()
+    print(f"Simulation completed in {end - start:.2f} seconds")
+
+    start = time.time()
+    sol = simulate_noisy_SNN(
+        model,
+        solver,
+        t0,
+        t1,
+        dt0,
+        init_state,
+        save_at=SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
+        args=args,
+    )
+    end = time.time()
+    print(f"Second simulation completed in {end - start:.2f} seconds")
 
     plot_simulate_SNN_results(sol, model, split_noise=True)
 

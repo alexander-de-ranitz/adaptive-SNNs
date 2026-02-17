@@ -11,11 +11,11 @@ from adaptive_SNN.models import (
     OUP,
     Agent,
     AgentEnvSystem,
-    LIFNetwork,
     NoisyNetwork,
     SystemState,
 )
 from adaptive_SNN.models.environments import SpikeRateEnvironment
+from adaptive_SNN.models.networks.eligibility_LIF import EligibilityLIFNetwork
 from adaptive_SNN.models.reward import RewardModel
 from adaptive_SNN.solver import simulate_noisy_SNN
 from adaptive_SNN.utils.save_helper import save_part_of_state
@@ -23,7 +23,7 @@ from adaptive_SNN.utils.save_helper import save_part_of_state
 
 def main():
     t0 = 0
-    t1 = 200
+    t1 = 100
     dt = 1e-4
 
     N_neurons = 1
@@ -37,15 +37,15 @@ def main():
 
     target_state = 10.0  # Target output state
 
-    iterations = 5
+    iterations = 1
     noise_level = 0.15
-    lr = 6.5
+    lr = 0.5
     initial_weight_factors = jnp.array([0.5, 1.0])
 
     network_key = jr.PRNGKey(0)
 
     # Set up models
-    neuron_model = LIFNetwork(
+    neuron_model = EligibilityLIFNetwork(
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         dt=dt,
@@ -60,7 +60,7 @@ def main():
     network = NoisyNetwork(
         neuron_model=neuron_model,
         noise_model=noise_model,
-        min_noise_std=0 * 5e-9,
+        min_noise_std=5e-9,
     )
 
     agent = Agent(
@@ -99,7 +99,9 @@ def main():
                     rates * dt,
                     shape=(N_neurons, N_inputs),
                 ),
-                "get_desired_balance": lambda t, x, args: jnp.array([0.86]),
+                "get_desired_balance": lambda t, x, args: jnp.where(
+                    t < 1.0, jnp.array([2.0]), jnp.array([0.0])
+                ),
                 "noise_scale_hyperparam": noise_level,
             }
 
