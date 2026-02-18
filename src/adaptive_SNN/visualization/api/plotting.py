@@ -452,3 +452,64 @@ def plot_learning_detailed(
         plt.savefig(save_path)
     else:
         plt.show()
+
+
+def plot_weight_distribution(
+    sol: Solution,
+    model: AgentEnvSystem,
+    t_range: tuple[float, float] | None = None,
+    plot_reward: bool = True,
+    neurons_to_plot: Array | None = None,
+    save_path: str | None = None,
+    **plot_kwargs,
+):
+    """Plots the distribution of synaptic weights a probability density function.
+
+    Arguments:
+        sol: The solution object containing the simulation results.
+        model: The AgentEnvSystem model used in the simulation.
+        t_range: A tuple specifying the time range to use for the plot (start, end). If None, plots the entire range.
+        plot_reward: Whether to plot the probability density of the reward as well.
+        neurons_to_plot: An array of neuron indices to include in the weight distribution. If None, includes all neurons.
+        save_path: Path to save the figure. If None, displays the figure instead.
+    """
+    # Get results
+    t = sol.ts
+    fig, axs = plt.subplots(1, 1 if not plot_reward else 2, figsize=(10, 8))
+
+    state: SystemState = sol.ys
+
+    if t_range is not None:
+        start_idx = jnp.searchsorted(t, t_range[0])
+        end_idx = jnp.searchsorted(t, t_range[1])
+    else:
+        start_idx, end_idx = 0, len(t)
+    weight_data = state.agent_state.noisy_network.network_state.W[
+        start_idx:end_idx, :, 1
+    ]
+    weight_data = (
+        weight_data[:, neurons_to_plot] if neurons_to_plot is not None else weight_data
+    )
+    weight_data = weight_data.flatten()
+
+    # plot weight distribution
+    axs[0].hist(weight_data, bins=30, density=True, alpha=0.7, color="darkgreen")
+    axs[0].set_title("Synaptic Weight Distribution")
+    axs[0].set_xlabel("Weight Value")
+    axs[0].set_ylabel("Density")
+
+    # Plot reward distribution if desired
+    if plot_reward:
+        reward_data = state.agent_state.reward[start_idx:end_idx]
+        reward_data = reward_data.flatten()
+        axs[1].hist(reward_data, bins=30, density=True, alpha=0.7, color="darkgreen")
+        axs[1].set_title("Reward Distribution")
+        axs[1].set_xlabel("Reward")
+        axs[1].set_ylabel("Density")
+
+    plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
