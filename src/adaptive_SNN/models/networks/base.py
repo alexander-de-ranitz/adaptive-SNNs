@@ -208,6 +208,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             shape=(N_neurons, N_neurons),
             minval=0.0,
             maxval=2 * self.mean_synaptic_delay,
+            dtype=default_float,
         )
 
         # Compute buffer size based on max delay
@@ -545,7 +546,9 @@ class AbstractLIFNetwork(NeuronModelABC):
             state.spike_buffer.at[buffer_idx].set(recurrent_spikes),
         )
         new_buffer = state.spike_buffer
-        new_buffer_index = jnp.round((state.buffer_index + 1) % self.buffer_size)
+        new_buffer_index = jnp.round(
+            (state.buffer_index + 1) % self.buffer_size
+        ).astype(state.buffer_index.dtype)
 
         # Get delayed spikes and update conductances based on delayed activity
         delayed_spikes = self.get_delayed_spikes(
@@ -661,7 +664,10 @@ class AbstractLIFNetwork(NeuronModelABC):
             self.rec_weight
             * jnp.clip(
                 1
-                + self.weight_std * jr.normal(subkey, (self.N_neurons, self.N_neurons)),
+                + self.weight_std
+                * jr.normal(
+                    subkey, (self.N_neurons, self.N_neurons), dtype=default_float
+                ),
                 min=0.5,
                 max=1.5,
             )
