@@ -299,7 +299,7 @@ def test_weight_plasticity():
     state = make_baseline_state(model, G=G)
 
     # Define deterministic noise and RPE
-    E_noise = (jnp.arange(N, dtype=jnp.float32) + 1.0) * model.synaptic_increment
+    E_noise = (jnp.arange(N) + 1.0) * model.synaptic_increment
     noise_std = jnp.arange(3, N + 3, dtype=state.V.dtype) * 0.1
 
     RPE_value = 2.0
@@ -641,6 +641,33 @@ def test_force_balance_random():
     assert jnp.allclose(
         balance_after, args["get_desired_balance"](0, state, args), atol=1e-5
     )
+
+
+def test_force_balance_zero_inhibitory_weight():
+    N_neurons, N_inputs = 1, 3
+    input_types = jnp.array([1, 0, 1])
+
+    model = make_LIF_model(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        input_neuron_types=input_types,
+        key=jr.PRNGKey(7),
+    )
+
+    target_balance = 2.0
+    args = make_default_args(
+        N_neurons,
+        N_inputs,
+        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
+    )
+
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.0).at[0, 3].set(1.0)
+    state = make_baseline_state(model, W=base_W)
+
+    state = model.force_balanced_weights(0, state, args=args)
+    balance_after = model.compute_balance(0, state, args=args)
+    assert jnp.allclose(balance_after, target_balance)
 
 
 def test_synaptic_delays():
