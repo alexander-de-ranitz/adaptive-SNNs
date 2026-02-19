@@ -84,7 +84,7 @@ def test_spike_rate_env():
 
     # Check that the final environment state is close to the target rates
     # there tolerance is quite large since the tracking is not exact
-    assert jnp.allclose(ys.environment_state[-1], rates, atol=1.0)
+    assert jnp.allclose(ys.environment_state[-1], rates, rtol=0.1)
 
 
 def test_double_integrator_optimal_control():
