@@ -7,6 +7,11 @@ import jax.random as jr
 from diffrax import RESULTS, Euler, SaveAt, Solution, SubSaveAt
 from jaxtyping import Array, PyTree
 
+jax.config.update(
+    "jax_enable_x64", True
+)  # Use float64 for better numerical accuracy in the solver
+default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
 # Default args for simulate_noisy_SNN, can be overridden by user-provided args
 # provided here for convenience, such that you only need to specify the args relevant to the experiment
 # note that is important that these are saved outside of the function definition to avoid recompilation on each call
@@ -61,12 +66,10 @@ def simulate_noisy_SNN(
     # Args are the default args, overridden by any user-provided args
     args = {**DEFAULT_ARGS, **(args or {})}
 
-    # Compute time grid
-    n_steps = jnp.floor((t1 - t0) / dt0).astype(int)
-    times = t0 + dt0 * jnp.arange(n_steps + 1)  # Add 1 for t1
-    times = times.at[-1].set(t1)  # Make sure last time is exactly t1
-    save_mask = compute_save_mask(save_at, times)
-    n_saves = jnp.sum(save_mask)
+    # Compute number of steps and save indices/times based on save_at
+    n_steps = jnp.ceil((t1 - t0) / dt0).astype(int)
+    save_indices, save_times = compute_save_indices(save_at, t0, t1, dt0, n_steps)
+    n_saves = save_indices.shape[0]
 
     # Preallocate storage for results
     save_fn = save_at.subs.fn
@@ -78,7 +81,7 @@ def simulate_noisy_SNN(
     terms = model.terms(key)
 
     y_final, ys = run_simulation(
-        times, y0, ys, save_mask, save_fn, terms, args, model, solver
+        t0, t1, n_steps, dt0, y0, ys, save_indices, save_fn, terms, args, model, solver
     )
 
     # If no states were saved, return the final state
@@ -88,7 +91,7 @@ def simulate_noisy_SNN(
     return Solution(
         t0=t0,
         t1=t1,
-        ts=times[save_mask],
+        ts=save_times,
         ys=ys,
         interpolation=None,
         stats=None,
@@ -111,19 +114,27 @@ def save_state(args, save_fn, carry, t):
 
 
 @eqx.filter_jit
-def step(times, solver, terms, args, save_mask, model, save_fn, i, carry):
+def step(i, carry, t0, t1, dt, solver, terms, args, save_indices, model, save_fn):
     """Inner loop of the simulation. Takes one step and saves if needed."""
     y, ys, save_index = carry
 
-    # Take a step
-    t_start = times[i]
-    t_end = times[i + 1]
+    t0_64 = jnp.asarray(t0, dtype=jnp.float64)
+    dt_64 = jnp.asarray(dt, dtype=jnp.float64)
+    t1_64 = jnp.asarray(t1, dtype=jnp.float64)
+
+    t_start = t0_64 + i * dt_64
+    t_end = t0_64 + (i + 1) * dt_64
+    t_end = jnp.minimum(t_end, t1_64)  # Ensure we don't go past t1
+
     y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
     y = model.update(t_end, y, args)
 
-    # Is save_mask true at this index? If so, save, else do nothing
+    # Is save_index in save_indices? If so, save, else do nothing
     y, ys, save_index = jax.lax.cond(
-        save_mask[i + 1],  # + 1 because we already stepped
+        save_indices.size > 0
+        and save_indices[save_index]
+        == i
+        + 1,  # Check if we need to save at this step (+1 because this is after the step)
         lambda c: save_state(args=args, save_fn=save_fn, carry=c, t=t_end),
         lambda c: c,
         (y, ys, save_index),
@@ -132,32 +143,37 @@ def step(times, solver, terms, args, save_mask, model, save_fn, i, carry):
     return (y, ys, save_index)
 
 
-def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver):
+def run_simulation(
+    t0, t1, n_steps, dt0, y0, ys, save_indices, save_fn, terms, args, model, solver
+):
     """Runs the simulation loop."""
 
     # Partially apply all fixed arguments to the step function
     step_partial = partial(
         step,
-        times,
-        solver,
-        terms,
-        args,
-        save_mask,
-        model,
-        save_fn,
+        t0=t0,
+        t1=t1,
+        dt=dt0,
+        solver=solver,
+        terms=terms,
+        args=args,
+        save_indices=save_indices,
+        model=model,
+        save_fn=save_fn,
     )
 
     # Save the initial state if needed
     y0, ys, save_index = jax.lax.cond(
-        save_mask[0],
-        lambda c: save_state(args=args, save_fn=save_fn, carry=c, t=times[0]),
+        save_indices.size > 0
+        and save_indices[0] == 0,  # Check if we need to save at the initial time
+        lambda c: save_state(args=args, save_fn=save_fn, carry=c, t=t0),
         lambda c: c,
         (y0, ys, 0),
     )
 
     # Loop over all intervals
     y_final, ys, save_index = jax.lax.fori_loop(
-        0, times.size - 1, step_partial, (y0, ys, save_index)
+        0, n_steps, step_partial, (y0, ys, save_index)
     )
 
     # Ensure computation is complete before returning
@@ -166,7 +182,7 @@ def run_simulation(times, y0, ys, save_mask, save_fn, terms, args, model, solver
     return y_final, ys
 
 
-def compute_save_mask(save_at: SaveAt, times: Array) -> Array:
+def compute_save_indices(save_at: SaveAt, t0, t1, dt, nsteps) -> tuple[Array, Array]:
     """Computes the indices at which to save the state, based on the SaveAt object.
 
     Setting t0=True or t1=True will always include the initial and final times. Setting steps=True
@@ -176,10 +192,13 @@ def compute_save_mask(save_at: SaveAt, times: Array) -> Array:
 
     Args:
         save_at: SaveAt object specifying when to save states.
-        times: Array of all time points in the simulation.
+        t0: Start time of the simulation.
+        t1: End time of the simulation.
+        dt: Time step size.
+        nsteps: Number of steps in the simulation.
 
     Returns:
-        Binary array of same length as times, with True at indices where the state should be saved.
+        tuple of (save_indices, save_times), where save_indices is an array of indices at which to save, and save_times is an array of the corresponding times.
     """
     if not isinstance(save_at.subs, SubSaveAt):
         raise NotImplementedError(
@@ -190,41 +209,24 @@ def compute_save_mask(save_at: SaveAt, times: Array) -> Array:
             raise ValueError(
                 "Both steps=True and ts specified in save_at.subs; only one of these can be used."
             )
-        # Save every step
-        save_every_n_steps = 1
-        save_mask = (jnp.arange(times.size) % save_every_n_steps) == 0
+        save_indices = jnp.arange(
+            0, nsteps + 1
+        )  # We add 1, since we might save the initial state, and then after each step
+        save_times = jnp.unique(jnp.clip(t0 + save_indices * dt, t0, t1))
+        return save_indices, save_times
     else:
-        # Save at specified times using a vectorized search, choosing the closer of (i-1) or i
-        save_mask = jnp.zeros(times.shape, dtype=bool)
-
-        if save_at.subs.t0:
-            save_mask = save_mask.at[0].set(True)
-        if save_at.subs.t1:
-            save_mask = save_mask.at[-1].set(True)
-
         if save_at.subs.ts is not None:
-            save_ts = jnp.asarray(save_at.subs.ts)
-
-            # Only consider requested times that fall within [times[0], times[-1]]
-            valid = (save_ts >= times[0]) & (save_ts <= times[-1])
-            save_ts = save_ts[valid]
-
-            if save_ts.size > 0:
-                # First index i s.t. times[i] >= st
-                idx_right = jnp.searchsorted(times, save_ts, side="left")
-
-                # Candidate neighbors: previous (i-1) and next (i)
-                prev_idx = jnp.clip(idx_right - 1, 0, times.size - 1)
-                next_idx = jnp.clip(idx_right, 0, times.size - 1)
-
-                prev_diff = jnp.abs(times[prev_idx] - save_ts)
-                next_diff = jnp.abs(times[next_idx] - save_ts)
-
-                # We save at the closest of the two timepoints
-                closest_idx = jnp.where(
-                    (idx_right > 0) & (prev_diff < next_diff),
-                    prev_idx,
-                    next_idx,
-                )
-                save_mask = save_mask.at[closest_idx].set(True)
-    return save_mask
+            save_times = jnp.unique(jnp.clip(save_at.subs.ts, t0, t1))
+            save_indices = jnp.rint((save_times - t0) / dt)
+        else:
+            save_indices = jnp.array([], dtype=int)
+            save_times = jnp.array([], dtype=default_float)
+        if save_at.subs.t0:
+            if save_indices.size == 0 or save_indices[0] != 0:
+                save_indices = jnp.insert(save_indices, 0, 0)
+                save_times = jnp.insert(save_times, 0, t0)
+        if save_at.subs.t1:
+            if save_indices.size == 0 or save_indices[-1] != nsteps:
+                save_indices = jnp.append(save_indices, nsteps)
+                save_times = jnp.append(save_times, t1)
+        return save_indices, save_times
