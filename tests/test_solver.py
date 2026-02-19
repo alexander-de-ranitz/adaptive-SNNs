@@ -1,3 +1,7 @@
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
 import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
@@ -16,7 +20,7 @@ from adaptive_SNN.solver import simulate_noisy_SNN
 def test_solver_timesteps():
     N_neurons = 4
     N_inputs = 0
-    t0, t1, dt0 = 0.0, 1.0, 0.1
+    t0, t1, dt0 = 0.0, 1.05, 0.1
 
     key = jr.PRNGKey(0)
 
@@ -65,6 +69,43 @@ def test_solver_timesteps():
 
     assert sol_1_ts.shape == sol_2_ts.shape
     assert jnp.allclose(sol_1_ts, sol_2_ts)
+
+
+def test_solver_timesteps_precision():
+    N_neurons = 1
+    N_inputs = 0
+    t0, t1, dt0 = 10**4, 10**4 + 1e-4, 1e-4
+
+    key = jr.PRNGKey(0)
+
+    network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key)
+
+    noise_model = DeterministicOUP(
+        tau=network.tau_E, noise_std=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
+    )
+
+    model = DeterministicNoisyNeuronModel(
+        neuron_model=network,
+        noise_model=noise_model,
+        t0=t0,
+        t1=t1 + dt0,
+    )
+
+    # Prepare initial state from model
+    y0 = model.initial
+
+    solver = dfx.Euler()
+    args = make_default_args(N_neurons, N_inputs)
+
+    # Our method
+    save_at = dfx.SaveAt(subs=dfx.SubSaveAt(steps=True, t0=True, t1=True))
+    sol_1 = simulate_noisy_SNN(
+        model, solver, t0, t1, dt0, y0, save_at=save_at, args=args
+    )
+    sol_1_ts = sol_1.ts
+    # Check that time steps are consistent with dt0
+    actual_dts = jnp.ediff1d(sol_1_ts)
+    assert jnp.allclose(actual_dts, dt0, rtol=1e-6, atol=1e-6)
 
 
 def test_solver_output():
