@@ -600,7 +600,13 @@ class AbstractLIFNetwork(NeuronModelABC):
         raise NotImplementedError
 
     def compute_balance(self, t, state, args):
-        """Compute the ratio of total inhibitory to excitatory input weights for each neuron."""
+        """Compute the ratio of total inhibitory to excitatory input weights for each neuron.
+
+        Balance is computed as:
+            balance = (total_I_weights / N_I_connections * |E_I - V_rest| * tau_I) / (total_E_weights / N_E_connections * |E_E - V_rest| * tau_E)
+
+        Returns NaN if a neuron has no non-zero excitatory or inhibitory connections.
+        """
         weights = jnp.where(
             state.W == -jnp.inf, 0.0, state.W
         )  # Treat non-existing connections as weight 0 for balance computation
@@ -612,33 +618,61 @@ class AbstractLIFNetwork(NeuronModelABC):
         N_E_connections = jnp.sum(existing_E, axis=1)
         N_I_connections = jnp.sum(existing_I, axis=1)
 
-        mean_excitatory_weights = jnp.sum(weights * existing_E, axis=1) / (
-            N_E_connections + 1e-12
-        )
-        mean_inhibitory_weights = jnp.sum(weights * existing_I, axis=1) / (
-            N_I_connections + 1e-12
-        )
+        total_E_weights = jnp.sum(weights * existing_E, axis=1)
+        total_I_weights = jnp.sum(weights * existing_I, axis=1)
 
-        balance = (
-            mean_inhibitory_weights
-            * jnp.abs(self.reversal_potential_I - self.resting_potential)
-            * self.tau_I
-        ) / (
-            mean_excitatory_weights
-            * jnp.abs(self.reversal_potential_E - self.resting_potential)
-            * self.tau_E
-            + 1e-12
-        )
-
-        # In case either a neuron does not have both E and I connections, the balance is not defined
+        # If a neuron has no excitatory or no inhibitory connections, we cannot compute a balance, so we set it to NaN in that case
         balance = jnp.where(
-            (N_E_connections == 0) | (N_I_connections == 0), jnp.nan, balance
+            (total_I_weights == 0.0) | (total_E_weights == 0.0),
+            jnp.nan,
+            (
+                total_I_weights
+                / N_I_connections
+                * jnp.abs(self.reversal_potential_I - self.resting_potential)
+                * self.tau_I
+            )
+            / (
+                total_E_weights
+                / N_E_connections
+                * jnp.abs(self.reversal_potential_E - self.resting_potential)
+                * self.tau_E
+            ),
         )
+
         return balance
 
     def force_balanced_weights(self, t, state, args):
-        """Adjust weights to achieve a desired E/I balance for each neuron"""
+        """Adjust weights to achieve a desired E/I balance for each neuron.
+
+        Balance is enforced by scaling inhibitory weights for each neuron to achieve the desired balance given the current excitatory weights.
+        If a neuron only has inhibitory connections of weight zero, all inhibitory weights are set to the same weight at which the desired balance is reached.
+        If a neuron has zero excitatory weights, the balance cannot be achieved by scaling inhibitory weights, so no changes are made.
+        To avoid changing weights, the desired balance can be set to 0.0, in which case no weights are modified.
+        """
+
         desired_balance = args["get_desired_balance"](t, state, args)
+        total_I_weights = jnp.sum(
+            jnp.where(
+                state.W == -jnp.inf,
+                0.0,
+                state.W * jnp.invert(self.excitatory_mask[None, :]),
+            ),
+            axis=1,
+        )
+
+        # If there are no non-zero inhibitory connections, we set all inhibitory weights to 1 to allow the balance to be set to the correct value
+        state = eqx.tree_at(
+            lambda s: s.W,
+            state,
+            jnp.where(
+                (total_I_weights == 0.0)[:, None]
+                & jnp.invert(self.excitatory_mask[None, :])
+                & jnp.isfinite(state.W),
+                1.0,
+                state.W,
+            ),
+        )
+
         current_balance = self.compute_balance(t, state, args)
         adjust_ratio = desired_balance / current_balance
 
