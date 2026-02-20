@@ -20,6 +20,8 @@ from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
 # Model Creation Helpers
 # ============================================================================
 
+default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
 
 def make_LIF_model(
     N_neurons=10,
@@ -254,7 +256,7 @@ class DummySpikingNetwork(NeuronModelABC):
     @property
     def noise_shape(self):
         return jax.tree.map(
-            lambda a: jax.ShapeDtypeStruct(shape=(a.shape), dtype=jnp.float32),
+            lambda a: jax.ShapeDtypeStruct(shape=(a.shape), dtype=default_float),
             make_baseline_state(self),
         )
 
