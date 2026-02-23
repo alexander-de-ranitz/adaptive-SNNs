@@ -95,7 +95,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         0.8  # Fraction of excitatory recurrent neurons
     )
     fraction_excitatory_input: float = 1.0  # Fraction of excitatory input neurons
-    EMA_tau: float = 0.3  # Time constant for exponential moving average of firing rate and mean/var of conductance
+    EMA_tau: float = 1  # Time constant for exponential moving average of firing rate and mean/var of conductance
 
     input_weight: float  # Mean input weight
     weight_std: (

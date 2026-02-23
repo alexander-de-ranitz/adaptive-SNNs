@@ -8,7 +8,7 @@ from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 
 class GatedLIFNetwork(AbstractLIFNetwork):
-    tau_eligibility: float = 0.1  # Time constant for eligibility trace
+    tau_eligibility: float = 1.0  # Time constant for eligibility trace
 
     def init_features(self) -> Eligibility:
         return Eligibility(
@@ -53,14 +53,22 @@ class GatedLIFNetwork(AbstractLIFNetwork):
 
     def gating_function(self, voltage: Array) -> Array:
         """Gating function based on membrane voltage."""
-        # Normalize voltage such that 0 corresponds to resting potential and 1 to firing threshold
+        alpha = 5.0
+        mu = 0.5
+
+        # Normalize voltage: 0 = resting potential, 1 = firing threshold
         normalised_voltage = (voltage - self.resting_potential) / (
             self.firing_threshold - self.resting_potential
         )
 
-        a = 5.0  # Sharpness of the gating function
+        # Compute normalization factor (integral from 0 to 1)
+        # Integral of sigmoid = (1/alpha) * softplus(alpha * (x - mu))
+        normalization_factor = (
+            jax.nn.softplus(alpha * (1.0 - mu)) - jax.nn.softplus(alpha * (0.0 - mu))
+        ) / alpha
 
-        return jnp.exp(a * (normalised_voltage - 1))
+        # Return normalized sigmoid
+        return jax.nn.sigmoid(alpha * (normalised_voltage - mu)) / normalization_factor
 
     def compute_weight_updates(self, t, state: ElibilityState, args):
         # Compute weight changes

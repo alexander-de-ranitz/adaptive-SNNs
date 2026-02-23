@@ -26,7 +26,7 @@ class ElibilityState(eqx.Module):
 
 
 class EligibilityLIFNetwork(AbstractLIFNetwork):
-    tau_eligibility: float = 0.3  # Time constant for eligibility trace
+    tau_eligibility: float = 1  # Time constant for eligibility trace
 
     def init_features(self) -> Eligibility:
         return Eligibility(
