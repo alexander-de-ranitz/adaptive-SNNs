@@ -13,7 +13,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 class AgentState(eqx.Module):
     noisy_network: NoisyNetworkState
-    reward: Array
+    predicted_reward: Array
 
 
 class Agent(eqx.Module):
@@ -38,22 +38,22 @@ class Agent(eqx.Module):
     def drift(self, t, x: AgentState, args):
         """Compute deterministic time derivatives for LearningModel state.
 
-        The state consists of (network_state, reward_state). The args dict
+        The state consists of (network_state, predicted_reward). The args dict
         must contain the reward received from the environment.
 
         Args:
             t: time
-            x: (network_state, reward_state)
+            x: (network_state, predicted_reward)
             args: dict containing keys:
                 - reward -> scalar
         Returns:
-            (d_network_state, d_reward_state)
+            (d_network_state, d_predicted_reward)
         """
 
-        (network_state, reward_state) = x.noisy_network, x.reward
+        (network_state, predicted_reward) = x.noisy_network, x.predicted_reward
 
         reward = args.get("reward", 0.0)
-        RPE = jnp.asarray(reward - reward_state)
+        RPE = jnp.asarray(reward - predicted_reward)
 
         # Add to args for use in models
         args.update(
@@ -64,13 +64,13 @@ class Agent(eqx.Module):
         )
 
         neuron_drift = self.noisy_network.drift(t, network_state, args)
-        reward_drift = self.reward_model.drift(t, reward_state, args)
+        reward_drift = self.reward_model.drift(t, predicted_reward, args)
         return AgentState(neuron_drift, reward_drift)
 
     def diffusion(self, t, x: AgentState, args):
-        (neuron_state, reward_state) = x.noisy_network, x.reward
+        (neuron_state, predicted_reward) = x.noisy_network, x.predicted_reward
         neuron_diffusion = self.noisy_network.diffusion(t, neuron_state, args)
-        reward_diffusion = self.reward_model.diffusion(t, reward_state, args)
+        reward_diffusion = self.reward_model.diffusion(t, predicted_reward, args)
         return MixedPyTreeOperator(AgentState(neuron_diffusion, reward_diffusion))
 
     @property
@@ -89,6 +89,6 @@ class Agent(eqx.Module):
         )
 
     def update(self, t, x: AgentState, args):
-        (network_state, reward_state) = x.noisy_network, x.reward
+        (network_state, predicted_reward) = x.noisy_network, x.predicted_reward
         new_network_state = self.noisy_network.update(t, network_state, args)
-        return AgentState(new_network_state, reward_state)
+        return AgentState(new_network_state, predicted_reward)
