@@ -17,9 +17,11 @@ class SpikeRateEnvironment(EnvironmentABC):
     """
 
     dim: int = 1  # Dimension of the environment process
+    rate: float = 1
 
-    def __init__(self, dim: int = 1):
+    def __init__(self, dim: int = 1, rate: float = 1):
         self.dim = dim
+        self.rate = rate
 
     @property
     def initial(self):
@@ -32,7 +34,7 @@ class SpikeRateEnvironment(EnvironmentABC):
         return None
 
     def drift(self, t, x, args):
-        return -x  # Exponential decay of spike rate
+        return -self.rate * x  # Exponential decay of spike rate
 
     def diffusion(self, t, x, args):
         return DefaultIfNone(
