@@ -80,12 +80,10 @@ class AgentEnvSystem(eqx.Module):
         env_diffusion = self.environment.diffusion(t, env_state, args)
 
         # Reward is not subject to noise
-        reward_diffusion = (
-            DefaultIfNone(
-                default=jnp.zeros_like(x.reward_signal),
-                else_do=ElementWiseMul(
-                    jnp.zeros_like(x.reward_signal, dtype=default_float)
-                ),
+        reward_diffusion = DefaultIfNone(
+            default=jnp.zeros_like(x.reward_signal),
+            else_do=ElementWiseMul(
+                jnp.zeros_like(x.reward_signal, dtype=default_float)
             ),
         )
         return MixedPyTreeOperator(
@@ -95,9 +93,9 @@ class AgentEnvSystem(eqx.Module):
     @property
     def noise_shape(self):
         return SystemState(
-            self.agent.noise_shape,
-            self.environment.noise_shape,
-            jax.ShapeDtypeStruct(shape=(), dtype=default_float),
+            agent_state=self.agent.noise_shape,
+            environment_state=self.environment.noise_shape,
+            reward_signal=None,
         )
 
     def terms(self, key):
