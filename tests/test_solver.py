@@ -1,8 +1,5 @@
-import jax
-
-jax.config.update("jax_enable_x64", True)
-
 import diffrax as dfx
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 from helpers import (
@@ -18,6 +15,7 @@ from adaptive_SNN.solver import simulate_noisy_SNN
 
 
 def test_solver_timesteps():
+    jax.config.update("jax_enable_x64", True)
     N_neurons = 4
     N_inputs = 0
     t0, t1, dt0 = 0.0, 1.05, 0.1
@@ -72,6 +70,7 @@ def test_solver_timesteps():
 
 
 def test_solver_timesteps_precision():
+    jax.config.update("jax_enable_x64", True)
     N_neurons = 1
     N_inputs = 0
     t0, t1, dt0 = 10**4, 10**4 + 1e-4, 1e-4
@@ -112,6 +111,7 @@ def test_solver_output():
     """Tests that our custom solver function produces the same output as a direct diffrax call.
     Note that this only works when our model does not spike, this is not implemented in the diffrax solver."""
 
+    jax.config.update("jax_enable_x64", True)
     N_neurons = 3
     N_inputs = 0
     t0, t1, dt0 = 0.0, 0.01, 1e-4
