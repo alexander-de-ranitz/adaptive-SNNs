@@ -53,12 +53,13 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
             noise_std != 0.0, noise_conductance / noise_std, 0.0
         )
 
+        # Map the relative noise strength to each excitatory synapse
+        noise_per_synapse = jnp.outer(relative_noise_strength, self.excitatory_mask)
+
         synaptic_traces = state.G
         d_eligibility = (
             -state.features.eligibility / self.tau_eligibility
-            + relative_noise_strength[:, None]
-            * synaptic_traces
-            / self.synaptic_increment
+            + noise_per_synapse * synaptic_traces / self.synaptic_increment
         )
         return Eligibility(eligibility=d_eligibility)
 
