@@ -1,6 +1,11 @@
 import time
 
 import diffrax as dfx
+import jax
+
+jax.config.update(
+    "jax_enable_x64", True
+)  # Enable 64-bit precision for better numerical stability
 import jax.random as jr
 from diffrax import SaveAt
 from jax import numpy as jnp
@@ -24,6 +29,7 @@ def main():
     rates = jnp.array([exc_rate, inh_rate])  # firing rate in Hz
 
     min_noise_std = 5e-9
+    noise_level = 0.1
     N_neurons = 1
     N_inputs = 2
 
@@ -52,19 +58,29 @@ def main():
     solver = dfx.EulerHeun()
     init_state = model.initial
 
-    args = {
-        "get_input_spikes": lambda t, x, args: jr.poisson(
-            jr.fold_in(key, jnp.int32(jnp.round(t / dt0))),
+    def get_spikes(t, x, args):
+        return jr.poisson(
+            jr.fold_in(key, jnp.rint(t / dt0)),
             rates * dt0,
             shape=(N_neurons, N_inputs),
-        ),
-        "get_desired_balance": lambda t, x, args: jnp.array([1.5]),
-        "noise_scale_hyperparam": 0.0,
+        )
+
+    args = {
+        "get_input_spikes": get_spikes,
+        "get_desired_balance": lambda t, x, args: jnp.array([1.75]),
+        "noise_scale_hyperparam": noise_level,
     }
 
     def save_fn(t, state, args):
         return save_part_of_state(
-            state, V=True, G=True, W=True, S=True, noise_state=True
+            state,
+            V=True,
+            G=True,
+            W=True,
+            S=True,
+            noise_state=True,
+            mean_E_conductance=True,
+            var_E_conductance=True,
         )
 
     start = time.time()
@@ -80,20 +96,6 @@ def main():
     )
     end = time.time()
     print(f"Simulation completed in {end - start:.2f} seconds")
-
-    start = time.time()
-    sol = simulate_noisy_SNN(
-        model,
-        solver,
-        t0,
-        t1,
-        dt0,
-        init_state,
-        save_at=SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
-        args=args,
-    )
-    end = time.time()
-    print(f"Second simulation completed in {end - start:.2f} seconds")
 
     plot_simulate_SNN_results(sol, model, split_noise=True)
 
