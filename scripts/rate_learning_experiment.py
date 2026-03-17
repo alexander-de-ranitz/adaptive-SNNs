@@ -1,190 +1,95 @@
 import time
 
-import diffrax as dfx
-import equinox as eqx
+import jax
+
+jax.config.update(
+    "jax_enable_x64", True
+)  # Enable 64-bit precision for better numerical stability
+
 import jax.random as jr
 from diffrax import SaveAt
+from helpers import SimulationConfig, run_simulation
 from jax import numpy as jnp
-from matplotlib import pyplot as plt
 
-from adaptive_SNN.models import (
-    OUP,
-    Agent,
-    AgentEnvSystem,
-    NoisyNetwork,
-    SystemState,
-)
-from adaptive_SNN.models.environments import SpikeRateEnvironment
-from adaptive_SNN.models.networks.eligibility_LIF import EligibilityLIFNetwork
-from adaptive_SNN.models.reward import RewardModel
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
 from adaptive_SNN.utils.save_helper import save_part_of_state
+from adaptive_SNN.visualization import (
+    plot_learning_detailed,
+)
 
 
 def main():
+    start = time.time()
     t0 = 0
-    t1 = 100
+    t1 = 30
     dt = 1e-4
-
-    N_neurons = 1
-    N_inputs = 2
-
-    # Define input parameters
-    exc_rate = 5000
-    exc_to_inh_ratio = 4.0
-    inh_rate = exc_rate / exc_to_inh_ratio
-    rates = jnp.array([exc_rate, inh_rate])  # firing rate in Hz
-
-    target_state = 10.0  # Target output state
-
-    iterations = 1
-    noise_level = 0.15
     lr = 0.5
-    initial_weight_factors = jnp.array([0.5, 1.0])
+    noise_level = 0.1
+    N_neurons = 1
+    N_inputs = 500
+    model_cls = GatedLIFNetwork  # Change to GatedLIFNetwork to test the gated model
+    network_output_fn = lambda t, agent_state, args: jnp.squeeze(
+        agent_state.noisy_network.network_state.S[0]
+    )
 
-    network_key = jr.PRNGKey(0)
+    spike_key = jr.PRNGKey(101)
+    input_spike_fn = lambda t, x, args: jr.poisson(
+        jr.fold_in(spike_key, jnp.rint(t / dt)),
+        10 * dt,
+        shape=(N_neurons, N_inputs),
+    )
 
-    # Set up models
-    neuron_model = EligibilityLIFNetwork(
+    target_state = 10
+    reward_fn = lambda t, x, args: jnp.squeeze(
+        -jnp.square(x.environment_state - target_state)
+    )
+    cfg = SimulationConfig(
+        model=model_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
+        fraction_excitatory_input=0.8,
+        balance=1.75,
+        input_types=None,
+        t0=t0,
+        t1=t1,
         dt=dt,
-        fully_connected_input=True,
-        input_weight=5.0,
-        input_types=jnp.array([1, 0]),
-        key=network_key,
-    )
-
-    noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
-
-    network = NoisyNetwork(
-        neuron_model=neuron_model,
-        noise_model=noise_model,
-        min_noise_std=5e-9,
-    )
-
-    agent = Agent(
-        neuron_model=network,
-        reward_model=RewardModel(reward_rate=10),
-    )
-
-    model = AgentEnvSystem(
-        agent=agent,
-        environment=SpikeRateEnvironment(
-            dim=1,
+        initial_weight=1,
+        weight_std=0.2,
+        lr=lr,
+        noise_level=noise_level,
+        min_noise_std=1e-10,
+        warmup_time=20,
+        reward_rate=0.1,
+        key_seed=0,
+        save_at=SaveAt(
+            ts=jnp.linspace(20, t1, 5000),
+            fn=lambda t, x, args: save_part_of_state(
+                x,
+                environment_state=True,
+                W=True,
+                G=True,
+                reward_signal=True,
+                predicted_reward=True,
+                eligibility=True,
+                V=True,
+                noise_state=True,
+                S=True,
+                mean_E_conductance=True,
+                var_E_conductance=True,
+            ),
         ),
+        save_file=f"results/rate_learning_experiment/simulation_results_{'gated' if model_cls == GatedLIFNetwork else 'eligibility'}_lr{lr:.2f}_nl{noise_level:.2f}.npz",
+        network_output_fn=network_output_fn,
+        input_spike_fn=input_spike_fn,
+        reward_fn=reward_fn,
+        save_results=True,
     )
-    solver = dfx.EulerHeun()
-    init_state = model.initial
 
-    def get_weights(state: SystemState):
-        return state.agent_state.noisy_network.network_state.W
-
-    data = {}
-    key = jr.PRNGKey(1)
-    for i in range(iterations):
-        for j in range(len(initial_weight_factors)):
-            key, spike_key, simulation_key = jr.split(key, 3)
-
-            args = {
-                "get_learning_rate": lambda t, x, args: jnp.where(t < 5, 0.0, lr),
-                "network_output_fn": lambda t, agent_state, args: jnp.squeeze(
-                    agent_state.noisy_network.network_state.S[0]
-                ),
-                "reward_fn": lambda t, environment_state, args: -jnp.abs(
-                    environment_state[0] - target_state
-                ),
-                "get_input_spikes": lambda t, x, args: jr.poisson(
-                    jr.fold_in(spike_key, jnp.round(t / dt).astype(int)),
-                    rates * dt,
-                    shape=(N_neurons, N_inputs),
-                ),
-                "get_desired_balance": lambda t, x, args: jnp.where(
-                    t < 1.0, jnp.array([2.0]), jnp.array([0.0])
-                ),
-                "noise_scale_hyperparam": noise_level,
-            }
-
-            init = eqx.tree_at(
-                get_weights,
-                init_state,
-                get_weights(init_state) * initial_weight_factors[j],
-            )
-
-            start = time.time()
-
-            def save_fn(t, y: SystemState, args):
-                return save_part_of_state(y, W=True, environment_state=True)
-
-            sol = simulate_noisy_SNN(
-                model,
-                solver,
-                t0,
-                t1,
-                dt,
-                init,
-                save_at=SaveAt(fn=save_fn, ts=jnp.linspace(t0, t1, 500)),
-                args=args,
-                key=simulation_key,
-            )
-
-            end = time.time()
-            print(
-                f"Simulation {i * len(initial_weight_factors) + j + 1}/{iterations * len(initial_weight_factors)} completed in {end - start:.2f} seconds.",
-                end="\r",
-            )
-
-            E_weights = get_weights(sol.ys)[:, :, 1]
-            if j not in data:
-                data[j] = (E_weights, sol.ys.environment_state)
-            else:
-                data[j] = (
-                    jnp.hstack((data[j][0], E_weights)),
-                    jnp.hstack((data[j][1], sol.ys.environment_state)),
-                )
-
-    ts = sol.ts
-    for j in range(len(initial_weight_factors)):
-        plt.subplot(2, 1, 1)
-        plt.plot(ts, data[j][0], c="k", alpha=0.1)
-        plt.subplot(2, 1, 2)
-        plt.plot(ts, data[j][1], c="k", alpha=0.1)
-
-        plt.subplot(2, 1, 1)
-        mean_weights = jnp.mean(data[j][0], axis=1).squeeze()
-        std_weights = jnp.std(data[j][0], axis=1).squeeze()
-        plt.plot(ts, mean_weights, label=f"Init factor {initial_weight_factors[j]}")
-        plt.fill_between(
-            ts,
-            mean_weights - std_weights,
-            mean_weights + std_weights,
-            alpha=0.3,
-        )
-
-        plt.subplot(2, 1, 2)
-        mean_env = jnp.mean(data[j][1], axis=1).squeeze()
-        std_env = jnp.std(data[j][1], axis=1).squeeze()
-
-        plt.plot(ts, mean_env, label=f"Init factor {initial_weight_factors[j]}")
-        plt.fill_between(
-            ts,
-            mean_env - std_env,
-            mean_env + std_env,
-            alpha=0.3,
-        )
-
-    plt.subplot(2, 1, 1)
-    plt.title("Synaptic weight evolution")
-    plt.xlabel("Time step")
-    plt.ylabel("Synaptic weight")
-    plt.legend()
-
-    plt.subplot(2, 1, 2)
-    plt.title("Environment state evolution")
-    plt.xlabel("Time step")
-    plt.ylabel("Environment state")
-    plt.legend()
-    plt.show()
+    sol, model = run_simulation(cfg)
+    end = time.time()
+    print(f"Simulation completed in {end - start:.2f} seconds")
+    # plot_learning_results(sol)
+    plot_learning_detailed(sol, model)
 
 
 if __name__ == "__main__":

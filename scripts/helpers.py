@@ -13,9 +13,7 @@ from adaptive_SNN.models import (
     OUP,
     Agent,
     AgentEnvSystem,
-    LIFNetwork,
     NoisyNetwork,
-    NoisyNetworkState,
 )
 from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.environments.base import EnvironmentABC
@@ -25,7 +23,7 @@ from adaptive_SNN.solver import simulate_noisy_SNN
 
 
 @dataclass
-class RateLearningSimulationConfig:
+class SimulationConfig:
     model: NeuronModelABC
 
     # Time parameters
@@ -36,17 +34,23 @@ class RateLearningSimulationConfig:
     save_at: SaveAt = dfx.SaveAt()
 
     # Model hyperparameters
-    N_neurons = 1
-    N_inputs = 2
+    N_neurons: int = 1
+    N_inputs: int = 2
+    connection_prob: float = 0.1
     noise_level: float = 0.1
     lr: float = 1e-3
     initial_weight: float = 5.0
     balance: float = 1.75
     min_noise_std: float = 5e-9
+    fraction_excitatory_recurrent: float = 0.8
+    fraction_excitatory_input: float = 0.8
+    initial_weight_matrix: jnp.ndarray | None = (
+        None  # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
+    )
 
     # Reward model
     reward_rate: float = 0.1
-    reward_fn: str = "MSE"
+    reward_fn: callable = None
 
     # Environment parameters
     environment_model: EnvironmentABC = SpikeRateEnvironment
@@ -54,9 +58,9 @@ class RateLearningSimulationConfig:
     environment_kwargs: dict = eqx.field(default_factory=lambda: {})
 
     # Input parameters
-    exc_rate: float = 5000.0
-    inh_rate: float = 1250
-    input_types = jnp.array([1, 0])  # 1 for excitatory, 0 for inhibitory
+    input_spike_fn: callable = None
+    input_types: jnp.ndarray | None = None  # 1 for excitatory, 0 for inhibitory
+
     weight_std: float = 0.0
     fully_connected_input: bool = True
 
@@ -65,7 +69,7 @@ class RateLearningSimulationConfig:
     save_file: str = "results/rate_learning"
     save_results: bool = True
     network_output_fn: callable = (
-        None  # Optional function to extract network output for reward calculation
+        None  # Function to extract network output for reward calculation
     )
 
     def print_to_file(self):
@@ -74,10 +78,10 @@ class RateLearningSimulationConfig:
             for field in fields(self):
                 if field.name == "save_at":
                     continue  # skip printing save_at details for brevity
-                if field.name == "network_output_fn":
-                    f.write("Network output function:\n")
-                    if self.network_output_fn is not None:
-                        f.write(inspect.getsource(self.network_output_fn) + "\n")
+                if field.name in ["network_output_fn", "input_spike_fn", "reward_fn"]:
+                    f.write(f"{field.name}:\n")
+                    if getattr(self, field.name) is not None:
+                        f.write(inspect.getsource(getattr(self, field.name)) + "\n")
                     else:
                         f.write("None\n")
                     continue
@@ -92,11 +96,13 @@ class RateLearningSimulationConfig:
                     f.write(f"  {field.name}: <unavailable>\n")
 
 
-def run_rate_learning_simulation(config: RateLearningSimulationConfig):
+def run_simulation(config: SimulationConfig):
     if os.path.exists(config.save_file + ".npz") and config.save_results:
         print(f"File {config.save_file}.npz already exists. Not running simulation.")
-        return
+        sol = np.load(config.save_file + ".npz", allow_pickle=True)["sol"].item()
+        return sol, None
 
+    os.makedirs(os.path.dirname(config.save_file), exist_ok=True)
     if config.save_results:
         config.print_to_file()
 
@@ -107,10 +113,14 @@ def run_rate_learning_simulation(config: RateLearningSimulationConfig):
     neuron_model = config.model(
         N_neurons=config.N_neurons,
         N_inputs=config.N_inputs,
+        connection_prob=config.connection_prob,
         dt=config.dt,
+        initial_weight_matrix=config.initial_weight_matrix,
         fully_connected_input=config.fully_connected_input,
         input_weight=config.initial_weight,
         input_types=config.input_types,
+        fraction_excitatory_input=config.fraction_excitatory_input,
+        fraction_excitatory_recurrent=config.fraction_excitatory_recurrent,
         weight_std=config.weight_std,
         key=network_key,
     )
@@ -134,27 +144,13 @@ def run_rate_learning_simulation(config: RateLearningSimulationConfig):
     solver = dfx.EulerHeun()
     init_state = model.initial
 
-    rates = jnp.array([config.exc_rate, config.inh_rate])  # firing rate in Hz
-    if config.reward_fn == "MSE":
-        reward_fn = lambda t, x, args: jnp.squeeze(
-            -jnp.square(x.environment_state - config.target_state)
-        )
-    else:
-        raise ValueError(f"Unsupported reward function: {config.reward_fn}")
-
     args = {
         "get_learning_rate": lambda t, x, args: jnp.where(
             t < config.warmup_time, 0.0, config.lr
         ),
-        "network_output_fn": lambda t, agent_state, args: jnp.squeeze(
-            agent_state.noisy_network.network_state.S[0]
-        ),
-        "reward_fn": reward_fn,
-        "get_input_spikes": lambda t, x, args: jr.poisson(
-            jr.fold_in(spike_key, jnp.rint(t / config.dt)),
-            rates * config.dt,
-            shape=(config.N_neurons, config.N_inputs),
-        ),
+        "network_output_fn": config.network_output_fn,
+        "reward_fn": config.reward_fn,
+        "get_input_spikes": config.input_spike_fn,
         "get_desired_balance": lambda t, x, args: jnp.array([config.balance]),
         "noise_scale_hyperparam": config.noise_level,
     }
@@ -171,8 +167,6 @@ def run_rate_learning_simulation(config: RateLearningSimulationConfig):
         key=simulation_key,
     )
 
-    os.makedirs(os.path.dirname(config.save_file), exist_ok=True)
-
     if config.save_results:
         np.savez(
             config.save_file,
@@ -180,79 +174,3 @@ def run_rate_learning_simulation(config: RateLearningSimulationConfig):
         )
 
     return sol, model
-
-
-def run_noisy_network_simulation(
-    t0: float,
-    t1: float,
-    dt: float,
-    save_at: dfx.SaveAt,
-    output_file: str,
-    balance: float,
-    noise_level: float,
-    key_seed: int,
-    initial_weight: float,
-):
-    key = jr.fold_in(jr.PRNGKey(0), key_seed)
-
-    N_neurons = 1
-    N_inputs = 2
-
-    # Define input parameters
-    exc_rate = 5000
-    exc_to_inh_ratio = 4.0
-    inh_rate = exc_rate / exc_to_inh_ratio
-    rates = jnp.array([exc_rate, inh_rate])  # firing rate in Hz
-
-    network_key = jr.PRNGKey(0)  # Doesn't actually matter since weights fixed
-
-    # Set up models
-    neuron_model = LIFNetwork(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        dt=dt,
-        fully_connected_input=True,
-        input_weight=initial_weight,
-        input_types=jnp.array([1, 0]),
-        weight_std=0.0,
-        key=network_key,
-    )
-
-    noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
-
-    model = NoisyNetwork(
-        neuron_model=neuron_model,
-        noise_model=noise_model,
-        min_noise_std=5e-9,
-    )
-
-    solver = dfx.EulerHeun()
-    init_state = model.initial
-
-    key, spike_key, simulation_key = jr.split(key, 3)
-
-    args = {
-        "get_input_spikes": lambda t, x, args: jr.poisson(
-            jr.fold_in(spike_key, jnp.round(t / dt).astype(int)),
-            rates * dt,
-            shape=(N_neurons, N_inputs),
-        ),
-        "get_desired_balance": lambda t, x, args: jnp.array([balance]),
-        "noise_scale_hyperparam": noise_level,
-    }
-
-    sol = simulate_noisy_SNN(
-        model,
-        solver,
-        t0,
-        t1,
-        dt,
-        init_state,
-        save_at=save_at,
-        args=args,
-        key=simulation_key,
-    )
-
-    state: NoisyNetworkState = sol.ys
-
-    np.savez(output_file, times=sol.ts, sol=state)
