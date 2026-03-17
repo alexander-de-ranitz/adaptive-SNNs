@@ -9,6 +9,7 @@ from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 class GatedLIFNetwork(AbstractLIFNetwork):
     tau_eligibility: float = 1.0  # Time constant for eligibility trace
+    delta_V: float = 0.002  # Steepness of the gating function
 
     def init_features(self) -> Eligibility:
         return Eligibility(
@@ -56,27 +57,28 @@ class GatedLIFNetwork(AbstractLIFNetwork):
 
     def gating_function(self, voltage: Array) -> Array:
         """Gating function based on membrane voltage."""
-        alpha = 5.0
-        mu = 0.5
-
-        # Normalize voltage: 0 = resting potential, 1 = firing threshold
-        normalised_voltage = (voltage - self.resting_potential) / (
+        default_area = 1.0 * (
             self.firing_threshold - self.resting_potential
+        )  # Area under the default gating function (which is constant at 1)
+        driving_force = self.reversal_potential_E - voltage
+
+        integral = lambda V: (self.reversal_potential_E + self.delta_V - V) * -jnp.exp(
+            (V - self.firing_threshold) / self.delta_V
         )
+        area = integral(self.resting_potential) - integral(self.firing_threshold)
+        gating = (
+            driving_force
+            / self.delta_V
+            * jnp.exp((voltage - self.firing_threshold) / self.delta_V)
+        )
+        normalization_factor = area / default_area
 
-        # Compute normalization factor (integral from 0 to 1)
-        # Integral of sigmoid = (1/alpha) * softplus(alpha * (x - mu))
-        normalization_factor = (
-            jax.nn.softplus(alpha * (1.0 - mu)) - jax.nn.softplus(alpha * (0.0 - mu))
-        ) / alpha
-
-        # Return normalized sigmoid
-        return jax.nn.sigmoid(alpha * (normalised_voltage - mu)) / normalization_factor
+        return gating / normalization_factor
 
     def compute_weight_updates(self, t, state: ElibilityState, args):
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        RPE = args.get("RPE", jnp.array(0.0))
+        RPE = jnp.sum(jnp.asarray(args.get("RPE", 0.0)))
 
         dW = learning_rate * RPE * state.features.eligibility
 
@@ -84,3 +86,35 @@ class GatedLIFNetwork(AbstractLIFNetwork):
             state.W == -jnp.inf, 0.0, dW
         )  # No weight change for non-existing connections
         return dW
+
+
+def plot_gating_function():
+    import matplotlib.pyplot as plt
+
+    network = GatedLIFNetwork(N_neurons=1, dt=1e-4, N_inputs=0)
+    voltages = jnp.linspace(-75 * 1e-3, -50 * 1e-3, 100)  # From -80 mV to +20 mV
+    gating_values = network.gating_function(voltages)
+    plt.figure(figsize=(3.5, 2))
+    plt.hlines(
+        1.0,
+        -77 * 1e-3,
+        -48 * 1e-3,
+        colors="k",
+        linestyles="--",
+        label="Constant gating function",
+    )
+    plt.plot(voltages, gating_values, c="k", label="Voltage-dependent gating function")
+    plt.xlabel("Membrane Voltage (mV)")
+    plt.xlim(voltages[0], voltages[-1])
+    plt.xticks(
+        jnp.arange(-75, -50 + 1, 5) * 1e-3, labels=[-75, -70, -65, -60, -55, -50]
+    )
+    plt.ylabel("Gating Function Value")
+    plt.legend(loc="upper left")
+    plt.grid(alpha=0.3)
+    plt.savefig("../figures/gating_function.pdf")
+    plt.show()
+
+
+if __name__ == "__main__":
+    plot_gating_function()
