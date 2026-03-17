@@ -105,3 +105,6 @@ wrapt==2.0.1
 xprof==2.21.1
 yarl==1.22.0
 zipp==3.23.0
+optuna>=4.0.0
+psycopg2-binary>=2.9.0
+pandas>=2.0.0
