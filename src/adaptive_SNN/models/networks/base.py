@@ -102,6 +102,9 @@ class AbstractLIFNetwork(NeuronModelABC):
         float  # Standard deviation of initial weights as fraction of mean weight
     )
     rec_weight: float  # Mean recurrent weight
+    initial_weight_matrix: (
+        Array | None
+    )  # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
     fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
     N_neurons: int
     N_inputs: int
@@ -118,9 +121,11 @@ class AbstractLIFNetwork(NeuronModelABC):
         dt,
         N_neurons: int,
         N_inputs: int = 0,
+        connection_prob: float = 0.1,
         fully_connected_input: bool = True,
         input_weight: float = 1.0,
         rec_weight: float = 1.0,
+        initial_weight_matrix: Array | None = None,
         fraction_excitatory_recurrent: float = 0.8,
         fraction_excitatory_input: float = 1.0,
         weight_std: float = 0.2,
@@ -132,9 +137,11 @@ class AbstractLIFNetwork(NeuronModelABC):
         Args:
             N_neurons: Number of neurons in the network
             N_inputs: Number of input neurons
+            connection_prob: Probability of connection between any two neurons (for recurrent connections)
             fully_connected_input: If True, all input neurons connect to all neurons with weight input_weight
             input_weight: Mean weight of input synapses
             rec_weight: Mean weight of recurrent synapses
+            initial_weight_matrix: Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs). If None, weights are initialized randomly based on input_weight, rec_weight, connection_prob, and weight_std.
             fraction_excitatory_recurrent: Fraction of excitatory recurrent neurons
             fraction_excitatory_input: Fraction of excitatory input neurons
             weight_std: Standard deviation of initial weights as fraction of mean weight
@@ -143,6 +150,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         """
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
+        self.connection_prob = connection_prob
         self.fully_connected_input = fully_connected_input
         self.input_weight = input_weight
         self.rec_weight = rec_weight
@@ -150,6 +158,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         self.fraction_excitatory_input = fraction_excitatory_input
         self.dt = dt
         self.weight_std = weight_std
+        self.initial_weight_matrix = initial_weight_matrix
 
         key, subkey = jr.split(key)
 
@@ -222,7 +231,17 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         # Initialize weights
         key, subkey = jr.split(key)
-        weights = self.initialize_weights(subkey)
+        if self.initial_weight_matrix is not None:
+            if self.initial_weight_matrix.shape != (
+                self.N_neurons,
+                self.N_neurons + self.N_inputs,
+            ):
+                raise ValueError(
+                    f"initial_weight_matrix must have shape ({self.N_neurons}, {self.N_neurons + self.N_inputs}), but has shape {self.initial_weight_matrix.shape}"
+                )
+            weights = self.initial_weight_matrix
+        else:
+            weights = self.initialize_weights(subkey)
 
         # Initialize other state variables to zeros
         V_init = (
@@ -720,8 +739,18 @@ class AbstractLIFNetwork(NeuronModelABC):
         rec_weights = jnp.fill_diagonal(rec_weights, 0.0, inplace=False)
 
         key, subkey = jr.split(key)
-        N_input_connections = int(self.N_neurons * self.N_inputs * self.connection_prob)
-        input_weights = jr.permutation(
+        N_input_connections = (
+            int(self.N_neurons * self.N_inputs * self.connection_prob)
+            if not self.fully_connected_input
+            else self.N_neurons * self.N_inputs
+        )
+        input_weights = jnp.clip(
+            1
+            + self.weight_std
+            * jr.normal(subkey, (self.N_neurons, self.N_inputs), dtype=default_float),
+            min=0.5,
+            max=1.5,
+        ) * jr.permutation(
             subkey,
             jnp.concatenate(
                 [
@@ -737,9 +766,4 @@ class AbstractLIFNetwork(NeuronModelABC):
             weights == 0.0, -jnp.inf, weights
         )  # Non existing connections have weight -inf
 
-        # If fully_connected_input is True, set all input weights to input_weight
-        if self.fully_connected_input and (self.N_inputs > 0):
-            weights = weights.at[:, self.N_neurons :].set(
-                jnp.ones(shape=(self.N_neurons, self.N_inputs)) * self.input_weight
-            )
         return weights
