@@ -1,4 +1,10 @@
 import diffrax as dfx
+import jax
+
+jax.config.update(
+    "jax_enable_x64", True
+)  # Enable 64-bit precision for better numerical stability
+
 import jax.random as jr
 from jax import numpy as jnp
 
@@ -10,6 +16,7 @@ from adaptive_SNN.models import (
     NoisyNetwork,
     RewardModel,
 )
+from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import DoubleIntegratorKickControl
 from adaptive_SNN.solver import simulate_noisy_SNN
 from adaptive_SNN.utils.coding import poisson_rate_code
@@ -25,7 +32,7 @@ def main():
 
     N_neurons = 100
     N_background = 100
-    N_encoding = 50
+    N_encoding = 100
     N_inputs = N_background + N_encoding
 
     # Define input parameters
@@ -34,7 +41,7 @@ def main():
     input_weight = 4.0
     rec_weight = 4.0
 
-    balance = 2.5
+    balance = 1.75
 
     # Set up models
     neuron_model = LIFNetwork(
@@ -56,7 +63,7 @@ def main():
         noise_model=noise_model,
     )
 
-    agent = Agent(neuron_model=noisy_model, reward_model=RewardModel(reward_rate=100))
+    agent = Agent(neuron_model=noisy_model, reward_model=RewardModel(reward_rate=0.1))
     model = AgentEnvSystem(
         agent=agent,
         environment=DoubleIntegratorKickControl(),
@@ -64,16 +71,18 @@ def main():
     solver = dfx.EulerHeun()
     init_state = model.initial
 
+    key, background_spikes_key, encoding_spikes_key = jr.split(key, 3)
+
     def get_input_spikes(t, x, args):
         background_spikes = jr.bernoulli(
-            jr.PRNGKey(jnp.round(t / dt).astype(int)),
+            jr.fold_in(background_spikes_key, jnp.round(t / dt).astype(int)),
             input_firing_rate * dt,
             shape=(N_neurons, N_background),
         )
-        encoding_spikes = 0 * poisson_rate_code(
+        encoding_spikes = poisson_rate_code(
             rate=jnp.clip(args["env_state"].at[0].get() + 10.0, min=0.0, max=40.0),
             dt=dt,
-            key=jr.PRNGKey(123456 + jnp.round(t / dt).astype(int)),
+            key=jr.fold_in(encoding_spikes_key, jnp.round(t / dt).astype(int)),
             encoding_shape=(N_neurons, N_encoding),
         )
         spikes = jnp.hstack((background_spikes, encoding_spikes))
@@ -88,14 +97,16 @@ def main():
             agent_state.noisy_network.network_state.S[:10]
         )
         - jnp.sum(agent_state.noisy_network.network_state.S[10:20]),
-        "reward_fn": lambda t, environment_state, args: -jnp.sum(
-            environment_state.at[0].get() ** 2
+        "reward_fn": lambda t, state, args: -jnp.sum(
+            state.environment_state.at[0].get() ** 2
         ),
         "get_learning_rate": lambda t, x, args: jnp.where(t < 0.5, 0.0, 0.0),
     }
 
-    def save_fn(t, y, args):
-        state = save_part_of_state(y, S=True, environment_state=True, reward=True)
+    def save_fn(t, y: SystemState, args):
+        state = save_part_of_state(
+            y, S=True, environment_state=True, reward_signal=True, predicted_reward=True
+        )
         return state
 
     print("Running simulation...")
@@ -106,7 +117,7 @@ def main():
         t1,
         dt,
         init_state,
-        save_at=dfx.SaveAt(t0=True, t1=True, steps=True, fn=save_fn),
+        save_at=dfx.SaveAt(steps=True, fn=save_fn),
         args=args,
     )
 
