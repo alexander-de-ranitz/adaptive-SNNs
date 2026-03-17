@@ -33,6 +33,8 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export JAX_ENABLE_X64=1 # Enable 64-bit precision in JAX, which is important for numerical stability in our simulations
+
 
 echo "Running setup tests simulations..."
 python "$REPO_DIR/scripts/snellius/setup_tests/launch.py" \
@@ -40,6 +42,6 @@ python "$REPO_DIR/scripts/snellius/setup_tests/launch.py" \
 
 echo "Simulations completed, copying results back to home directory..."
 # Copy results back to home directory
-DEST_DIR="$REPO_DIR/results/setup_tests_fixed_I_weight_$(date +%Y%m%d_%H%M%S)"
+DEST_DIR="$REPO_DIR/results/setup_tests_square_error_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$DEST_DIR"
 cp -r "$TMPDIR/output_dir/." "$DEST_DIR/"

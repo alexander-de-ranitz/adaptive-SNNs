@@ -6,7 +6,7 @@ from jax import numpy as jnp
 
 from adaptive_SNN.models import LIFNetwork
 from adaptive_SNN.utils.save_helper import save_part_of_state
-from scripts.helpers import run_rate_learning_simulation_fixed_I_weight
+from scripts.helpers import SimulationConfig, run_simulation
 
 
 def main():
@@ -34,64 +34,33 @@ def main():
     )
 
     def save_fn(t, x, args):
-        return save_part_of_state(x, S=True, environment_state=True, reward=True)
+        return save_part_of_state(x, environment_state=True, reward_signal=True)
 
-    # run_rate_learning_simulation(
-    #     t0=0,
-    #     t1=200,
-    #     dt=1e-4,
-    #     save_at=SaveAt(steps=True, fn=save_fn),
-    #     output_file=args.output_file,
-    #     balance=args.balance,
-    #     noise_level=args.noise_level,
-    #     key_seed=args.key_seed,
-    #     initial_weight=args.initial_weight,
-    #     lr=0.0,
-    #     iterations=1,
-    # )
-
-    default_weight = 7.5
-    curr_balance = (
-        7.5
-        * jnp.abs(LIFNetwork.reversal_potential_I - LIFNetwork.resting_potential)
-        * LIFNetwork.tau_I
-    ) / (
-        default_weight
-        * jnp.abs(LIFNetwork.reversal_potential_E - LIFNetwork.resting_potential)
-        * LIFNetwork.tau_E
-        + 1e-12
-    )
-    adjust_ratio = args.balance / curr_balance
-    I_weight = adjust_ratio * default_weight
-
-    new_balance = (
-        I_weight
-        * jnp.abs(LIFNetwork.reversal_potential_I - LIFNetwork.resting_potential)
-        * LIFNetwork.tau_I
-        + 1e-12
-    ) / (
-        args.initial_weight
-        * jnp.abs(LIFNetwork.reversal_potential_E - LIFNetwork.resting_potential)
-        * LIFNetwork.tau_E
+    run_simulation(
+        SimulationConfig(
+            model=LIFNetwork,
+            t0=0,
+            t1=250,
+            dt=1e-4,
+            N_neurons=1,
+            N_inputs=500,
+            fraction_excitatory_input=0.8,
+            input_types=None,
+            rates=10.0,
+            warmup_time=50,
+            reward_rate=0.1,
+            save_at=SaveAt(ts=jnp.linspace(50, 250, 200), fn=save_fn),
+            save_file=args.output_file,
+            balance=args.balance,
+            noise_level=args.noise_level,
+            lr=0.0,
+            initial_weight=args.initial_weight,
+            weight_std=0.0,
+            key_seed=args.key_seed,
+            save_results=True,
+        ),
     )
 
-    print(
-        f"I weight = {I_weight:.4f}, E weight = {args.initial_weight:.4f}, new balance = {new_balance:.4f}, desired balance = {args.balance:.4f}"
-    )
-
-    run_rate_learning_simulation_fixed_I_weight(
-        t0=0,
-        t1=200,
-        dt=1e-4,
-        save_at=SaveAt(steps=True, fn=save_fn),
-        output_file=args.output_file,
-        noise_level=args.noise_level,
-        key_seed=args.key_seed,
-        initial_weight_E=args.initial_weight,
-        initial_weight_I=I_weight,
-        lr=0.0,
-        iterations=1,
-    )
     end = time.time()
     print(f"Simulation completed in {end - start:.2f} seconds")
 

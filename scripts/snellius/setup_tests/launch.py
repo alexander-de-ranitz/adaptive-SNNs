@@ -32,7 +32,7 @@ def create_jobs():
     log_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    initial_weights = np.linspace(0.0, 15.0, 16)
+    initial_weights = np.linspace(0.0, 13.0, 14)
     balances = [1.5, 1.75, 2.0, 2.25, 2.5]
     noise_levels = [0.1]
     base_key = 0

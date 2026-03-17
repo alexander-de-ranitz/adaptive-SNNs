@@ -63,23 +63,19 @@ def load_results(results_dir):
 
             # Load the data
             npz_data = np.load(file, allow_pickle=True)
-            times = npz_data["times"]
-            sol: SystemState = npz_data[
-                "sol"
-            ].item()  # .item() to get the dict from 0-d array
+            sol = npz_data["sol"].item()
+            times = sol.ts
 
+            state: SystemState = sol.ys
             # Extract data from the state structure
-            spike_data = sol.agent_state.noisy_network.network_state.S
-            reward_data = sol.agent_state.reward
-            environment_state = sol.environment_state
+            reward_data = state.reward_signal
+            environment_state = state.environment_state
 
-            # Calculate firing rate
-            firing_rate = calculate_firing_rate(spike_data, times)
+            # # Calculate firing rate
+            # firing_rate = calculate_firing_rate(spike_data, times)
 
             # Store results grouped by (balance, weight), including times for later processing
-            data[(balance, iw)].append(
-                (firing_rate, reward_data, environment_state, times)
-            )
+            data[(balance, iw)].append((reward_data, environment_state, times))
 
         except Exception as e:
             print(f"Error processing {file.name}: {e}")
@@ -112,29 +108,22 @@ def plot_curves(data, output_file=None):
 
     for (balance, iw), results in data.items():
         # Average over multiple runs (different noise levels)
-        firing_rates = []
         mean_rewards = []
         mean_env_states = []
 
-        for firing_rate, reward_data, environment_state, times in results:
+        for reward_data, environment_state, times in results:
             # Find index corresponding to t=5 seconds
-            cutoff_idx = np.searchsorted(times, 5.0)
+            cutoff_idx = np.searchsorted(times, 0.0)
 
-            # Firing rate is already calculated as a scalar
-            firing_rates.append(firing_rate)
-
-            # For reward and environment state, skip first 5 seconds and take mean
             if cutoff_idx < len(times) - 1:
                 mean_rewards.append(np.mean(reward_data[cutoff_idx:]))
                 mean_env_states.append(np.mean(environment_state[cutoff_idx:]))
             else:
-                # If simulation is too short, use all data
                 mean_rewards.append(np.mean(reward_data))
                 mean_env_states.append(np.mean(environment_state))
 
         # Average over runs
         data_by_balance[balance][iw] = (
-            np.mean(firing_rates),
             np.mean(mean_rewards),
             np.mean(mean_env_states),
         )
@@ -143,84 +132,45 @@ def plot_curves(data, output_file=None):
     all_balances = sorted(data_by_balance.keys())
     # I_weights = [compute_I_weight_for_balance(balance, 7.5) for balance in all_balances]
 
-    # Create figure with three subplots
     fig, axes = plt.subplots(1, 2, figsize=(18, 5))
 
     # Use a colormap for different balance levels
     cmap = plt.get_cmap("tab10")
     colors = [cmap(i) for i in range(len(all_balances))]
 
-    # Plot 1: Firing rate vs initial weight
+    # Plot 1: env state vs initial weight
     ax = axes[0]
     for balance_idx, balance in enumerate(all_balances):
-        weights_rates = sorted(data_by_balance[balance].items())
-        weights = [w for w, _ in weights_rates]
-        rates = [data[0] for _, data in weights_rates]
-
+        iws = sorted(data_by_balance[balance].keys())
+        env_state = [data_by_balance[balance][iw][1] for iw in iws]
         ax.plot(
-            weights,
-            rates,
-            "o-",
-            color=colors[balance_idx],
-            linewidth=2,
-            markersize=6,
+            iws,
+            env_state,
             label=f"Balance={balance:.2f}",
+            color=colors[balance_idx],
+            marker="o",
         )
-        # label=f'Initial Inh. weight={I_weights[balance_idx]:.0f}')
-
-    ax.set_xlabel("Exc. Weight", fontsize=12)
-    ax.set_ylabel("Firing Rate (Hz)", fontsize=12)
-    ax.set_title("Firing Rate vs Exc. Weight", fontsize=13, fontweight="bold")
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=10)
+    ax.set_xlabel("Initial Weight")
+    ax.set_ylabel("Mean Environment State")
+    ax.legend()
 
     # Plot 2: Mean reward vs initial weight
     ax = axes[1]
     for balance_idx, balance in enumerate(all_balances):
-        weights_rewards = sorted(data_by_balance[balance].items())
-        weights = [w for w, _ in weights_rewards]
-        rewards = [data[1] for _, data in weights_rewards]
-
+        iws = sorted(data_by_balance[balance].keys())
+        rewards = [data_by_balance[balance][iw][0] for iw in iws]
         ax.plot(
-            weights,
+            iws,
             rewards,
-            "o-",
-            color=colors[balance_idx],
-            linewidth=2,
-            markersize=6,
             label=f"Balance={balance:.2f}",
+            color=colors[balance_idx],
+            marker="o",
         )
-        # label=f'Initial Inh. weight={I_weights[balance_idx]:.0f}')
-
-    ax.set_xlabel("Exc. Weight", fontsize=12)
-    ax.set_ylabel("Mean Reward", fontsize=12)
-    ax.set_title("Mean Reward vs Exc. Weight", fontsize=13, fontweight="bold")
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=10)
-
-    # # Plot 3: Mean environment state vs initial weight
-    # ax = axes[2]
-    # for balance_idx, balance in enumerate(all_balances):
-    #     weights_env = sorted(data_by_balance[balance].items())
-    #     weights = [w for w, _ in weights_env]
-    #     env_states = [data[2] for _, data in weights_env]
-
-    #     ax.plot(weights, env_states, 'o-',
-    #            color=colors[balance_idx],
-    #            linewidth=2,
-    #            markersize=6,
-    #            label=f'Balance={balance:.2f}')
-
-    # ax.set_xlabel('Initial Weight', fontsize=12)
-    # ax.set_ylabel('Mean Environment State', fontsize=12)
-    # ax.set_title('Mean Environment State vs Initial Weight', fontsize=13, fontweight='bold')
-    # ax.grid(True, alpha=0.3)
-    # ax.legend(fontsize=10)
-
-    plt.tight_layout()
+    ax.set_xlabel("Initial Weight")
+    ax.set_ylabel("Mean Reward")
 
     if output_file:
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
+        plt.savefig(output_file, dpi=300)
         print(f"Figure saved to {output_file}")
 
     plt.show()
@@ -233,7 +183,7 @@ def main():
     # Automatically find the most recent results directory
     results_base_dir = base_dir / "results"
     dirs = sorted(
-        results_base_dir.glob("setup_tests_fixed_I_weight_*"),
+        results_base_dir.glob("setup_tests_square_error_20260311_140120"),
         key=os.path.getmtime,
         reverse=True,
     )
