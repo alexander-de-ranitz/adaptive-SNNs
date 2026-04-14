@@ -2,13 +2,13 @@ import diffrax as dfx
 import jax
 import jax.numpy as jnp
 
-from adaptive_SNN.models.environments.base import EnvironmentABC
+from adaptive_SNN.models.environments.base import AbstractEnvironment
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class SpikeRateEnvironment(EnvironmentABC):
+class SpikeRateEnvironment(AbstractEnvironment):
     """Environment model that tracks the spike rate of a neuron using an exponential filter.
 
     The input is expected to be the spike count at each time step. If tracking the combined rate of multiple neurons,
@@ -55,4 +55,6 @@ class SpikeRateEnvironment(EnvironmentABC):
             raise ValueError(
                 "SpikeRateEnvironment requires 'get_env_input' in args for update."
             )
-        return x + args["get_env_input"](t, x, args)  # Increment by spike count
+        return (
+            x + args["get_env_input"](t, x, args) * self.rate
+        )  # Increment by spike count

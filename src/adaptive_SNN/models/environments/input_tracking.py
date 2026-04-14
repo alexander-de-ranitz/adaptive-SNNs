@@ -2,13 +2,13 @@ import diffrax as dfx
 import jax
 import jax.numpy as jnp
 
-from adaptive_SNN.models.environments.base import EnvironmentABC
+from adaptive_SNN.models.environments.base import AbstractEnvironment
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class InputTrackingEnvironment(EnvironmentABC):
+class InputTrackingEnvironment(AbstractEnvironment):
     """Environment model that tracks an input signal."""
 
     dim: int = 1  # Dimension of the environment process
