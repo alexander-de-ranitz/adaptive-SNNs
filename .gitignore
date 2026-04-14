@@ -49,3 +49,4 @@ data/
 results/
 figures/
 matplotlibrc
+.qcg*
