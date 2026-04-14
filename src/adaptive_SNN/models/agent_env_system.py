@@ -38,7 +38,7 @@ class AgentEnvSystem(eqx.Module):
         return SystemState(
             self.agent.initial,
             self.environment.initial,
-            jnp.array(0.0),  # Initial reward signal
+            jnp.array([0.0]),
         )
 
     def drift(self, t, x: SystemState, args: dict):
@@ -61,6 +61,7 @@ class AgentEnvSystem(eqx.Module):
 
         agent_output = args["network_output_fn"](t, agent_state, args)
         reward = args["reward_fn"](t, x, args)
+
         args.update(
             {
                 "env_state": env_state,
@@ -72,7 +73,7 @@ class AgentEnvSystem(eqx.Module):
         env_drift = self.environment.drift(t, env_state, args)
         agent_drift = self.agent.drift(t, agent_state, args)
 
-        return SystemState(agent_drift, env_drift, jnp.array(0.0))
+        return SystemState(agent_drift, env_drift, jnp.array([0.0]))
 
     def diffusion(self, t, x: SystemState, args):
         (agent_state, env_state) = x.agent_state, x.environment_state
@@ -108,7 +109,10 @@ class AgentEnvSystem(eqx.Module):
 
     def update(self, t, x: SystemState, args: dict):
         (agent_state, env_state) = x.agent_state, x.environment_state
-        new_agent_state = self.agent.update(t, agent_state, args)
         new_env_state = self.environment.update(t, env_state, args)
-        reward_signal = args["reward"]
+
+        # Used by the reward model. Otherwise, the prediction is always one step behind
+        args.update({"new_env_state": new_env_state})
+        new_agent_state = self.agent.update(t, agent_state, args)
+        reward_signal = args["reward"].reshape((1,))
         return SystemState(new_agent_state, new_env_state, reward_signal)
