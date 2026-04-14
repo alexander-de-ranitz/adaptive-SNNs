@@ -128,6 +128,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         initial_weight_matrix: Array | None = None,
         fraction_excitatory_recurrent: float = 0.8,
         fraction_excitatory_input: float = 1.0,
+        mean_synaptic_delay: float = 1.5e-3,
         weight_std: float = 0.2,
         input_types: Array | None = None,
         key: jr.PRNGKey = jr.PRNGKey(0),
@@ -156,6 +157,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         self.rec_weight = rec_weight
         self.fraction_excitatory_recurrent = fraction_excitatory_recurrent
         self.fraction_excitatory_input = fraction_excitatory_input
+        self.mean_synaptic_delay = mean_synaptic_delay
         self.dt = dt
         self.weight_std = weight_std
         self.initial_weight_matrix = initial_weight_matrix
@@ -278,8 +280,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             features=self.init_features(),
         )
 
-    abstractmethod
-
+    @abstractmethod
     def init_features(self):
         raise NotImplementedError
 
@@ -347,8 +348,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             features=self.compute_feature_drift(t, state, args),
         )
 
-    abstractmethod
-
+    @abstractmethod
     def compute_feature_drift(self, t, state: LIFState, args):
         raise NotImplementedError
 
@@ -387,8 +387,7 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         return MixedPyTreeOperator(tree)
 
-    abstractmethod
-
+    @abstractmethod
     def compute_feature_diffusion(self, t, state: LIFState, args):
         raise NotImplementedError
 
@@ -409,8 +408,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             features=self.noise_shape_features(),
         )
 
-    abstractmethod
-
+    @abstractmethod
     def noise_shape_features(self):
         raise NotImplementedError
 
@@ -487,8 +485,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         dV = jnp.where(state.time_since_last_spike < self.refractory_period, 0.0, dV)
         return dV
 
-    abstractmethod
-
+    @abstractmethod
     def compute_weight_updates(self, t, state: LIFState, args) -> Array:
         raise NotImplementedError
 
