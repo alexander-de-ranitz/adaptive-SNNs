@@ -8,8 +8,8 @@ from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 
 class GatedLIFNetwork(AbstractLIFNetwork):
-    tau_eligibility: float = 1.0  # Time constant for eligibility trace
-    delta_V: float = 0.002  # Steepness of the gating function
+    tau_eligibility: float = 0.1  # Time constant for eligibility trace
+    delta_V: float = 0.001  # Steepness of the gating function
 
     def init_features(self) -> Eligibility:
         return Eligibility(
@@ -39,13 +39,15 @@ class GatedLIFNetwork(AbstractLIFNetwork):
         # Map the relative noise strength to each excitatory synapse
         noise_per_synapse = jnp.outer(relative_noise_strength, self.excitatory_mask)
 
+        delta_V = args.get("delta_V", self.delta_V)
+
         synaptic_traces = state.G
         d_eligibility = (
             -state.features.eligibility / self.tau_eligibility
             + noise_per_synapse
             * synaptic_traces
             / self.synaptic_increment
-            * self.gating_function(state.V)[:, None]
+            * self.gating_function(state.V, delta_V)[:, None]
         )
         return Eligibility(eligibility=d_eligibility)
 
@@ -55,21 +57,21 @@ class GatedLIFNetwork(AbstractLIFNetwork):
     def noise_shape_features(self) -> Eligibility:
         return Eligibility(eligibility=None)
 
-    def gating_function(self, voltage: Array) -> Array:
+    def gating_function(self, voltage: Array, delta_V: float) -> Array:
         """Gating function based on membrane voltage."""
         default_area = 1.0 * (
             self.firing_threshold - self.resting_potential
         )  # Area under the default gating function (which is constant at 1)
         driving_force = self.reversal_potential_E - voltage
 
-        integral = lambda V: (self.reversal_potential_E + self.delta_V - V) * -jnp.exp(
-            (V - self.firing_threshold) / self.delta_V
+        integral = lambda V: (self.reversal_potential_E + delta_V - V) * -jnp.exp(
+            (V - self.firing_threshold) / delta_V
         )
         area = integral(self.resting_potential) - integral(self.firing_threshold)
         gating = (
             driving_force
-            / self.delta_V
-            * jnp.exp((voltage - self.firing_threshold) / self.delta_V)
+            / delta_V
+            * jnp.exp((voltage - self.firing_threshold) / delta_V)
         )
         normalization_factor = area / default_area
 
@@ -78,7 +80,7 @@ class GatedLIFNetwork(AbstractLIFNetwork):
     def compute_weight_updates(self, t, state: ElibilityState, args):
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        RPE = jnp.sum(jnp.asarray(args.get("RPE", 0.0)))
+        RPE = args.get("RPE", jnp.array([0.0]))
 
         dW = learning_rate * RPE * state.features.eligibility
 
@@ -93,7 +95,7 @@ def plot_gating_function():
 
     network = GatedLIFNetwork(N_neurons=1, dt=1e-4, N_inputs=0)
     voltages = jnp.linspace(-75 * 1e-3, -50 * 1e-3, 100)  # From -80 mV to +20 mV
-    gating_values = network.gating_function(voltages)
+    gating_values = network.gating_function(voltages, delta_V=network.delta_V)
     plt.figure(figsize=(3.5, 2))
     plt.hlines(
         1.0,
