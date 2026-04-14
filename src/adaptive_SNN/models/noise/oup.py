@@ -22,16 +22,14 @@ class OUP(NoiseModelABC):
         return -1.0 / self.tau * (x - self.mean)
 
     def diffusion(self, t, x, args):
-        # the value given in args takes precedence as this is used by the NoisyNetwork model
-        # to set state-dependent noise stds. The default is a constant noise std used otherwise.
-        noise_std = (
-            self.noise_std if args is None else args.get("noise_std", self.noise_std)
-        )
-
+        noise_std = self.noise_std
         # Return diagonal diffusion matrix
         if isinstance(noise_std, Array) and noise_std.ndim == 1:
             return jnp.diag(noise_std) * jnp.sqrt(2.0 / self.tau)
         return jnp.eye(self.dim) * noise_std * jnp.sqrt(2.0 / self.tau)
+
+    def update(self, t, x, args):
+        return x
 
     @property
     def noise_shape(self):
@@ -44,3 +42,22 @@ class OUP(NoiseModelABC):
         return dfx.MultiTerm(
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
+
+
+class NeuralNoiseOUP(OUP):
+    tau: float | Array = 1.0
+    noise_std: float | Array = 0.0
+    mean: float | Array = 0.0
+    dim: int = 1
+
+    def diffusion(self, t, x, args):
+        # the value given in args takes precedence as this is used by the NoisyNetwork model
+        # to set state-dependent noise stds. The default is a constant noise std used otherwise.
+        noise_std = (
+            self.noise_std if args is None else args.get("noise_std", self.noise_std)
+        )
+
+        # Return diagonal diffusion matrix
+        if isinstance(noise_std, Array) and noise_std.ndim == 1:
+            return jnp.diag(noise_std) * jnp.sqrt(2.0 / self.tau)
+        return jnp.eye(self.dim) * noise_std * jnp.sqrt(2.0 / self.tau)
