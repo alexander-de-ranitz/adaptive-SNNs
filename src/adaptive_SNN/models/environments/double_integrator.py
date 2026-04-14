@@ -2,13 +2,13 @@ import diffrax as dfx
 import jax
 import jax.numpy as jnp
 
-from adaptive_SNN.models.environments.base import EnvironmentABC
+from adaptive_SNN.models.environments.base import AbstractEnvironment
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class DoubleIntegrator(EnvironmentABC):
+class DoubleIntegrator(AbstractEnvironment):
     """Environment model representing a double integrator system."""
 
     dim: int = 2  # State is 2-dimensional: [position, velocity]
@@ -55,7 +55,7 @@ class DoubleIntegrator(EnvironmentABC):
         return x
 
 
-class DoubleIntegratorKickControl(EnvironmentABC):
+class DoubleIntegratorKickControl(AbstractEnvironment):
     """Double integrator environment controlled using discrete kicks."""
 
     dim: int = 2  # State is 2-dimensional: [position, velocity]
