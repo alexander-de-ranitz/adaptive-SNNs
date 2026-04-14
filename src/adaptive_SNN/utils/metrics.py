@@ -108,10 +108,13 @@ def compute_charge_ratio(t, state, model) -> Array:
     G = network_state.G
     V = network_state.V
     exc_mask = base_network.excitatory_mask
+    leak_conductance = base_network.leak_conductance
 
     dt = t[1] - t[0]
     W = jnp.where(jnp.isfinite(W), W, 0.0)
-    weighed_G_inhibitory = jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1)
+    weighed_G_inhibitory = (
+        jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1) + leak_conductance
+    )
     weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1) + noise
 
     total_inhibitory_charge = (
