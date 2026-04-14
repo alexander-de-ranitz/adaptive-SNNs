@@ -4,7 +4,7 @@ import jax
 from jax import numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.environments.base import EnvironmentABC
+from adaptive_SNN.models.environments.base import AbstractEnvironment
 from adaptive_SNN.models.networks.agent import Agent, AgentState
 from adaptive_SNN.utils.operators import (
     DefaultIfNone,
@@ -23,12 +23,12 @@ class SystemState(eqx.Module):
 
 class AgentEnvSystem(eqx.Module):
     agent: Agent
-    environment: EnvironmentABC
+    environment: AbstractEnvironment
 
     def __init__(
         self,
         agent: Agent,
-        environment: EnvironmentABC,
+        environment: AbstractEnvironment,
     ):
         self.agent = agent
         self.environment = environment

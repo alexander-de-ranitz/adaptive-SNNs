@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import equinox as eqx
 
 
-class EnvironmentABC(ABC, eqx.Module):
+class AbstractEnvironment(ABC, eqx.Module):
     @property
     @abstractmethod
     def initial(self):
