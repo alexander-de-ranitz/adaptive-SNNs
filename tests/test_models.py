@@ -11,6 +11,7 @@ from helpers import (
     make_Noisy_LIF_model,
     make_noisy_state,
     make_OUP_model,
+    make_poisson_jump_model,
 )
 
 from adaptive_SNN.models import NoisyNetwork, NoisyNetworkState
@@ -276,6 +277,53 @@ def test_OUP_zero_mean():
 
     mean = jnp.mean(sol.ys, axis=0)
     assert jnp.all(jnp.abs(mean) < 1)
+
+
+def test_poisson_jump_shapes():
+    dim = 4
+    model = make_poisson_jump_model(dim=dim)
+    initial_state = model.initial
+
+    assert initial_state.shape == (dim,)
+
+    drift = model.drift(0.0, initial_state, None)
+
+    assert drift.shape == (dim,)
+    assert jnp.allclose(drift, 0.0)
+
+
+def test_poisson_jump_update_zero_rate_no_change():
+    dim = 3
+    dt = 1e-3
+    model = make_poisson_jump_model(
+        dim=dim,
+        jump_rate=0.0,
+        jump_mean=2.0,
+        jump_std=1.0,
+        dt=dt,
+    )
+
+    state = jnp.array([1.0, -2.0, 0.5])
+    updated = model.update(dt, state, {"dt": dt})
+
+    assert jnp.allclose(updated, state)
+
+
+def test_poisson_jump_update_positive_rate_changes_state():
+    dim = 2
+    dt = 1e-2
+    model = make_poisson_jump_model(
+        dim=dim,
+        jump_rate=5000.0,
+        jump_mean=1.0,
+        jump_std=0.0,
+        dt=dt,
+    )
+
+    state = jnp.zeros((dim,))
+    updated = model.update(dt, state, {"dt": dt})
+
+    assert jnp.any(updated > state)
 
 
 def test_weight_plasticity():

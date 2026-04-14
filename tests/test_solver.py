@@ -1,7 +1,7 @@
-import diffrax as dfx
 import jax
 
 jax.config.update("jax_enable_x64", True)
+import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 from helpers import (
@@ -42,15 +42,14 @@ def test_solver_timesteps():
     args = make_default_args(N_neurons, N_inputs)
 
     # Our method
-    save_at = dfx.SaveAt(subs=dfx.SubSaveAt(steps=True, t0=True, t1=True))
+    saveat = dfx.SaveAt(t0=True, t1=True, steps=True)
     sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_at=save_at, args=args
+        model, solver, t0, t1, dt0, y0, save_at=saveat, args=args
     )
     sol_1_ts = sol_1.ts
 
     # Direct diffrax call for comparison
     terms = model.terms(jr.PRNGKey(0))
-    saveat = dfx.SaveAt(t0=True, t1=True, steps=True)
     sol_2 = dfx.diffeqsolve(
         terms,
         solver,
@@ -61,6 +60,7 @@ def test_solver_timesteps():
         args=args,
         saveat=saveat,
         adjoint=dfx.ForwardMode(),
+        stepsize_controller=dfx.ConstantStepSize(),
     )
 
     # Remove any -inf timepoints from sol_2 (pre-allocated but not used)
