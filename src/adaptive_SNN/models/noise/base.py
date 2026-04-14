@@ -17,6 +17,11 @@ class NoiseModelABC(ABC, eqx.Module):
     def diffusion(self, t, x, args):
         pass
 
+    @abstractmethod
+    def update(self, t, x, args):
+        """Apply non-differential updates"""
+        pass
+
     @property
     @abstractmethod
     def noise_shape(self):
