@@ -92,10 +92,13 @@ class NoisyNetwork(NeuronModelABC):
         """
         synaptic_variance = state.network_state.var_E_conductance
 
+        use_noise = args.get(
+            "use_noise", jnp.array([False] * self.base_network.N_neurons)
+        )
+
         # Compute desired noise std using the computed variance and a hyperparameter, then clip to min value
         noise_scale_hyperparam = args.get("noise_scale_hyperparam", 0.0)
-        if noise_scale_hyperparam == 0.0:
-            return jnp.zeros_like(synaptic_variance)
         desired_noise_std = jnp.sqrt(synaptic_variance) * noise_scale_hyperparam
         desired_noise_std = self.min_noise_std + desired_noise_std
+        desired_noise_std = jnp.where(use_noise, desired_noise_std, 0.0)
         return desired_noise_std
