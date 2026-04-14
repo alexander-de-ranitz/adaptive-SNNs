@@ -468,39 +468,64 @@ def _plot_noise_distribution_STA(
         neurons_to_plot = jnp.arange(lif_state.S.shape[1])
 
     spike_times = jnp.nonzero(lif_state.S[:, neurons_to_plot])
-    data = []
+    noise_at_spike_time = []
+    noise_all_time = []
     for i, neuron_idx in enumerate(neurons_to_plot):
         neuron_spike_times = spike_times[i]
         neuron_noise = noise_state[:, neuron_idx]
         noise_values_at_spikes = neuron_noise[neuron_spike_times]
-        data.append(noise_values_at_spikes)
+        noise_at_spike_time.append(noise_values_at_spikes)
+        noise_all_time.append(neuron_noise)
 
+    x_lim = (
+        3 * noise_std.item()
+        if noise_std is not None
+        else jnp.quantile(jnp.abs(jnp.concatenate(noise_all_time)), 0.99).item()
+    )
+
+    STA_noise = jnp.concatenate(noise_at_spike_time)
+    STA_noise = STA_noise[
+        jnp.abs(STA_noise) < x_lim
+    ]  # Limit to x_lim for better visualization
+    all_noise = jnp.concatenate(noise_all_time)
+    all_noise = all_noise[jnp.abs(all_noise) < x_lim]  # Limit
     ax.hist(
-        jnp.concatenate(data),
-        bins=31,
+        STA_noise,
+        bins=41,
         density=True,
         histtype="stepfilled",
         label="Noise distribution at spike times",
-        alpha=0.7,
+        alpha=0.6,
         color="darkgreen",
     )
 
-    # Plot the analytical noise distribution for comparison
-    # note that this assumes constant noise std over time
-    if noise_std is not None:
-        if isinstance(noise_std, jnp.ndarray):
-            noise_std = noise_std.at[0].get()
-        x = jnp.linspace(-4 * noise_std, 4 * noise_std, 100)
-        lim = (-4 * noise_std, 4 * noise_std)
-        ax.set_xlim(lim)
-        pdf = (1 / (noise_std * jnp.sqrt(2 * jnp.pi))) * jnp.exp(
-            -0.5 * (x / noise_std) ** 2
-        )
-        ax.plot(
-            x, pdf, color="k", linestyle="--", label="Analytical Noise Distribution"
-        )
-        ax.legend()
+    ax.hist(
+        all_noise,
+        bins=41,
+        density=True,
+        histtype="step",
+        label="Noise distribution at all times",
+        alpha=0.7,
+        color="k",
+    )
 
+    ax.set_xlim(-x_lim, x_lim)
+
+    # # Plot the analytical noise distribution for comparison
+    # # note that this assumes constant noise std over time
+    # if noise_std is not None:
+    #     if isinstance(noise_std, jnp.ndarray):
+    #         noise_std = noise_std.at[0].get()
+    #     x = jnp.linspace(-4 * noise_std, 4 * noise_std, 100)
+    #     lim = (-4 * noise_std, 4 * noise_std)
+    #     ax.set_xlim(lim)
+    #     pdf = (1 / (noise_std * jnp.sqrt(2 * jnp.pi))) * jnp.exp(
+    #         -0.5 * (x / noise_std) ** 2
+    #     )
+    #     ax.plot(
+    #         x, pdf, color="k", linestyle="--", label="Noise Distribution"
+    #     )
+    ax.legend(loc="upper left")
     ax.set_title("Distribution of Noise Values at Spike Times")
     ax.set_xlabel("Noise Value")
     ax.set_ylabel("Density")
