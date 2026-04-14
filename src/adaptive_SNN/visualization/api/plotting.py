@@ -82,7 +82,6 @@ def plot_simulate_SNN_results(
             axs[-1], sol, model, neurons_to_plot=neurons_to_plot, **plot_kwargs
         )
 
-    plt.tight_layout()
     if save_path is not None:
         plt.savefig(save_path)
     else:
@@ -357,7 +356,6 @@ def plot_noise_STA(
         ax.set_ylabel("Density")
         ax.label_outer()
 
-    plt.tight_layout()
     if save_path is not None:
         plt.savefig(save_path)
         plt.close()
@@ -370,6 +368,7 @@ def plot_learning_detailed(
     model: AgentEnvSystem | None = None,
     args: dict = {},
     neurons_to_plot: Array | None = None,
+    synapses_to_plot: Array | None = None,
     save_path: str | None = None,
     target_state: float | None = None,
     **plot_kwargs,
@@ -441,9 +440,11 @@ def plot_learning_detailed(
             split_noise=True,
         )
 
+    if synapses_to_plot is None:
+        synapses_to_plot = jnp.ones_like(network_state.network_state.W[0], dtype=bool)
     axs[4].plot(
         t,
-        eligibility_trace[:, 0, model.agent.noisy_network.base_network.excitatory_mask],
+        eligibility_trace[:, synapses_to_plot],
         label="Eligibility Trace",
         alpha=0.5,
     )
@@ -451,15 +452,22 @@ def plot_learning_detailed(
     axs[4].set_ylabel("Eligibility Trace")
     axs[4].set_xlabel("Time (s)")
 
-    E_weights = network_state.network_state.W[
-        :, 0, model.agent.noisy_network.base_network.excitatory_mask
-    ]
-    I_weights = network_state.network_state.W[
-        :, 0, ~model.agent.noisy_network.base_network.excitatory_mask
-    ]
-    # Plot exc synaptic weights over time for first neuron
-    axs[5].plot(t, E_weights, label="Excitatory Weights", c="g", alpha=0.1)
-    axs[5].plot(t, I_weights, label="Inhibitory Weights", c="r", alpha=0.1)
+    E_mask = model.agent.noisy_network.base_network.excitatory_mask[None, :]
+    W = network_state.network_state.W
+    axs[5].plot(
+        t,
+        W[:, (synapses_to_plot & E_mask)],
+        label="Excitatory Weights",
+        c="g",
+        alpha=0.1,
+    )
+    axs[5].plot(
+        t,
+        W[:, (synapses_to_plot & ~E_mask)],
+        label="Inhibitory Weights",
+        c="r",
+        alpha=0.1,
+    )
     axs[5].set_title("Synaptic Weight")
     axs[5].set_ylabel("Weight")
     axs[5].set_xlabel("Time (s)")
