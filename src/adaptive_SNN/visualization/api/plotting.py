@@ -322,7 +322,8 @@ def plot_noise_STA(
         args = {
             "noise_scale_hyperparam": noise_levels[i]
             if noise_levels is not None
-            else None
+            else None,
+            "use_noise": jnp.array([True]),
         }
         var_E_conductance = get_LIF_state(sol.ys).var_E_conductance
         mean_var_E = jnp.mean(
