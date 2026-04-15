@@ -10,13 +10,13 @@ in the GatedLIFNetwork over a short time window. It illustrates:
 5. Resulting weight changes
 """
 
-import diffrax as dfx
 import jax
 
 jax.config.update(
     "jax_enable_x64", True
 )  # Enable 64-bit precision for better numerical stability
 
+import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
@@ -26,13 +26,16 @@ from adaptive_SNN.models import (
     OUP,
     Agent,
     AgentEnvSystem,
+    MovingAverageRewardModel,
+    NeuralNoiseOUP,
     NoisyNetwork,
-    RewardModel,
     SystemState,
 )
 from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
+from adaptive_SNN.models.RPE import UpdateAndDecayRPEModel
 from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.utils.save_helper import save_part_of_state
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
@@ -69,7 +72,7 @@ def main():
     t1 = 0.5
     dt = 1e-4  # 0.1 ms
 
-    for i in range(13, 14):
+    for i in range(15, 16):
         key = jr.PRNGKey(i)
         spike_times = jnp.array([15, 30]) * 1e-2
 
@@ -81,7 +84,7 @@ def main():
         input_weight = 26.0  # Strong enough to drive spiking
 
         # Learning parameters
-        learning_rate = 1e4  # Increased learning rate for more visible weight changes
+        learning_rate = 2000  # Increased learning rate for more visible weight changes
 
         # Set up the GatedLIFNetwork
         neuron_model = GatedLIFNetwork(
@@ -97,7 +100,7 @@ def main():
         )
 
         # Set up noise model (Ornstein-Uhlenbeck process)
-        noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
+        noise_model = NeuralNoiseOUP(tau=neuron_model.tau_E, dim=N_neurons)
 
         # Combine into NoisyNetwork
         noisy_network = NoisyNetwork(
@@ -105,19 +108,14 @@ def main():
         )
         agent = Agent(
             neuron_model=noisy_network,
-            reward_model=RewardModel(reward_rate=0.1),
+            reward_model=MovingAverageRewardModel(reward_rate=0.1),
+            reward_noise=OUP(noise_std=0.0),
+            RPE_model=UpdateAndDecayRPEModel(),
         )
         model = AgentEnvSystem(agent=agent, environment=SpikeRateEnvironment(rate=50))
 
         solver = dfx.EulerHeun()
         init_state = model.initial
-
-        def reward_fn(t, x: SystemState, args):
-            # t_since_spike = x.agent_state.noisy_network.network_state.time_since_last_spike[0]
-            # return alpha_function(t_since_spike, 0.0)
-            return x.environment_state[
-                0
-            ].squeeze()  # Reward is the spike rate from the environment
 
         def get_input_spikes(t, x, args):
             # Return 1 if current time is within spike times, 0 otherwise
@@ -130,49 +128,33 @@ def main():
         args = {
             "get_input_spikes": get_input_spikes,
             "get_learning_rate": lambda t, x, args: learning_rate,
-            "reward_fn": reward_fn,
+            "reward_fn": lambda t, x, args: jnp.array([0.0]),
             "noise_scale_hyperparam": 1e-6,
             "network_output_fn": lambda t, agent_state, args: jnp.squeeze(
                 agent_state.noisy_network.network_state.S[0]
             ),
+            "use_noise": jnp.array([True]),
+            "tau_RPE": 0.05,
+            "RPE_fn": lambda t, x, args: x.noisy_network.network_state.S[
+                0
+            ],  # RPE is zero for now, since we want to see how it evolves
         }
 
         # Define what to save
         def save_fn(t, y, args):
             """Save relevant state variables for plotting."""
-            state: SystemState = y
-
-            # Calculate reward and RPE at this time - ensure dtypes match
-            reward = state.reward_signal
-            rpe = reward - state.agent_state.predicted_reward
-
-            # Extract gating function value
-            gating = neuron_model.gating_function(
-                state.agent_state.noisy_network.network_state.V
+            return save_part_of_state(
+                y,
+                environment_state=True,
+                W=True,
+                G=True,
+                S=True,
+                RPE=True,
+                reward_noise=True,
+                eligibility=True,
+                V=True,
+                noise_state=True,
             )
-
-            return {
-                "V": state.agent_state.noisy_network.network_state.V[
-                    0
-                ],  # Voltage of neuron 0
-                "G": state.agent_state.noisy_network.network_state.G[
-                    0, 1
-                ],  # Conductances of neuron 0 (all synapses)
-                "W": state.agent_state.noisy_network.network_state.W[
-                    0, 1
-                ],  # Weights of neuron 0 (all synapses)
-                "eligibility": state.agent_state.noisy_network.network_state.features.eligibility[
-                    0, :
-                ],  # Eligibility traces
-                "noise": state.agent_state.noisy_network.noise_state[
-                    0
-                ],  # Noise for neuron 0
-                "spikes": state.agent_state.noisy_network.network_state.S[0],
-                "reward": reward,
-                "reward_prediction": state.agent_state.predicted_reward,
-                "RPE": rpe,
-                "gating": gating[0],  # Gating function value
-            }
 
         print("Running simulation...")
         sol = simulate_noisy_SNN(
@@ -187,24 +169,24 @@ def main():
             key=key,
         )
 
-        # Extract time and data
-        t = sol.ts * 1000  # Convert to ms
-        V = (
-            jnp.array([sol.ys["V"][i] for i in range(len(sol.ts))]) * 1000
-        )  # Convert to mV
+        state: SystemState = sol.ys
+        spikes = state.agent_state.noisy_network.network_state.S[:, 0]
+        noise = state.agent_state.noisy_network.noise_state[:, 0]
         G_total = (
-            jnp.array([sol.ys["G"][i].sum() for i in range(len(sol.ts))]) * 1e9
-        )  # Convert to nS
-        noise = (
-            jnp.array([sol.ys["noise"][i] for i in range(len(sol.ts))]) * 1e9
-        )  # Convert to nS
-        eligibility = jnp.array(
-            [sol.ys["eligibility"][i].sum() for i in range(len(sol.ts))]
+            state.agent_state.noisy_network.network_state.G[:, 0].sum(axis=-1) * 1e9
         )
-        W = jnp.array([sol.ys["W"][i].sum() for i in range(len(sol.ts))])
-        RPE = jnp.array([sol.ys["RPE"][i] for i in range(len(sol.ts))])
-        gating = jnp.array([sol.ys["gating"][i] for i in range(len(sol.ts))])
-        spikes = jnp.array([sol.ys["spikes"][i] for i in range(len(sol.ts))])
+        V = state.agent_state.noisy_network.network_state.V[:, 0] * 1000
+        eligibility = (
+            state.agent_state.noisy_network.network_state.features.eligibility[
+                :, 0
+            ].sum(axis=-1)
+        )
+        RPE = state.agent_state.RPE[:, 0]
+        W = state.agent_state.noisy_network.network_state.W[:, 0]
+        gating = neuron_model.gating_function(
+            state.agent_state.noisy_network.network_state.V[:, 0], neuron_model.delta_V
+        )
+        t = sol.ts.squeeze() * 1000
 
         # Detect spike times for vertical lines
         spike_indices = jnp.where(spikes > 0)[0]
@@ -288,7 +270,7 @@ def main():
             spike_time = t[ind]
             ax3.vlines(
                 spike_time,
-                ymin=-70,
+                ymin=-60,
                 ymax=V[ind - 1] + 10,
                 linewidth=linewidth,
                 color=color_voltage,
@@ -360,7 +342,7 @@ def main():
             "RPE",
             "Weight",
         ]
-        y_offsets = [0.1, 0.01, 0.16, 0.1, 0.05, 0.07, 0.43]
+        y_offsets = [0.1, 0.01, 0.16, 0.1, 0.1, 0.1, 0.43]
         for i, ax in enumerate(axes):
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
@@ -380,9 +362,9 @@ def main():
         fig.align_ylabels(axes)
 
         output_path = "../figures/learning_mechanism_illustration.pdf"
-        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        fig.savefig(output_path, dpi=300)
         print(f"Figure saved to {output_path}")
-
+        break
         # plt.show()
 
 

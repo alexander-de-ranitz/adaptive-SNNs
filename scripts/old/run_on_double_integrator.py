@@ -9,12 +9,12 @@ import jax.random as jr
 from jax import numpy as jnp
 
 from adaptive_SNN.models import (
-    OUP,
     Agent,
     AgentEnvSystem,
     LIFNetwork,
+    MovingAverageRewardModel,
+    NeuralNoiseOUP,
     NoisyNetwork,
-    RewardModel,
 )
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import DoubleIntegratorKickControl
@@ -56,14 +56,16 @@ def main():
         key=key,
     )
 
-    noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
+    noise_model = NeuralNoiseOUP(tau=neuron_model.tau_E, dim=N_neurons)
 
     noisy_model = NoisyNetwork(
         neuron_model=neuron_model,
         noise_model=noise_model,
     )
 
-    agent = Agent(neuron_model=noisy_model, reward_model=RewardModel(reward_rate=0.1))
+    agent = Agent(
+        neuron_model=noisy_model, reward_model=MovingAverageRewardModel(reward_rate=0.1)
+    )
     model = AgentEnvSystem(
         agent=agent,
         environment=DoubleIntegratorKickControl(),

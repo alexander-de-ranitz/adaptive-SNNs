@@ -3,7 +3,7 @@ import jax.random as jr
 from jax import numpy as jnp
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models import OUP
+from adaptive_SNN.models import NeuralNoiseOUP
 
 
 def main():
@@ -13,7 +13,7 @@ def main():
     dt0 = 1e-4
 
     def run_and_plot_OU_process(tau, D):
-        noise_model = OUP(tau=tau, noise_std=D, mean=0.0, dim=2)
+        noise_model = NeuralNoiseOUP(tau=tau, noise_std=D, mean=0.0, dim=2)
 
         expected_std = jnp.sqrt(D * tau / 2)
 

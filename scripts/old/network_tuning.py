@@ -6,8 +6,8 @@ import jax.random as jr
 from jax import numpy as jnp
 
 from adaptive_SNN.models import (
-    OUP,
     LIFNetwork,
+    NeuralNoiseOUP,
     NoisyNetwork,
     NoisyNetworkState,
 )
@@ -53,7 +53,7 @@ def main():
                 key=key,
             )
 
-            noise_model = OUP(tau=neuron_model.tau_E, dim=N_neurons)
+            noise_model = NeuralNoiseOUP(tau=neuron_model.tau_E, dim=N_neurons)
 
             model = NoisyNetwork(
                 neuron_model=neuron_model,
