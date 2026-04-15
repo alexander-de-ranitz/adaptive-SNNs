@@ -64,14 +64,13 @@ class UpdateAndDecayRPEModel(AbstractRPEModel):
         return -x / tau_RPE  # Exponential decay of RPE over time
 
     def update(self, t, x, args):
-        RPE_update_fn = args.get(
-            "RPE_fn", None
-        )  # Function to compute RPE update based on current state and environment
-        if RPE_update_fn is None:
+        RPE_update = args.get(
+            "RPE_update", None
+        )  # RPE update computed based on current state and environment
+        if RPE_update is None:
             raise ValueError(
-                "UpdateAndDecayRPEModel requires 'RPE_fn' in args for update computation."
+                "UpdateAndDecayRPEModel requires 'RPE_update' in args for update computation."
             )
-        RPE_update = RPE_update_fn(t, x, args)  # Compute the RPE update
         return x + RPE_update  # Update the reward by adding the RPE update
 
     def terms(self, key):
@@ -103,15 +102,14 @@ class InstantRPEModel(AbstractRPEModel):
         return jnp.zeros_like(x)  # No drift, RPE is determined solely by updates
 
     def update(self, t, x, args):
-        RPE_fn = args.get(
-            "RPE_fn", None
-        )  # Function to compute RPE update based on current state and environment
-        if RPE_fn is None:
+        RPE_update = args.get(
+            "RPE_update", None
+        )  # RPE update computed based on current state and environment
+        if RPE_update is None:
             raise ValueError(
-                "InstantRPEModel requires 'RPE_fn' in args for update computation."
+                "InstantRPEModel requires 'RPE_update' in args for update computation."
             )
-        RPE = RPE_fn(t, x, args)  # Compute the RPE
-        return RPE
+        return RPE_update  # Instantaneously set RPE to the computed update
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(

@@ -127,7 +127,13 @@ class Agent(eqx.Module):
         new_network_state = self.noisy_network.update(t, network_state, args)
         new_predicted_reward = self.reward_model.update(t, predicted_reward, args)
         new_reward_noise = self.reward_noise.update(t, reward_noise, args)
+
+        RPE_update = (
+            args.get("RPE_fn")(t, x, args) if "RPE_fn" in args else jnp.zeros_like(RPE)
+        )
+        args.update({"RPE_update": RPE_update})  # Used in RPE model
         new_RPE = self.RPE_model.update(t, RPE, args)
+
         return AgentState(
             new_network_state, new_predicted_reward, new_reward_noise, new_RPE
         )
