@@ -22,10 +22,10 @@ from diffrax import SaveAt
 
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.utils.runner import run_simulation
-from scripts.simulation_configs.single_neuron_simulation import (
+from adaptive_SNN.simulation_configs.single_neuron_simulation import (
     create_single_neuron_config_extra_synapse,
 )
+from adaptive_SNN.utils.runner import run_simulation
 
 MAX_TIME_DIFF = 0.1
 WINDOW_BUFFER = 10e-3
