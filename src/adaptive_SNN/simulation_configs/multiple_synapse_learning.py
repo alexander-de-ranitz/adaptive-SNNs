@@ -11,6 +11,7 @@ from adaptive_SNN.models.networks.coupled import (
 )
 from adaptive_SNN.models.noise.poisson_jump import PoissonJumpProcess
 from adaptive_SNN.models.reward import StudentRewardModel
+from adaptive_SNN.models.RPE import UpdateAndDecayRPEModel
 from adaptive_SNN.utils.config import SimulationConfig
 from adaptive_SNN.utils.save_helper import save_part_of_state
 
@@ -246,6 +247,8 @@ def create_multiple_synapse_learning_config(
             "tau": 0.05,
             "key": reward_noise_key,
         },
+        RPE_model=UpdateAndDecayRPEModel,
+        RPE_model_kwargs={"tau_RPE": 0.1},
         environment_kwargs={"dim": N_neurons, "rate": 10},
     )
 

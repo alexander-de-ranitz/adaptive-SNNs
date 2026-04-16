@@ -15,14 +15,15 @@ from adaptive_SNN.models.networks.coupled import (
 )
 from adaptive_SNN.models.noise.poisson_jump import PoissonJumpProcess
 from adaptive_SNN.models.reward import MovingAverageRewardModel
+from adaptive_SNN.models.RPE import UpdateAndDecayRPEModel
 from adaptive_SNN.utils.config import SimulationConfig
 from adaptive_SNN.utils.save_helper import save_part_of_state
 
 
 def create_default_config_single_synapse_task(
-    lr,
-    noise_level,
-    RPE_noise_rate,
+    lr=0.0,
+    noise_level=0.0,
+    RPE_noise_rate=0.0,
     key=jr.PRNGKey(0),
     model_cls: CoupledNoiseGatedLIFNetwork
     | CoupledNoiseEligibilityLIFNetwork = CoupledNoiseGatedLIFNetwork,
@@ -109,6 +110,8 @@ def create_default_config_single_synapse_task(
         network_output_fn=network_output_fn,
         input_spike_fn=input_spike_fn,
         reward_fn=lambda t, x, args: jnp.array([0.0]),
+        RPE_model=UpdateAndDecayRPEModel,
+        RPE_model_kwargs={"tau_RPE": 0.1},
         environment_model=SpikeRateEnvironment,
         environment_kwargs={"rate": 0.05, "dim": N_neurons},
         reward_model=MovingAverageRewardModel,
@@ -120,7 +123,7 @@ def create_default_config_single_synapse_task(
             "jump_std": 1.0,
             "dim": 1,
             "dt": dt,
-            "tau": 0.05,
+            "tau": 0.1,
             "key": reward_noise_key,
         },
         args={
