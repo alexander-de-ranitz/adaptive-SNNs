@@ -17,12 +17,12 @@ import jax.numpy as jnp
 import jax.random as jr
 from diffrax import SaveAt
 
+from adaptive_SNN.simulation_configs.single_neuron_simulation import (
+    create_single_neuron_config_extra_synapse,
+)
 from adaptive_SNN.utils.runner import run_simulation
 from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_noise_STA
-from scripts.simulation_configs.single_neuron_simulation import (
-    create_single_neuron_config_extra_synapse,
-)
 
 
 def plot_noise_level_STA():
