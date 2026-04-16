@@ -21,6 +21,11 @@ import matplotlib.pyplot as plt
 from diffrax import SaveAt
 
 from adaptive_SNN.models.agent_env_system import SystemState
+from adaptive_SNN.models.networks.eligibility_LIF import (
+    ElibilityState,
+    Eligibility,
+    EligibilityLIFNetwork,
+)
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
 from adaptive_SNN.simulation_configs.single_neuron_simulation import (
     create_single_neuron_config_extra_synapse,
@@ -29,6 +34,51 @@ from adaptive_SNN.utils.runner import run_simulation
 
 MAX_TIME_DIFF = 0.1
 WINDOW_BUFFER = 10e-3
+
+
+class NoDecayGatedLIFNetwork(GatedLIFNetwork):
+    def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
+        noise_std = args.get("noise_std", 0.0)
+        noise_conductance = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+
+        # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
+        # In case the noise std is zero (no noise), avoid division by zero and set relative noise strength to zero
+        relative_noise_strength = jnp.where(
+            noise_std != 0.0, noise_conductance / noise_std, 0.0
+        )
+
+        # Map the relative noise strength to each excitatory synapse
+        noise_per_synapse = jnp.outer(relative_noise_strength, self.excitatory_mask)
+
+        delta_V = args.get("delta_V", self.delta_V)
+
+        synaptic_traces = state.G
+        d_eligibility = (
+            noise_per_synapse
+            * synaptic_traces
+            / self.synaptic_increment
+            * self.gating_function(state.V, delta_V)[:, None]
+        )
+        return Eligibility(eligibility=d_eligibility)
+
+
+class NoDecayEligibilityLIFNetwork(EligibilityLIFNetwork):
+    def compute_feature_drift(self, t, state, args):
+        noise_std = args.get("noise_std", 0.0)
+        noise_conductance = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+
+        # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
+        # In case the noise std is zero (no noise), avoid division by zero and set relative noise strength to zero
+        relative_noise_strength = jnp.where(
+            noise_std != 0.0, noise_conductance / noise_std, 0.0
+        )
+
+        # Map the relative noise strength to each excitatory synapse
+        noise_per_synapse = jnp.outer(relative_noise_strength, self.excitatory_mask)
+
+        synaptic_traces = state.G
+        d_eligibility = noise_per_synapse * synaptic_traces / self.synaptic_increment
+        return Eligibility(eligibility=d_eligibility)
 
 
 def compute_eligibility_changes_around_spikes(sol) -> list[tuple[float, float]]:
@@ -58,11 +108,18 @@ def compute_eligibility_changes_around_spikes(sol) -> list[tuple[float, float]]:
 
     e_changes = []
 
+    skipped_spikes = 0
     for i, post_spike_time in enumerate(post_spikes_w_pre):
+        # if i < len(post_spikes_w_pre)-2 and (post_spikes_w_pre[i + 1] - post_spikes_w_pre[i]) < 0.1:
+        #     skipped_spikes += 1
+        #     continue
         pre_spike_time = paired_pre_spike_times[i]
         time_diff = time_diffs[i]
-        # window = (min(pre_spike_time, post_spike_time) - WINDOW_BUFFER, max(pre_spike_time, post_spike_time) + WINDOW_BUFFER)
-        window = (pre_spike_time, pre_spike_time + MAX_TIME_DIFF * 1.1)
+        window = (
+            min(pre_spike_time, post_spike_time) - WINDOW_BUFFER,
+            max(pre_spike_time, post_spike_time) + WINDOW_BUFFER,
+        )
+        # window = (pre_spike_time, pre_spike_time + MAX_TIME_DIFF * 1.1)
         nearest_time_indices = (
             jnp.argmin(jnp.abs(sol.ts - window[0])),
             jnp.argmin(jnp.abs(sol.ts - window[1])),
@@ -71,13 +128,14 @@ def compute_eligibility_changes_around_spikes(sol) -> list[tuple[float, float]]:
             eligibility[nearest_time_indices[1]] - eligibility[nearest_time_indices[0]]
         )
         e_changes.append((time_diff, delta_e))
+    print(f"Skipped {skipped_spikes}/{len(post_spikes_w_pre)}")
     return e_changes
 
 
 def run_sim(id, key):
     config = create_single_neuron_config_extra_synapse(N_neurons=1, key=key)
     config.t1 = 30
-    config.base_network_cls = GatedLIFNetwork
+    config.base_network_cls = NoDecayGatedLIFNetwork
     config.min_noise_std = 0.0
     config.noise_level = 0.3
 
@@ -96,7 +154,7 @@ def run_sim(id, key):
     config.save_at = save_at
 
     config.args["use_noise"] = jnp.array([True])
-    config.save_file = f"results/STDP_plot/STDP_gated_simulation_{id}"
+    config.save_file = f"results/STDP_plot/STDP_no_decay_default_simulation_{id}"
     return run_simulation(config, save_results=True)
 
 
