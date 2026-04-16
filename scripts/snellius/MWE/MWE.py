@@ -13,10 +13,10 @@ from adaptive_SNN.models.networks.coupled import (
     CoupledNoiseEligibilityLIFNetwork,
     CoupledNoiseGatedLIFNetwork,
 )
-from adaptive_SNN.utils.runner import run_simulation
-from scripts.simulation_configs.single_synapse_learning import (
+from adaptive_SNN.simulation_configs.single_synapse_learning import (
     create_default_config_single_synapse_task,
 )
+from adaptive_SNN.utils.runner import run_simulation
 
 
 def main():

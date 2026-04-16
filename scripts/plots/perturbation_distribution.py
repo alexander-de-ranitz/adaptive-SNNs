@@ -9,11 +9,11 @@ from diffrax import SaveAt
 
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.networks import NoisyNetwork, NoisyNetworkState
-from adaptive_SNN.utils.runner import run_simulation
-from adaptive_SNN.utils.save_helper import save_part_of_state
-from scripts.simulation_configs.single_neuron_simulation import (
+from adaptive_SNN.simulation_configs.single_neuron_simulation import (
     create_single_neuron_config_extra_synapse,
 )
+from adaptive_SNN.utils.runner import run_simulation
+from adaptive_SNN.utils.save_helper import save_part_of_state
 
 
 class ExternalNoiseStd(NoisyNetwork):
