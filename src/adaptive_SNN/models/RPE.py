@@ -42,6 +42,8 @@ class AbstractRPEModel(ABC, eqx.Module):
 class UpdateAndDecayRPEModel(AbstractRPEModel):
     """RPE model that integrates RPE updates and decays them over time"""
 
+    tau_RPE: float = 0.1
+
     @property
     def initial(self):
         return jnp.zeros((1,))
@@ -56,12 +58,7 @@ class UpdateAndDecayRPEModel(AbstractRPEModel):
         )
 
     def drift(self, t, x, args):
-        tau_RPE = args.get("tau_RPE", None)  # Time constant for RPE integration
-        if tau_RPE is None:
-            raise ValueError(
-                "UpdateAndDecayRPEModel requires 'tau_RPE' in args for drift computation."
-            )
-        return -x / tau_RPE  # Exponential decay of RPE over time
+        return -x / self.tau_RPE  # Exponential decay of RPE over time
 
     def update(self, t, x, args):
         RPE_update = args.get(
