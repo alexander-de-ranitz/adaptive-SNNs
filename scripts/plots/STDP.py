@@ -1,19 +1,7 @@
-import sys
-import time
-from pathlib import Path
-
 import jax
 
 jax.config.update("jax_enable_x64", True)
-
-# Allow running this file directly while importing from the repository modules.
-_THIS_FILE = Path(__file__).resolve()
-_SCRIPTS_DIR = _THIS_FILE.parents[1]
-_REPO_ROOT = _THIS_FILE.parents[2]
-for _path in (str(_REPO_ROOT), str(_SCRIPTS_DIR)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-
+import time
 
 import jax.numpy as jnp
 import jax.random as jr
