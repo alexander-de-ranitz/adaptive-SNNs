@@ -39,7 +39,7 @@ def make_LIF_model(
         N_inputs=N_inputs,
         dt=dt,
         fully_connected_input=fully_connected_input,
-        input_weight=input_weight,
+        initial_input_weight=input_weight,
         key=key,
     )
 
