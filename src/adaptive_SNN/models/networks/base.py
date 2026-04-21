@@ -619,7 +619,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         """Compute the ratio of total inhibitory to excitatory input weights for each neuron.
 
         Balance is computed as:
-            balance = (total_I_weights / N_I_connections * |E_I - V_rest| * tau_I) / (total_E_weights / N_E_connections * |E_E - V_rest| * tau_E)
+            balance = (total_I_weights * |E_I - V_rest| * tau_I) / (total_E_weights * |E_E - V_rest| * tau_E)
 
         Returns NaN if a neuron has no non-zero excitatory or inhibitory connections.
         """
@@ -634,6 +634,27 @@ class AbstractLIFNetwork(NeuronModelABC):
         N_E_connections = jnp.sum(existing_E, axis=1)
         N_I_connections = jnp.sum(existing_I, axis=1)
 
+        if "N_simulated_E_inputs" in args:
+            is_E_input = self.excitatory_mask[None, :] & jnp.concatenate(
+                [
+                    jnp.zeros((self.N_neurons,), dtype=bool),
+                    jnp.ones((self.N_inputs,), dtype=bool),
+                ]
+            )
+            existing_E = jnp.where(is_E_input, args["N_simulated_E_inputs"], existing_E)
+            N_E_connections += (
+                args["N_simulated_E_inputs"] - 1
+            )  # -1 since the existing connections already count as 1
+        if "N_simulated_I_inputs" in args:
+            is_I_input = ~self.excitatory_mask[None, :] & jnp.concatenate(
+                [
+                    jnp.zeros((self.N_neurons,), dtype=bool),
+                    jnp.ones((self.N_inputs,), dtype=bool),
+                ]
+            )
+            existing_I = jnp.where(is_I_input, args["N_simulated_I_inputs"], existing_I)
+            N_I_connections += args["N_simulated_I_inputs"]
+
         total_E_weights = jnp.sum(weights * existing_E, axis=1)
         total_I_weights = jnp.sum(weights * existing_I, axis=1)
 
@@ -643,13 +664,11 @@ class AbstractLIFNetwork(NeuronModelABC):
             jnp.nan,
             (
                 total_I_weights
-                / N_I_connections
                 * jnp.abs(self.reversal_potential_I - self.resting_potential)
                 * self.tau_I
             )
             / (
                 total_E_weights
-                / N_E_connections
                 * jnp.abs(self.reversal_potential_E - self.resting_potential)
                 * self.tau_E
             ),
