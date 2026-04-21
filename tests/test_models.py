@@ -653,7 +653,6 @@ def test_force_balance_mini():
     )
     charge_E = (
         (state.W[0][1] + state.W[0][3])
-        / 2.0
         * (model.reversal_potential_E - model.resting_potential)
         * model.tau_E
     )
@@ -716,6 +715,48 @@ def test_force_balance_zero_inhibitory_weight():
     state = model.force_balanced_weights(0, state, args=args)
     balance_after = model.compute_balance(0, state, args=args)
     assert jnp.allclose(balance_after, target_balance)
+
+
+def test_balance_simulated_input_counts():
+    N_neurons, N_inputs = 2, 2
+    input_types = jnp.array([1, 0])
+
+    model = make_LIF_model(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        input_neuron_types=input_types,
+        key=jr.PRNGKey(7),
+    )
+
+    target_balance = 1.0
+    args = make_default_args(
+        N_neurons,
+        N_inputs,
+        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
+        N_simulated_I_inputs=3,
+        N_simulated_E_inputs=5,
+    )
+
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(2.0).at[0, 3].set(3.0)
+
+    state = make_baseline_state(model, W=base_W)
+    state = model.force_balanced_weights(0, state, args=args)
+
+    total_E_weights = state.W[0, 1] + state.W[0, 2] * args["N_simulated_E_inputs"]
+    total_I_weights = state.W[0, 3] * args["N_simulated_I_inputs"]
+
+    balance = (
+        total_I_weights
+        * jnp.abs(model.reversal_potential_I - model.resting_potential)
+        * model.tau_I
+    ) / (
+        total_E_weights
+        * (model.reversal_potential_E - model.resting_potential)
+        * model.tau_E
+    )
+
+    assert jnp.allclose(balance, target_balance)
 
 
 def test_synaptic_delays():
