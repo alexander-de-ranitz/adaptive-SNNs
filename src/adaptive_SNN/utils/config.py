@@ -42,7 +42,8 @@ class SimulationConfig:
     connection_prob: float = 0.0
     noise_level: float = 0.0
     lr: float = 0.0
-    initial_weight: float = 0.0
+    initial_rec_weight: float = 0.0
+    rec_weight_std: float = 0.0
     balance: float = 0.0
     min_noise_std: float = 0.0
     fraction_excitatory_recurrent: float = 0.8
@@ -68,9 +69,8 @@ class SimulationConfig:
     # Input parameters
     input_spike_fn: Callable[..., Any] | None = None
     input_types: jnp.ndarray | None = None
-
-    weight_std: float = 0.0
     fully_connected_input: bool = True
+    initial_input_weight: float = 0.0
 
     # Other
     key: int | jnp.ndarray = 0

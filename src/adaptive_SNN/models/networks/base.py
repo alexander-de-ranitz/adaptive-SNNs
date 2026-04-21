@@ -97,15 +97,13 @@ class AbstractLIFNetwork(NeuronModelABC):
     fraction_excitatory_input: float = 1.0  # Fraction of excitatory input neurons
     EMA_tau: float = 1  # Time constant for exponential moving average of firing rate and mean/var of conductance
 
-    input_weight: float  # Mean input weight
-    weight_std: (
-        float  # Standard deviation of initial weights as fraction of mean weight
-    )
-    rec_weight: float  # Mean recurrent weight
+    initial_input_weight: float  # Mean input weight
+    rec_weight_std: float  # Standard deviation of initial recurrent weights as fraction of mean weight
+    initial_rec_weight: float  # Mean recurrent weight
     initial_weight_matrix: (
         Array | None
     )  # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
-    fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight input_weight
+    fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight initial_input_weight
     N_neurons: int
     N_inputs: int
     excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
@@ -123,13 +121,13 @@ class AbstractLIFNetwork(NeuronModelABC):
         N_inputs: int = 0,
         connection_prob: float = 0.1,
         fully_connected_input: bool = True,
-        input_weight: float = 1.0,
-        rec_weight: float = 1.0,
+        initial_input_weight: float = 1.0,
+        initial_rec_weight: float = 0.0,
         initial_weight_matrix: Array | None = None,
         fraction_excitatory_recurrent: float = 0.8,
         fraction_excitatory_input: float = 1.0,
         mean_synaptic_delay: float = 1.5e-3,
-        weight_std: float = 0.2,
+        rec_weight_std: float = 0.2,
         input_types: Array | None = None,
         key: jr.PRNGKey = jr.PRNGKey(0),
     ):
@@ -139,13 +137,13 @@ class AbstractLIFNetwork(NeuronModelABC):
             N_neurons: Number of neurons in the network
             N_inputs: Number of input neurons
             connection_prob: Probability of connection between any two neurons (for recurrent connections)
-            fully_connected_input: If True, all input neurons connect to all neurons with weight input_weight
-            input_weight: Mean weight of input synapses
-            rec_weight: Mean weight of recurrent synapses
-            initial_weight_matrix: Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs). If None, weights are initialized randomly based on input_weight, rec_weight, connection_prob, and weight_std.
+            fully_connected_input: If True, all input neurons connect to all neurons with weight initial_input_weight
+            initial_input_weight: Mean weight of input synapses
+            initial_rec_weight: Mean weight of recurrent synapses
+            initial_weight_matrix: Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs). If None, weights are initialized randomly based on initial_input_weight, initial_rec_weight, connection_prob, and rec_weight_std.
             fraction_excitatory_recurrent: Fraction of excitatory recurrent neurons
             fraction_excitatory_input: Fraction of excitatory input neurons
-            weight_std: Standard deviation of initial weights as fraction of mean weight
+            rec_weight_std: Standard deviation of initial recurrent weights as fraction of mean weight
             input_types: Optional array of shape (N_inputs,) with boolean values indicating whether each input neuron is excitatory (True) or inhibitory (False). If None, random assignment is used.
             key: JAX random key for initialization
         """
@@ -153,13 +151,13 @@ class AbstractLIFNetwork(NeuronModelABC):
         self.N_inputs = N_inputs
         self.connection_prob = connection_prob
         self.fully_connected_input = fully_connected_input
-        self.input_weight = input_weight
-        self.rec_weight = rec_weight
+        self.initial_input_weight = initial_input_weight
+        self.initial_rec_weight = initial_rec_weight
         self.fraction_excitatory_recurrent = fraction_excitatory_recurrent
         self.fraction_excitatory_input = fraction_excitatory_input
         self.mean_synaptic_delay = mean_synaptic_delay
         self.dt = dt
-        self.weight_std = weight_std
+        self.rec_weight_std = rec_weight_std
         self.initial_weight_matrix = initial_weight_matrix
 
         key, subkey = jr.split(key)
@@ -730,10 +728,10 @@ class AbstractLIFNetwork(NeuronModelABC):
         key, subkey, subkey2 = jr.split(key, 3)
         num_rec_connections = int(self.N_neurons**2 * self.connection_prob)
         rec_weights = (
-            self.rec_weight
+            self.initial_rec_weight
             * jnp.clip(
                 1
-                + self.weight_std
+                + self.rec_weight_std
                 * jr.normal(
                     subkey, (self.N_neurons, self.N_neurons), dtype=default_float
                 ),
@@ -760,17 +758,11 @@ class AbstractLIFNetwork(NeuronModelABC):
             if not self.fully_connected_input
             else self.N_neurons * self.N_inputs
         )
-        input_weights = jnp.clip(
-            1
-            + self.weight_std
-            * jr.normal(subkey, (self.N_neurons, self.N_inputs), dtype=default_float),
-            min=0.5,
-            max=1.5,
-        ) * jr.permutation(
+        input_weights = jr.permutation(
             subkey,
             jnp.concatenate(
                 [
-                    jnp.ones(N_input_connections) * self.input_weight,
+                    jnp.ones(N_input_connections) * self.initial_input_weight,
                     jnp.zeros(self.N_neurons * self.N_inputs - N_input_connections),
                 ]
             ),
