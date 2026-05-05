@@ -658,7 +658,7 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         # If a neuron has no excitatory or no inhibitory connections, we cannot compute a balance, so we set it to NaN in that case
         balance = jnp.where(
-            (total_I_weights == 0.0) | (total_E_weights == 0.0),
+            (total_E_weights == 0.0),
             jnp.nan,
             (
                 total_I_weights
