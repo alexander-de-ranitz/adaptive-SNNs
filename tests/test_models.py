@@ -712,6 +712,44 @@ def test_force_balance_zero_inhibitory_weight():
     base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.0).at[0, 3].set(1.0)
     state = make_baseline_state(model, W=base_W)
 
+    initial_balance = model.compute_balance(0, state, args)
+    assert jnp.isclose(initial_balance, 0.0)
+
+    state = model.force_balanced_weights(0, state, args=args)
+    balance_after = model.compute_balance(0, state, args=args)
+    assert jnp.allclose(balance_after, target_balance)
+
+
+def test_force_balance_zero_inhibitory_weight_recurrent_only():
+    N_neurons, N_inputs = 4, 0
+
+    model = make_LIF_model(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        key=jr.PRNGKey(7),
+    )
+
+    target_balance = 2.0
+    args = make_default_args(
+        N_neurons,
+        N_inputs,
+        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
+    )
+
+    # Override excitatory mask for test
+    excitatory_mask = jnp.array([True, True, False, False], dtype=bool)
+    object.__setattr__(model, "excitatory_mask", excitatory_mask)
+
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = base_W.at[0, 1].set(1.0).at[0, 3].set(0.0)
+    base_W = base_W.at[1, 0].set(1.0).at[1, 3].set(0.0)
+    base_W = base_W.at[2, 1].set(1.0).at[2, 3].set(0.0)
+    base_W = base_W.at[3, 0:2].set(1.0).at[3, 2].set(0.0)
+    state = make_baseline_state(model, W=base_W)
+
+    initial_balance = model.compute_balance(0, state, args)
+    assert jnp.allclose(initial_balance, 0.0)
+
     state = model.force_balanced_weights(0, state, args=args)
     balance_after = model.compute_balance(0, state, args=args)
     assert jnp.allclose(balance_after, target_balance)
