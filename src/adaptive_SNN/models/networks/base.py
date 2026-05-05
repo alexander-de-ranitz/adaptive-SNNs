@@ -728,7 +728,19 @@ class AbstractLIFNetwork(NeuronModelABC):
         """
         key, subkey, subkey2 = jr.split(key, 3)
         num_rec_connections = int(self.N_neurons**2 * self.connection_prob)
-        rec_weights = (
+
+        rec_mask = jr.permutation(
+            subkey2,
+            jnp.concatenate(
+                [
+                    jnp.ones(num_rec_connections),
+                    jnp.zeros(self.N_neurons**2 - num_rec_connections),
+                ]
+            ),
+        ).reshape(self.N_neurons, self.N_neurons)
+
+        rec_weights = jnp.where(
+            rec_mask,
             self.initial_rec_weight
             * jnp.clip(
                 1
@@ -738,20 +750,12 @@ class AbstractLIFNetwork(NeuronModelABC):
                 ),
                 min=0.5,
                 max=1.5,
-            )
-            * jr.permutation(
-                subkey2,
-                jnp.concatenate(
-                    [
-                        jnp.ones(num_rec_connections),
-                        jnp.zeros(self.N_neurons**2 - num_rec_connections),
-                    ]
-                ),
-            ).reshape(self.N_neurons, self.N_neurons)
+            ),
+            -jnp.inf,
         )
 
         # Remove self-connections
-        rec_weights = jnp.fill_diagonal(rec_weights, 0.0, inplace=False)
+        rec_weights = jnp.fill_diagonal(rec_weights, -jnp.inf, inplace=False)
 
         key, subkey = jr.split(key)
         N_input_connections = (
@@ -759,20 +763,22 @@ class AbstractLIFNetwork(NeuronModelABC):
             if not self.fully_connected_input
             else self.N_neurons * self.N_inputs
         )
-        input_weights = jr.permutation(
+
+        input_mask = jr.permutation(
             subkey,
             jnp.concatenate(
                 [
-                    jnp.ones(N_input_connections) * self.initial_input_weight,
+                    jnp.ones(N_input_connections),
                     jnp.zeros(self.N_neurons * self.N_inputs - N_input_connections),
                 ]
             ),
         ).reshape(self.N_neurons, self.N_inputs)
 
+        input_weights = jnp.where(
+            input_mask,
+            self.initial_input_weight,
+            -jnp.inf,
+        )
+
         weights = jnp.concatenate([rec_weights, input_weights], axis=1)
-
-        weights = jnp.where(
-            weights == 0.0, -jnp.inf, weights
-        )  # Non existing connections have weight -inf
-
         return weights
