@@ -632,6 +632,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         N_E_connections = jnp.sum(existing_E, axis=1)
         N_I_connections = jnp.sum(existing_I, axis=1)
 
+        # TODO: fix this. This is 1) a bit hacky and 2) bloated since we currently only use E external input
         if "N_simulated_E_inputs" in args:
             is_E_input = self.excitatory_mask[None, :] & jnp.concatenate(
                 [
