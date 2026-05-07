@@ -8,7 +8,7 @@ from adaptive_SNN.models.networks.noisy_network import NoisyNetwork, NoisyNetwor
 from adaptive_SNN.models.noise import OUP
 from adaptive_SNN.models.noise.base import NoiseModelABC
 from adaptive_SNN.models.reward import AbstractRewardModel
-from adaptive_SNN.models.RPE import AbstractRPEModel
+from adaptive_SNN.models.RPE import AbstractRPEModel, RPEState
 from adaptive_SNN.utils.operators import MixedPyTreeOperator
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -18,7 +18,7 @@ class AgentState(eqx.Module):
     noisy_network: NoisyNetworkState
     predicted_reward: Array
     reward_noise: Array
-    RPE: Array
+    RPE: RPEState
 
 
 class Agent(eqx.Module):
@@ -71,7 +71,7 @@ class Agent(eqx.Module):
         )
 
         args.update(
-            {"RPE": RPE + reward_noise}
+            {"RPE": RPE.RPE + reward_noise}
         )  # Add RPE to args so that it can be used for weight updates in the network drift
 
         neuron_drift = self.noisy_network.drift(t, network_state, args)

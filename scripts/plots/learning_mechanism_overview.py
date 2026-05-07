@@ -181,7 +181,7 @@ def main():
                 :, 0
             ].sum(axis=-1)
         )
-        RPE = state.agent_state.RPE[:, 0]
+        RPE = state.agent_state.RPE.RPE[:, 0]
         W = state.agent_state.noisy_network.network_state.W[:, 0]
         gating = neuron_model.gating_function(
             state.agent_state.noisy_network.network_state.V[:, 0], neuron_model.delta_V
