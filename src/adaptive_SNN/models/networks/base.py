@@ -81,7 +81,8 @@ class AbstractLIFNetwork(NeuronModelABC):
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_capacitance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
-    connection_prob: float = 0.1
+    connection_prob_E: float = 0.1
+    connection_prob_I: float = 0.2
     reversal_potential_E: float = 0.0  # mV
     reversal_potential_I: float = -80.0 * 1e-3  # mV
     tau_E: float = 6.0 * 1e-3  # ms
@@ -119,7 +120,8 @@ class AbstractLIFNetwork(NeuronModelABC):
         dt,
         N_neurons: int,
         N_inputs: int = 0,
-        connection_prob: float = 0.1,
+        connection_prob_E: float = 0.1,
+        connection_prob_I: float = 0.2,
         fully_connected_input: bool = True,
         initial_input_weight: float = 1.0,
         initial_rec_weight: float = 0.0,
@@ -149,7 +151,8 @@ class AbstractLIFNetwork(NeuronModelABC):
         """
         self.N_neurons = N_neurons
         self.N_inputs = N_inputs
-        self.connection_prob = connection_prob
+        self.connection_prob_E = connection_prob_E
+        self.connection_prob_I = connection_prob_I
         self.fully_connected_input = fully_connected_input
         self.initial_input_weight = initial_input_weight
         self.initial_rec_weight = initial_rec_weight
@@ -727,17 +730,15 @@ class AbstractLIFNetwork(NeuronModelABC):
         No self-connections are allowed. Non-existing connections have weight -inf.
         """
         key, subkey, subkey2 = jr.split(key, 3)
-        num_rec_connections = int(self.N_neurons**2 * self.connection_prob)
 
-        rec_mask = jr.permutation(
-            subkey2,
-            jnp.concatenate(
-                [
-                    jnp.ones(num_rec_connections),
-                    jnp.zeros(self.N_neurons**2 - num_rec_connections),
-                ]
-            ),
-        ).reshape(self.N_neurons, self.N_neurons)
+        connection_prob = jnp.where(
+            self.excitatory_mask[: self.N_neurons],
+            self.connection_prob_E,
+            self.connection_prob_I,
+        )
+        rec_mask = jr.bernoulli(
+            subkey2, p=connection_prob[None, :], shape=(self.N_neurons, self.N_neurons)
+        )
 
         rec_weights = jnp.where(
             rec_mask,
@@ -759,7 +760,7 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         key, subkey = jr.split(key)
         N_input_connections = (
-            int(self.N_neurons * self.N_inputs * self.connection_prob)
+            int(self.N_neurons * self.N_inputs * self.connection_prob_E)
             if not self.fully_connected_input
             else self.N_neurons * self.N_inputs
         )
