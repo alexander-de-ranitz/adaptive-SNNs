@@ -78,6 +78,26 @@ def compute_conductance_ratio(t, state, model) -> Array:
     return avg_ratio
 
 
+def compute_balance_from_V(V) -> Array:
+    """Compute the balance of inhibitory to excitatory input for each neuron based on the voltage trace.
+
+    Args:
+        V (jnp.ndarray): Voltage trace of shape (num_time_steps, num_neurons).
+    Returns:
+        jnp.ndarray: An array of shape (num_neurons,) containing the ratio of total inhibitory to excitatory charge.
+    """
+
+    dV = jnp.diff(V, axis=0)
+    # Remove dV due to spiking
+    dV = jnp.where(dV < -9.9e-3, 0.0, dV)  # Spike goes from -50mV to -60mV
+    total_E_charge = jnp.sum(dV[dV > 0], axis=0)
+    total_I_charge = jnp.sum(-dV[dV < 0], axis=0)
+    total_charge_per_neuron = (
+        total_I_charge / (total_E_charge) if total_E_charge > 0 else jnp.inf
+    )
+    return total_charge_per_neuron
+
+
 def compute_charge_ratio(t, state, model) -> Array:
     """Compute the ratio of total inhibitory to excitatory charge for each neuron.
 
