@@ -84,6 +84,9 @@ def simulate_noisy_SNN(
         t0, t1, n_steps, dt0, y0, ys, save_indices, save_fn, terms, args, model, solver
     )
 
+    # Wait until results are ready
+    jax.tree.map(lambda x: x.block_until_ready(), (y_final, ys))
+
     # If no states were saved, return the final state
     if ys is None:
         ys = y_final
@@ -143,6 +146,7 @@ def step(i, carry, t0, t1, dt, solver, terms, args, save_indices, model, save_fn
     return (y, ys, save_index)
 
 
+@eqx.filter_jit()
 def run_simulation(
     t0, t1, n_steps, dt0, y0, ys, save_indices, save_fn, terms, args, model, solver
 ):
@@ -175,9 +179,6 @@ def run_simulation(
     y_final, ys, save_index = jax.lax.fori_loop(
         0, n_steps, step_partial, (y0, ys, save_index)
     )
-
-    # Ensure computation is complete before returning
-    jax.tree.map(lambda x: x.block_until_ready(), (ys, y_final))
 
     return y_final, ys
 
