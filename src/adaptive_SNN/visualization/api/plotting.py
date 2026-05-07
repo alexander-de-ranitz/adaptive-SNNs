@@ -13,7 +13,7 @@ from adaptive_SNN.models import (
     SystemState,
 )
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.utils.metrics import compute_CV_ISI
+from adaptive_SNN.utils.metrics import compute_CV_ISI, compute_synchrony
 from adaptive_SNN.visualization.utils.adapters import (
     get_LIF_model,
     get_LIF_state,
@@ -248,6 +248,9 @@ def plot_network_stats(
         sol,
         model,
     )
+
+    synchrony = compute_synchrony(get_LIF_state(sol.ys).S)
+    axs[1][1].text(0.5, 0.5, f"Synchrony: {synchrony:.2f}", fontsize=12, ha="center")
 
     _plot_spikes_raster(axs[2][0], sol, model)
 
