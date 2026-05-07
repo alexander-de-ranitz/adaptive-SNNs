@@ -702,7 +702,10 @@ class AbstractLIFNetwork(NeuronModelABC):
             lambda s: s.W,
             state,
             jnp.where(
-                (total_I_weights == 0.0)[:, None]
+                (
+                    desired_balance != 0.0
+                )  # If desired balance is 0, we do not want to change the weights
+                & (total_I_weights == 0.0)[:, None]
                 & jnp.invert(self.excitatory_mask[None, :])
                 & jnp.isfinite(state.W),
                 1.0,
