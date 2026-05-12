@@ -39,7 +39,8 @@ class SimulationConfig:
     # Model hyperparameters
     N_neurons: int = 1
     N_inputs: int = 2
-    connection_prob: float = 0.0
+    connection_prob_E: float = 0.0
+    connection_prob_I: float = 0.0
     noise_level: float = 0.0
     lr: float = 0.0
     initial_rec_weight: float = 0.0
@@ -97,7 +98,8 @@ class SimulationConfig:
 
     def _validate_probabilities(self) -> None:
         for name in (
-            "connection_prob",
+            "connection_prob_E",
+            "connection_prob_I",
             "fraction_excitatory_recurrent",
             "fraction_excitatory_input",
         ):

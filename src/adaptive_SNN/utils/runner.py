@@ -54,7 +54,8 @@ def run_simulation(
     neuron_model = config.base_network_cls(
         N_neurons=config.N_neurons,
         N_inputs=config.N_inputs,
-        connection_prob=config.connection_prob,
+        connection_prob_E=config.connection_prob_E,
+        connection_prob_I=config.connection_prob_I,
         dt=config.dt,
         initial_weight_matrix=config.initial_weight_matrix,
         initial_input_weight=config.initial_input_weight,
