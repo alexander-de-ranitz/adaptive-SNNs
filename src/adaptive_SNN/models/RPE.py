@@ -149,9 +149,24 @@ class BiphasicRPEModel(AbstractRPEModel):
     time_constants: Array = eqx.field(
         default_factory=lambda: jnp.array([0.2, 0.3])
     )  # Time constants for the positive and negative phases of the response
-    amplitudes: Array = eqx.field(
-        default_factory=lambda: jnp.array([3.0, 2.0])
-    )  # Amplitudes for the positive and negative phases of the response. Must fulfill: amplitude[0] = amplitude[1] * time_constants[1] / time_constants[0] to ensure integral is 0
+    amplitudes: Array  # Amplitudes for the positive and negative phases, computed based on time constants to ensure zero integral of the response
+
+    def __init__(self, time_constants=None, scale=1.0):
+        if time_constants is not None:
+            self.time_constants = time_constants
+        assert self.time_constants.shape == (2,), (
+            "time_constants must be an array of shape (2,)"
+        )
+        assert self.time_constants[0] < self.time_constants[1], (
+            "time_constants[0] must be smaller than time_constants[1] for a biphasic response with an initial positive phase followed by a negative tail"
+        )
+        # Amplitudes for the positive and negative phases of the response. Must fulfill: amplitude[0] = amplitude[1] * time_constants[1] / time_constants[0] to ensure integral is 0
+        self.amplitudes = jnp.array(
+            [self.time_constants[1] / self.time_constants[0], 1.0]
+        )
+        self.amplitudes = (
+            scale * self.amplitudes / (self.amplitudes[0] - self.amplitudes[1])
+        )  # Normalize such that the maximum is equal to the specified scale
 
     @property
     def initial(self):
