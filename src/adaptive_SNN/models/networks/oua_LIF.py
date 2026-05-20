@@ -96,24 +96,44 @@ class OUAMeanReversionLIFNetwork(AbstractLIFNetwork):
         Update rule (unified §4.5 / impl plan §4.4):
             dW_ij = eta * delta_r * (zeta_ij / sigma_E) * (G_ij / w0) * gate(V_i)
 
-        with gamma-clip applied multiplicatively on the per-neuron prefactor.
+        Per-synapse geometry (alpha = 1): zeta_ij comes from
+        args["per_synapse_excitatory_noise"] (PerSynapseOUP via
+        PerSynapseNoisyNetwork).
+
+        Per-neuron geometry (alpha = 0): xi_i comes from
+        args["excitatory_noise"] (NeuralNoiseOUP via NoisyNetwork). The
+        per-neuron OUA update is then
+            dW_ij = eta * delta_r * (xi_i / sigma_xi) * (G_ij / w0) * mask_j * gate(V_i)
+        which is the alpha=0 endpoint of unified Eq. 2.4 evaluated under the
+        multiplicative-on-weight excursion (the share xi_i / |E_i| is the
+        per-synapse marginal of the per-neuron noise, but we factor |E_i|
+        into sigma normalisation rather than into the noise term, leaving
+        relative_noise = xi_i / sigma_xi as the natural ratio).
+
+        gamma-clip is applied multiplicatively on the per-neuron prefactor.
         """
         learning_rate = args["get_learning_rate"](t, state, args)
         RPE = args.get("RPE", jnp.array(0.0))
 
-        # zeta_ij — the per-synapse OU excursion.
-        per_synapse_noise = args.get(
-            "per_synapse_excitatory_noise", jnp.zeros_like(state.G)
-        )
-        # Normalise by the OU diffusion strength so the update scale is
-        # invariant to the absolute noise level (matches the analogous
-        # normalisation in EligibilityLIFNetwork.compute_feature_drift).
-        per_synapse_noise_std = args.get("per_synapse_noise_std", 0.0)
-        relative_noise = jnp.where(
-            per_synapse_noise_std != 0.0,
-            per_synapse_noise / per_synapse_noise_std,
-            0.0,
-        )
+        # Prefer per-synapse routing when present (alpha = 1 endpoint).
+        per_synapse_noise = args.get("per_synapse_excitatory_noise", None)
+        if per_synapse_noise is None:
+            # Per-neuron fallback (alpha = 0): broadcast xi_i across excitatory
+            # synapses; the variance match is encoded in sigma_xi normalisation.
+            xi = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+            sigma_xi = args.get("noise_std", 0.0)
+            exc_mask = self.excitatory_mask.astype(state.G.dtype)
+            sigma_xi_arr = jnp.atleast_1d(sigma_xi)
+            sigma_xi_arr = jnp.broadcast_to(sigma_xi_arr, (self.N_neurons,))
+            rel_per_neuron = jnp.where(sigma_xi_arr != 0.0, xi / sigma_xi_arr, 0.0)
+            relative_noise = rel_per_neuron[:, None] * exc_mask[None, :]
+        else:
+            per_synapse_noise_std = args.get("per_synapse_noise_std", 0.0)
+            relative_noise = jnp.where(
+                per_synapse_noise_std != 0.0,
+                per_synapse_noise / per_synapse_noise_std,
+                0.0,
+            )
 
         # s_ij — synaptic activity (G / w0).
         s_ij = state.G / self.synaptic_increment
