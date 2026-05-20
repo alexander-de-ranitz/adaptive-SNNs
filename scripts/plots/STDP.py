@@ -15,8 +15,8 @@ from adaptive_SNN.models.networks.eligibility_LIF import (
     EligibilityLIFNetwork,
 )
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.simulation_configs.single_neuron_simulation import (
-    create_single_neuron_config_extra_synapse,
+from adaptive_SNN.simulation_configs.single_synapse_learning import (
+    create_default_config_single_synapse_task,
 )
 from adaptive_SNN.utils.runner import run_simulation
 
@@ -121,19 +121,21 @@ def compute_eligibility_changes_around_spikes(sol) -> list[tuple[float, float]]:
 
 
 def run_sim(id, key):
-    config = create_single_neuron_config_extra_synapse(N_neurons=1, key=key)
+    config = create_default_config_single_synapse_task(key=key)
     config.t1 = 30
     config.base_network_cls = NoDecayGatedLIFNetwork
-    config.min_noise_std = 0.0
-    config.noise_level = 0.3
+    config.min_noise_std = 1e-9
+    config.noise_level = 0.0
+    config.initial_weight_matrix = config.initial_weight_matrix.at[:, -1].set(5.0)
+    config.args.update({"delta_V": 0.5**13})
 
     def save_fn(t, x: SystemState, args):
         pre_synaptic_spikes = args["get_input_spikes"](t, None, None)[
-            :, 2
+            0, 2
         ].squeeze()  # Get the spikes from the third input
         post_synaptic_spikes = x.agent_state.noisy_network.network_state.S[0].squeeze()
         eligibility = x.agent_state.noisy_network.network_state.features.eligibility[
-            0, 3
+            0, 4
         ].squeeze()  # Eligibility for the synapse from input 2 to neuron 0
         return (pre_synaptic_spikes, post_synaptic_spikes, eligibility)
 
@@ -141,17 +143,23 @@ def run_sim(id, key):
 
     config.save_at = save_at
 
-    config.args["use_noise"] = jnp.array([True])
-    config.save_file = f"results/STDP_plot/STDP_no_decay_default_simulation_{id}"
-    return run_simulation(config, save_results=True)
+    model = (
+        "gated"
+        if (config.base_network_cls == GatedLIFNetwork)
+        or (config.base_network_cls == NoDecayGatedLIFNetwork)
+        else "eligibility"
+    )
+    config.save_file = f"results/STDP_plot_new/STDP_no_decay_{model}_simulation_{id}"
+    return run_simulation(config, save_results=True, overwrite=False)
 
 
 def plot_STDP():
-    key = jr.PRNGKey(2001)
+    key = jr.PRNGKey(1001)
     all_e_changes = []
-    for i in range(20):
+    for i in range(5):
         start = time.time()
         sol, _ = run_sim(i, jr.fold_in(key, i))
+
         e_changes = compute_eligibility_changes_around_spikes(sol)
         end = time.time()
         print(
