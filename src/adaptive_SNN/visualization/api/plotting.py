@@ -556,8 +556,8 @@ def plot_weight_distribution_over_time(
             if neurons_to_plot is not None:
                 weight_data = weight_data[:, neurons_to_plot]
 
-            # Remove -inf values
-            weight_data = weight_data[jnp.isfinite(weight_data)]
+            # Remove NaN values
+            weight_data = weight_data[~jnp.isnan(weight_data)]
 
             all_weight_bins[i].append(weight_data.flatten())
 

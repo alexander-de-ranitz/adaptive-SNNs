@@ -54,7 +54,7 @@ class LIFState(eqx.Module):
     Attributes:
         V: Membrane potentials (N_neurons,)
         S: Spike vector (N_neurons + N_inputs,)
-        W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs). -inf indicates no connection
+        W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs). NaN indicates no connection
         G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
         auxiliary_info: AuxiliaryInfo object containing additional state variables
     """
@@ -314,7 +314,7 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         # Compute total excitatory synaptic conductance per neuron
         W, G = state.W, state.G
-        weighted_conductances = jnp.where(jnp.isfinite(W), W, 0.0) * G
+        weighted_conductances = jnp.where(~jnp.isnan(W), W, 0.0) * G
         total_E_conductance_per_neuron = jnp.sum(
             weighted_conductances * self.excitatory_mask[None, :], axis=1
         )
@@ -458,7 +458,7 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         # Compute E/I currents from recurrent connections
         weighted_conductances = (
-            jnp.where(W == -jnp.inf, 0.0, W) * G
+            jnp.where(jnp.isnan(W), 0.0, W) * G
         )  # For non-existing connections, set weighted conductance to 0
         total_I_conductances = jnp.sum(
             weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
@@ -498,7 +498,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         return eqx.tree_at(
             lambda s: s.W,
             state,
-            jnp.where(jnp.isfinite(state.W), jnp.clip(state.W, min=0.0), state.W),
+            jnp.where(~jnp.isnan(state.W), jnp.clip(state.W, min=0.0), state.W),
         )
 
     def get_delayed_spikes(self, state: LIFState) -> Array:
@@ -589,7 +589,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         )
 
         G_new = jnp.where(
-            W == -jnp.inf, 0.0, G_new
+            jnp.isnan(W), 0.0, G_new
         )  # Only update conductances for existing connections, else set to 0
 
         time_since_last_spike = jnp.where(
@@ -625,12 +625,12 @@ class AbstractLIFNetwork(NeuronModelABC):
         Returns NaN if a neuron has no non-zero excitatory or inhibitory connections.
         """
         weights = jnp.where(
-            state.W == -jnp.inf, 0.0, state.W
+            jnp.isnan(state.W), 0.0, state.W
         )  # Treat non-existing connections as weight 0 for balance computation
 
         # Create masks for existing connections
-        existing_E = jnp.isfinite(state.W) & self.excitatory_mask[None, :]
-        existing_I = jnp.isfinite(state.W) & ~self.excitatory_mask[None, :]
+        existing_E = ~jnp.isnan(state.W) & self.excitatory_mask[None, :]
+        existing_I = ~jnp.isnan(state.W) & ~self.excitatory_mask[None, :]
 
         N_E_connections = jnp.sum(existing_E, axis=1)
         N_I_connections = jnp.sum(existing_I, axis=1)
@@ -690,7 +690,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         desired_balance = args["get_desired_balance"](t, state, args)
         total_I_weights = jnp.sum(
             jnp.where(
-                state.W == -jnp.inf,
+                jnp.isnan(state.W),
                 0.0,
                 state.W * jnp.invert(self.excitatory_mask[None, :]),
             ),
@@ -707,7 +707,7 @@ class AbstractLIFNetwork(NeuronModelABC):
                 )  # If desired balance is 0, we do not want to change the weights
                 & (total_I_weights == 0.0)[:, None]
                 & jnp.invert(self.excitatory_mask[None, :])
-                & jnp.isfinite(state.W),
+                & ~jnp.isnan(state.W),
                 1.0,
                 state.W,
             ),
@@ -730,7 +730,7 @@ class AbstractLIFNetwork(NeuronModelABC):
     def initialize_weights(self, key: jr.PRNGKey):
         """Initialize synaptic weight matrix with random sparse connections.
 
-        No self-connections are allowed. Non-existing connections have weight -inf.
+        No self-connections are allowed. Non-existing connections have weight NaN.
         """
         key, subkey, subkey2 = jr.split(key, 3)
 
@@ -755,11 +755,11 @@ class AbstractLIFNetwork(NeuronModelABC):
                 min=0.5,
                 max=1.5,
             ),
-            -jnp.inf,
+            jnp.nan,
         )
 
         # Remove self-connections
-        rec_weights = jnp.fill_diagonal(rec_weights, -jnp.inf, inplace=False)
+        rec_weights = jnp.fill_diagonal(rec_weights, jnp.nan, inplace=False)
 
         key, subkey = jr.split(key)
         N_input_connections = (
@@ -781,7 +781,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         input_weights = jnp.where(
             input_mask,
             self.initial_input_weight,
-            -jnp.inf,
+            jnp.nan,
         )
 
         weights = jnp.concatenate([rec_weights, input_weights], axis=1)
