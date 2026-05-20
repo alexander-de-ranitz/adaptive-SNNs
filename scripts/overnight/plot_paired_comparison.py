@@ -207,12 +207,20 @@ def main():
             sems_snr = [_agg(cell, dV, "snr")[1] for dV in dV_vals]
             ax2 = ax.twinx()
             ax.errorbar(dV_log2, means_rho, yerr=sems_rho, fmt="o-", color="C0", label="rho")
-            ax2.errorbar(dV_log2, means_snr, yerr=sems_snr, fmt="s--", color="C3", label="SNR")
+            ax2.errorbar(
+                dV_log2,
+                np.maximum(np.array(means_snr), 1e-6),
+                yerr=sems_snr,
+                fmt="s--",
+                color="C3",
+                label="SNR",
+            )
             ax.set_title(cell)
             ax.set_ylabel("rho", color="C0")
             ax2.set_ylabel("SNR", color="C3")
             ax.set_ylim(-1.2, 1.2)
-            ax2.set_yscale("log")
+            if np.any(np.array(means_snr) > 0):
+                ax2.set_yscale("log")
             ax.axhline(0, color="k", lw=0.5)
             ax.grid(alpha=0.3)
 
@@ -282,11 +290,18 @@ def main():
     ax[0].set_ylim(-1.2, 1.2)
     ax[0].grid(alpha=0.3)
 
-    ax[1].errorbar(dV_log2, means_snr, yerr=sems_snr, fmt="o-", color="C3")
+    ax[1].errorbar(
+        dV_log2,
+        np.maximum(np.array(means_snr), 1e-6),
+        yerr=sems_snr,
+        fmt="o-",
+        color="C3",
+    )
     ax[1].set_title("B-PN replication: SNR vs Delta_V")
     ax[1].set_xlabel("log2(Delta_V) [V]")
     ax[1].set_ylabel("SNR")
-    ax[1].set_yscale("log")
+    if np.any(np.array(means_snr) > 0):
+        ax[1].set_yscale("log")
     ax[1].grid(alpha=0.3)
     fig2.tight_layout()
     out2 = RESULTS / "figure_alexander_replication.pdf"
