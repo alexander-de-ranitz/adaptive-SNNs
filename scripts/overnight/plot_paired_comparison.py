@@ -41,6 +41,16 @@ def _approx_rpe_from_spikes(ts, S, tau=TAU_RPE):
     return rpe
 
 
+def _voltage_gate_offline(V, delta_V, E_E=0.0, V_th=-50e-3, V_rest=-70e-3):
+    """Replicates _gating.voltage_gate on saved V trajectory."""
+    default_area = (V_th - V_rest)
+    driving_force = E_E - V
+    integral = lambda V_: (E_E + delta_V - V_) * -np.exp((V_ - V_th) / delta_V)
+    area = integral(V_rest) - integral(V_th)
+    gating = driving_force / delta_V * np.exp((V - V_th) / delta_V)
+    return gating / (area / default_area)
+
+
 def _compute_metrics(raw_path):
     """Compute rho and SNR for one raw npz file."""
     z = np.load(raw_path, allow_pickle=True)
@@ -50,6 +60,7 @@ def _compute_metrics(raw_path):
     G_learn = np.asarray(z["G_learn"]).ravel()
     noise = z["noise"]
     cell_id = str(z["cell_id"])
+    delta_V = float(z["delta_V"])
 
     # Steady-state mask
     ss = ts > WARMUP_T
@@ -58,27 +69,26 @@ def _compute_metrics(raw_path):
     rpe = _approx_rpe_from_spikes(ts, S)
     rpe_ss = rpe[ss]
 
+    # Gate at the noisy neuron (offline replica of training-time gate).
+    gate_noisy = _voltage_gate_offline(V[:, 0], delta_V)
+
     # Build the per-step gradient signal for the LEARNABLE synapse
     # (neuron 0, input 2 -> column 4 in the W matrix).
     # OUA: g_step = lr * rpe * (zeta / sigma_E) * (G_learn / w0) * gate
     # Eligibility: g_step = rpe * eligibility
     # We set lr = 1 (eta=0 means we measure the gradient signal directly).
     if cell_id.startswith("A-"):
-        # noise here is the per-neuron OU (B-PN style) for A-PN or 2D for A-PS
-        # We saved noise as the noise_state of the noisy wrapper.
+        # OUA: dW_ij = lr * RPE * (zeta_ij / sigma_E) * (G_ij / w0) * gate(V_i)
         if noise.ndim == 2:
             # per-neuron noise: shape (T, N_neurons)
-            zeta_at_learnable = noise[:, 0]  # noisy neuron's per-neuron noise
+            zeta_at_learnable = noise[:, 0]
             sigma = float(z["sigma_pn"]) if "sigma_pn" in z.files else 1.0
         else:
             # per-synapse noise: shape (T, N_neurons, N+N_in)
             zeta_at_learnable = noise[:, 0, 4]
             sigma = float(z["sigma_ps"]) if "sigma_ps" in z.files else 1.0
-        # G_learn already (T,) — convert to s via 1/w0 = 1e9 (synaptic_increment = 1nS)
         s_learn = G_learn / 1e-9
-        # Use gate proxy = 1 here (we did not save gate values); rho/SNR computed
-        # on the un-gated gradient kernel is still informative for comparisons.
-        signal = rpe * (zeta_at_learnable / max(sigma, 1e-30)) * s_learn
+        signal = rpe * (zeta_at_learnable / max(sigma, 1e-30)) * s_learn * gate_noisy
     else:
         # Eligibility cells: saved eligibility_learnable (T,)
         elig = z["eligibility_learnable"].ravel()
