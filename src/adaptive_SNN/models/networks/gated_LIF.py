@@ -2,6 +2,7 @@ import jax
 from jax import numpy as jnp
 from jaxtyping import Array
 
+from adaptive_SNN.models.networks._gating import voltage_gate
 from adaptive_SNN.models.networks.base import AbstractLIFNetwork
 from adaptive_SNN.models.networks.eligibility_LIF import ElibilityState, Eligibility
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
@@ -58,24 +59,14 @@ class GatedLIFNetwork(AbstractLIFNetwork):
         return Eligibility(eligibility=None)
 
     def gating_function(self, voltage: Array, delta_V: float) -> Array:
-        """Gating function based on membrane voltage."""
-        default_area = 1.0 * (
-            self.firing_threshold - self.resting_potential
-        )  # Area under the default gating function (which is constant at 1)
-        driving_force = self.reversal_potential_E - voltage
-
-        integral = lambda V: (self.reversal_potential_E + delta_V - V) * -jnp.exp(
-            (V - self.firing_threshold) / delta_V
+        """Voltage-gating function (delegates to shared module-level fn)."""
+        return voltage_gate(
+            voltage,
+            delta_V,
+            reversal_potential_E=self.reversal_potential_E,
+            firing_threshold=self.firing_threshold,
+            resting_potential=self.resting_potential,
         )
-        area = integral(self.resting_potential) - integral(self.firing_threshold)
-        gating = (
-            driving_force
-            / delta_V
-            * jnp.exp((voltage - self.firing_threshold) / delta_V)
-        )
-        normalization_factor = area / default_area
-
-        return gating / normalization_factor
 
     def compute_weight_updates(self, t, state: ElibilityState, args):
         # Compute weight changes
