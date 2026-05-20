@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH -J MWE
-#SBATCH -t 10
+#SBATCH -J delta_v_tuning
+#SBATCH -t 15
 #SBATCH -p gpu_a100
 #SBATCH -N 1
 #SBATCH --ntasks=72
