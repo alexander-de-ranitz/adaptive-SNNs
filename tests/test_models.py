@@ -612,7 +612,7 @@ def test_force_balance_no_change():
     state_after = model.force_balanced_weights(0, model.initial, args=args)
     balance_after = model.compute_balance(0, state_after, args=args)
     assert jnp.allclose(balance_after, balance)
-    assert jnp.allclose(state_after.W, state.W)
+    assert jnp.allclose(state_after.W, state.W, equal_nan=True)
 
 
 def test_force_balance_mini():
@@ -633,7 +633,7 @@ def test_force_balance_mini():
         get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
     )
 
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
     base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.5).at[0, 3].set(1.0)
     state = make_baseline_state(model, W=base_W)
 
@@ -658,7 +658,7 @@ def test_force_balance_mini():
     )
 
     assert jnp.allclose(charge_I / charge_E, target_balance)
-    assert state.W[0][0] == -jnp.inf  # No self connection
+    assert jnp.isnan(state.W[0][0])  # No self connection
     assert state.W[0][1] == 1.0 and state.W[0][1] == 1.0  # Exc weights unchanged
 
 
@@ -708,7 +708,7 @@ def test_force_balance_zero_inhibitory_weight():
         get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
     )
 
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
     base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.0).at[0, 3].set(1.0)
     state = make_baseline_state(model, W=base_W)
 
@@ -740,7 +740,7 @@ def test_force_balance_zero_inhibitory_weight_recurrent_only():
     excitatory_mask = jnp.array([True, True, False, False], dtype=bool)
     object.__setattr__(model, "excitatory_mask", excitatory_mask)
 
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
     base_W = base_W.at[0, 1].set(1.0).at[0, 3].set(0.0)
     base_W = base_W.at[1, 0].set(1.0).at[1, 3].set(0.0)
     base_W = base_W.at[2, 1].set(1.0).at[2, 3].set(0.0)
@@ -775,7 +775,7 @@ def test_balance_simulated_input_counts():
         N_simulated_E_inputs=5,
     )
 
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), -jnp.inf)
+    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
     base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(2.0).at[0, 3].set(3.0)
 
     state = make_baseline_state(model, W=base_W)
@@ -810,7 +810,7 @@ def test_synaptic_delays():
         model,
         V=voltages,
         W=jnp.fill_diagonal(
-            jnp.ones((N_neurons, N_neurons + N_inputs)), -jnp.inf, inplace=False
+            jnp.ones((N_neurons, N_neurons + N_inputs)), jnp.nan, inplace=False
         ),
     )  # Set some voltages above threshold to trigger spikes, set all w=1
     args = make_default_args(N_neurons, N_inputs)

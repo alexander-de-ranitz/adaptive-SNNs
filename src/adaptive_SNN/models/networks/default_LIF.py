@@ -31,7 +31,7 @@ class LIFNetwork(AbstractLIFNetwork):
         dW_ij = learning_rate * RPE * noise_i * (conductance_ij / synaptic_increment)
 
         The noise term is normalized by the desired noise standard deviation to decouple absolute noise levels from the magnitude of weight changes.
-        The weight updates are only applied to existing connections (weights != -inf).
+        The weight updates are only applied to existing connections (weights are not NaN).
 
         Args:
             t: Current time
@@ -70,6 +70,6 @@ class LIFNetwork(AbstractLIFNetwork):
         )  # Since W is in arbitrary units (not nS), scale G by synaptic increment to get a sensible scale
 
         dW = jnp.where(
-            state.W == -jnp.inf, 0.0, dW
+            jnp.isnan(state.W), 0.0, dW
         )  # No weight change for non-existing connections
         return dW

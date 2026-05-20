@@ -55,7 +55,7 @@ def main():
 
         for E_weight in E_weights:
             for I_weight in I_weights:
-                initial_weight_matrix = jnp.array([[-jnp.inf, E_weight, I_weight]])
+                initial_weight_matrix = jnp.array([[jnp.nan, E_weight, I_weight]])
                 input_types = jnp.array([1, 0])  # 1 for excitatory, 0 for inhibitory
                 # Set up models
                 neuron_model = LIFNetwork(
@@ -239,7 +239,7 @@ def main():
             continue
 
         lower, upper = target
-        mask = jnp.isfinite(matrix) & (matrix >= lower) & (matrix <= upper)
+        mask = ~jnp.isnan(matrix) & (matrix >= lower) & (matrix <= upper)
         target_masks.append(mask)
 
     valid_target_masks = [mask for mask in target_masks if mask is not None]

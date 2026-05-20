@@ -131,7 +131,7 @@ def compute_charge_ratio(t, state, model) -> Array:
     leak_conductance = base_network.leak_conductance
 
     dt = t[1] - t[0]
-    W = jnp.where(jnp.isfinite(W), W, 0.0)
+    W = jnp.where(~jnp.isnan(W), W, 0.0)
     weighed_G_inhibitory = (
         jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1) + leak_conductance
     )

@@ -51,13 +51,8 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
             x.agent_state.noisy_network.network_state.S.astype(jnp.bool),
             x.agent_state.RPE.RPE.astype(jnp.float32),
             x.agent_state.noisy_network.network_state.W[0].astype(jnp.float32),
-            jnp.nanmean(
-                jnp.where(
-                    jnp.isfinite(x.agent_state.noisy_network.network_state.W),
-                    x.agent_state.noisy_network.network_state.W,
-                    jnp.nan,
-                )
-            ),
+            jnp.nanmean(x.agent_state.noisy_network.network_state.W),
+            x.environment_state.astype(jnp.float32),
         )
 
     save_at = SaveAt(steps=True, fn=save)

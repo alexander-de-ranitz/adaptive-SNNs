@@ -36,7 +36,7 @@ def create_default_config_single_synapse_task(
         [5000, 1250, 10]
     )  # High frequency background input and one moderate frequency input
     initial_weights = jnp.tile(
-        jnp.array([-jnp.inf] * N_neurons + [1.1, 11, 0.0]), (N_neurons, 1)
+        jnp.array([jnp.nan] * N_neurons + [1.1, 11, 0.0]), (N_neurons, 1)
     )
 
     key, spike_key, reward_noise_key = jr.split(key, 3)

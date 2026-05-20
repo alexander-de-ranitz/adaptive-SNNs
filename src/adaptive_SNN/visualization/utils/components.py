@@ -96,7 +96,7 @@ def _plot_conductances(
     network_state = get_LIF_state(sol.ys)
 
     N_neurons = base_network.N_neurons
-    W = jnp.where(~jnp.isfinite(network_state.W), 0.0, network_state.W)
+    W = jnp.where(jnp.isnan(network_state.W), 0.0, network_state.W)
     G = network_state.G
     exc_mask = base_network.excitatory_mask
 
@@ -410,7 +410,7 @@ def _plot_conductance_frequency_spectrum(
 ):
     lif_state = get_LIF_state(sol.ys)
     G = lif_state.G
-    W = jnp.where(~jnp.isfinite(lif_state.W), 0.0, lif_state.W)
+    W = jnp.where(jnp.isnan(lif_state.W), 0.0, lif_state.W)
 
     exc_mask = get_LIF_model(model).excitatory_mask
     weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1)

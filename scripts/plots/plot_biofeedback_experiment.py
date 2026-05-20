@@ -69,14 +69,8 @@ def main():
 
             # Plot mean synaptic weight ot the target neuron and the entire network
             mean_w = method_group["W_mean"].values[0]
-            target_w = jnp.nanmean(
-                jnp.where(
-                    jnp.isfinite(method_group["W_target"].values[0]),
-                    method_group["W_target"].values[0],
-                    jnp.nan,
-                ),
-                axis=1,
-            )
+            target_w = jnp.nanmean(method_group["W_target"].values[0], axis=1)
+
             axs[1].plot(
                 ts[1:],
                 target_w[1:],

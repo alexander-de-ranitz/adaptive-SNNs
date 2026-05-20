@@ -77,6 +77,6 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
         dW = learning_rate * RPE * state.features.eligibility
 
         dW = jnp.where(
-            state.W == -jnp.inf, 0.0, dW
+            jnp.isnan(state.W), 0.0, dW
         )  # No weight change for non-existing connections
         return dW
