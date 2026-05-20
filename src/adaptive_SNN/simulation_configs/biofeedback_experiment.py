@@ -32,9 +32,9 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
 
     key, spike_key, reward_noise_key = jr.split(key, 3)
 
-    # Output is based on a single neuron
-    network_output_fn = lambda t, agent_state, args: jnp.squeeze(
-        agent_state.noisy_network.network_state.S[0]
+    # Output is the network's spikes
+    network_output_fn = (
+        lambda t, agent_state, args: agent_state.noisy_network.network_state.S
     )
 
     def input_spike_fn(t, x, args):
@@ -93,7 +93,7 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
         input_spike_fn=input_spike_fn,
         reward_fn=lambda t, x, args: jnp.array([0.0]),
         environment_model=SpikeRateEnvironment,
-        environment_kwargs={"rate": 10, "dim": N_neurons},
+        environment_kwargs={"rate": 1, "dim": N_neurons},
         reward_model=MovingAverageRewardModel,
         reward_kwargs={"reward_rate": 0.0, "dim": 1},
         reward_noise_model=PoissonJumpProcess,
