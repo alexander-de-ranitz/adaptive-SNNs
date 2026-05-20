@@ -79,7 +79,7 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
         input_spike_fn=input_spike_fn,
         reward_fn=lambda t, x, args: jnp.array([0.0]),
         environment_model=SpikeRateEnvironment,
-        environment_kwargs={"rate": 10, "dim": N_neurons},
+        environment_kwargs={"rate": 1, "dim": N_neurons},
         reward_model=MovingAverageRewardModel,
         reward_kwargs={"reward_rate": 0.0, "dim": 1},
         reward_noise_model=PoissonJumpProcess,
