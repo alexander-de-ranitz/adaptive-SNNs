@@ -49,7 +49,15 @@ from adaptive_SNN.solver import simulate_noisy_SNN  # noqa: E402
 # ---------------------------------------------------------------------------
 # Tier-2 large-scale task parameters (impl plan §5.2 target)
 # ---------------------------------------------------------------------------
-N_NEURONS = 1000
+N_NEURONS = 500          # impl plan §5.2 target is 1000; CPU JIT-compilation
+                         # hits a wall at N=1000 (no progress in 1h wall clock).
+                         # N=500 is the practical maximum on this hardware
+                         # without GPU/HPC. The conclusions about per-synapse
+                         # advantage at large N apply qualitatively at N=500
+                         # as long as |E_i| (number of E synapses per neuron)
+                         # grows commensurately, which it does: with p_E=0.1
+                         # and fully-connected inputs, |E_i| = 0.8*500*0.1 + 100
+                         # = 40 + 100 = 140 (vs |E_i|=180 at N=1000).
 N_INPUTS = 100
 N_PATTERNS = 4
 NEURONS_PER_PATTERN = N_INPUTS // N_PATTERNS  # 25
@@ -58,7 +66,7 @@ LOW_RATE = 5.0
 PATTERN_DURATION = 0.5
 T_TOTAL = 10.0
 DT = 1e-4
-N_SAVE = 200
+N_SAVE = 100
 DELTA_V = 2.0 ** -9
 NOISE_SCALE_HYPERPARAM = 2.0
 BALANCE_TARGET = 1.0
