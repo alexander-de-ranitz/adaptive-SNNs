@@ -54,21 +54,21 @@ from adaptive_SNN.solver import simulate_noisy_SNN  # noqa: E402
 # ---------------------------------------------------------------------------
 # Task parameters (Tier-2; simplified for overnight budget)
 # ---------------------------------------------------------------------------
-N_NEURONS = 200          # reduced from 1000 to fit time budget; balanced 80/20
-N_INPUTS = 40            # reduced from 100; 10 inputs per pattern
+N_NEURONS = 100          # 80 E + 20 I; smaller than impl plan's 1000 to fit budget
+N_INPUTS = 40            # 10 inputs per pattern
 N_PATTERNS = 4
 NEURONS_PER_PATTERN = N_INPUTS // N_PATTERNS  # 10
-HIGH_RATE = 100.0        # Hz (on-pattern input rate)
-LOW_RATE = 5.0           # Hz (off-pattern background rate)
+HIGH_RATE = 100.0        # Hz on-pattern
+LOW_RATE = 5.0           # Hz off-pattern background
 PATTERN_DURATION = 0.5   # s per pattern
-T_TOTAL = 30.0           # 60 trials in total
+T_TOTAL = 20.0           # 40 trials per cell
 DT = 1e-4
-N_SAVE = 600
+N_SAVE = 400
 DELTA_V = 2.0 ** -9
 NOISE_SCALE_HYPERPARAM = 2.0
-BALANCE_TARGET = 1.0     # heterosynaptic rebalancing ON for the network
-SEEDS = [42, 43, 44]     # 3 seeds (reduced from 5 for budget)
-CELL_IDS = ["A-PN", "A-PS", "B-PN", "B-PS"]  # skip gate-off controls to save time
+BALANCE_TARGET = 1.0     # heterosynaptic rebalancing ON
+SEEDS = [42, 43, 44]     # 3 seeds
+CELL_IDS = ["A-PN", "A-PS", "B-PN", "B-PS"]
 
 LEARNING_RATES = {
     "A-PN": 20.0,  "A0-PN": 20.0,
@@ -113,7 +113,7 @@ def _make_base_network(model_cls, key, use_gating=True):
         connection_prob_E=0.1, connection_prob_I=0.2,
         initial_input_weight=0.3, initial_rec_weight=0.3,
         rec_weight_std=0.2,
-        fully_connected_input=False,
+        fully_connected_input=True,            # readout sees ALL inputs (key fix)
         fraction_excitatory_recurrent=0.8,
         fraction_excitatory_input=1.0,
         mean_synaptic_delay=1.5e-3,
@@ -151,6 +151,31 @@ def _make_noisy(cell_id, key, sigma_pn, sigma_ps):
     raise ValueError(cell_id)
 
 
+def _task_rpe_fn_factory(target_pattern):
+    """Pattern-discrimination task RPE.
+
+    Returns a drive of magnitude 1/dt (rate-scale) when the readout neuron
+    fires during the on-target pattern, -1/dt when it fires during an
+    off-target pattern, 0 otherwise. After the LearningAgent's exp-filter
+    with τ_RPE = 100 ms, this produces a +/-1-amplitude smoothly-decaying
+    RPE per readout spike.
+    """
+    inv_dt = jnp.array(1.0 / DT, dtype=jnp.float64)
+    target_p = jnp.array(target_pattern, dtype=jnp.int64)
+
+    def fn(t, state, args):
+        # Current pattern index from time
+        p = jnp.floor(t / PATTERN_DURATION).astype(jnp.int64) % jnp.array(N_PATTERNS, dtype=jnp.int64)
+        multiplier = jnp.where(p == target_p, 1.0, -1.0)
+        # Inner spike vector (LearningAgentState.network_state -> NoisyNetworkState
+        # OR PerSynapseNoisyNetworkState; either way .network_state.S indexes
+        # the LIF spike vector)
+        readout_spike = state.network_state.network_state.S[READOUT_IDX]
+        return readout_spike * multiplier * inv_dt
+
+    return fn
+
+
 def _build_args(spike_key, rpe_key, pattern_seed, sigma_ps, lr, target_pattern):
     use_noise = jnp.ones((N_NEURONS,), dtype=bool)
     return {
@@ -162,19 +187,25 @@ def _build_args(spike_key, rpe_key, pattern_seed, sigma_ps, lr, target_pattern):
         "per_synapse_noise_std_target": sigma_ps,
         "rpe_noise_key": rpe_key,
         "target_pattern": target_pattern,
+        "task_rpe_fn": _task_rpe_fn_factory(target_pattern),
     }
 
 
 def _save_fn(cell_id):
-    """Save coarse state — for a 200-neuron net we can't save full state per step."""
+    """Save coarse state — for a 100-neuron net we can't save full state per step."""
     def fn(t, y, args):
         inner = y.network_state.network_state
+        # Pattern index at this time (saved so the offline analysis can compute
+        # per-pattern firing-rate statistics correctly).
+        p = jnp.floor(t / PATTERN_DURATION).astype(jnp.int64) % jnp.array(N_PATTERNS, dtype=jnp.int64)
         return {
             "fr_readout": jnp.atleast_1d(inner.firing_rate[READOUT_IDX]),
             "rpe": jnp.atleast_1d(y.rpe),
             "V_readout": jnp.atleast_1d(inner.V[READOUT_IDX]),
-            "W_readout_inputs": inner.W[READOUT_IDX, N_NEURONS:],  # input weights to readout
-            "S_sum": jnp.atleast_1d(jnp.sum(inner.S)),  # total spikes per save step
+            "W_readout_inputs": inner.W[READOUT_IDX, N_NEURONS:],
+            "S_readout": jnp.atleast_1d(inner.S[READOUT_IDX]),
+            "S_sum": jnp.atleast_1d(jnp.sum(inner.S)),
+            "pattern_idx": jnp.atleast_1d(p),
         }
     return fn
 

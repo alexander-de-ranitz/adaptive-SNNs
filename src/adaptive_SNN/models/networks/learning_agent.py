@@ -96,20 +96,23 @@ class LearningAgent(NeuronModelABC):
         # Wrapped network drift (handles its own per-synapse noise routing).
         net_drift = self.noisy_network.drift(t, state.network_state, args)
 
-        # Spike differential between noisy and noiseless neurons at *current* state.
+        # Task-RPE drive: user-callable via args["task_rpe_fn"] takes priority over
+        # the built-in `S[noisy_idx] - S[noiseless_idx]` fallback (used for SST).
         inner = state.network_state.network_state
-        spike_diff = inner.S[self.noisy_idx] - inner.S[self.noiseless_idx]
-        # Convert spike count (already binary in the LIF model) into a delta.
-        # Spikes are events with infinite peak instantaneous rate when filtered
-        # through dt; we approximate the drive as (spike_diff / dt) so the
-        # integral of the exp-filter receives one spike worth per fire.
-        spike_drive = spike_diff / jnp.array(1e-4, dtype=default_float)
+        task_rpe_fn = args.get("task_rpe_fn", None)
+        if task_rpe_fn is None:
+            spike_diff = inner.S[self.noisy_idx] - inner.S[self.noiseless_idx]
+            task_drive = spike_diff / jnp.array(1e-4, dtype=default_float)
+        else:
+            # Convention: task_rpe_fn returns a *spike-rate-scale* drive
+            # (e.g., +/-1 with a 1/dt-equivalent magnitude already applied).
+            task_drive = task_rpe_fn(t, state, args)
 
         # Poisson reward noise.
         rpe_noise_jump = self._poisson_jump(t, rpe_key)
         rpe_noise_drive = rpe_noise_jump / jnp.array(1e-4, dtype=default_float)
 
-        d_rpe = (-state.rpe + spike_drive + rpe_noise_drive) / self.tau_RPE
+        d_rpe = (-state.rpe + task_drive + rpe_noise_drive) / self.tau_RPE
         return LearningAgentState(network_state=net_drift, rpe=d_rpe)
 
     def diffusion(self, t, state: LearningAgentState, args: dict):
