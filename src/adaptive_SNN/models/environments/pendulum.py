@@ -20,46 +20,35 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 class Pendulum(AbstractEnvironment):
     """Environment model representing a pendulum balancing system.
 
-    The state of the pendulum is represented as a 3-dimensional vector:
-        - sin(angle): The sine of the pendulum's angle from the vertical.
-        - cos(angle): The cosine of the pendulum's angle from the vertical.
+    The state of the pendulum is represented as a 2-dimensional vector:
+        - angle: The angle of the pendulum from the vertical (0 radians means upright).
         - angular velocity: The rate of change of the pendulum's angle.
 
     The angle is measured from the vertical, where an angle of 0 indicates the pendulum is pointing straight upwards.
-    As such, the sin(angle) and cos(angle) give the x and y coordinates of the pendulum's end, respectively.
-    Sin and cos are used to avoid discontinuities in the state representation.
     """
 
-    dim: int = 3  # State dimension: [sin(angle), cos(angle), angular velocity]
+    dim: int = 2  # State dimension: [angle, angular velocity]
     rate: float = 1.0  # Rate at which the environment responds to input
     g: float = 10.0  # Gravitational constant
     min_max_angle_initial: tuple = (-0.1, 0.1)  # Range of initial angles (in radians)
-    key: Array = jr.PRNGKey(0)
+    key: Array = eqx.field(
+        default_factory=lambda: jr.PRNGKey(0)
+    )  # Random key for initialization
+    Q: Array = eqx.field(
+        default_factory=lambda: jnp.eye(2)
+    )  # State cost matrix for LQR
+    R: Array = eqx.field(
+        default_factory=lambda: jnp.eye(1)
+    )  # Control cost matrix for LQR
+
     control_gain: Array = (
         None  # Optimal control gain matrix, to be computed based on system dynamics
     )
     cost_to_go_matrix: Array = (
         None  # Cost-to-go matrix, to be computed based on system dynamics
     )
-    Q: Array = jnp.eye(2)  # State cost matrix for LQR
-    R: Array = jnp.eye(1)  # Control cost matrix for LQR
 
-    def __init__(
-        self,
-        rate: float = 1.0,
-        g: float = 10.0,
-        min_max_angle_initial: tuple = (-0.1, 0.1),
-        Q: Array = jnp.eye(2),
-        R: Array = jnp.eye(1),
-        key: Array = jr.PRNGKey(0),
-    ):
-        self.rate = rate
-        self.g = g
-        self.min_max_angle_initial = min_max_angle_initial
-        self.key = key
-        self.Q = Q
-        self.R = R
-
+    def __post_init__(self):
         A = jnp.array([[0, 1], [self.g, 0]])
         B = jnp.array([[0], [self.rate]])
         Q = self.Q  # State cost matrix
@@ -79,7 +68,7 @@ class Pendulum(AbstractEnvironment):
             minval=self.min_max_angle_initial[0],
             maxval=self.min_max_angle_initial[1],
         )
-        return jnp.array([jnp.sin(angle), jnp.cos(angle), 0.0], dtype=default_float)
+        return jnp.array([angle, 0.0], dtype=default_float)
 
     @property
     def noise_shape(self):
@@ -96,14 +85,13 @@ class Pendulum(AbstractEnvironment):
 
         # Compute the change in state due to dynamics
         gravity_effect = (
-            self.g * x[0]
+            self.g * jnp.sin(x[0])
         )  # Gravitational effect on the pendulum, assuming length = 1 and mass = 1 for simplicity
         total_torque = torque + gravity_effect
 
         dxdt = jnp.array(
             [
-                x[1] * x[2],  # d(sin(angle))/dt = cos(angle) * angular velocity
-                -x[0] * x[2],  # d(cos(angle))/dt = -sin(angle) * angular velocity
+                x[1],  # d(angle)/dt = angular velocity
                 total_torque,  # d(angular velocity)/dt = total torque
             ],
             dtype=default_float,
@@ -124,9 +112,7 @@ class Pendulum(AbstractEnvironment):
         )
 
     def update(self, t, x, args):
-        """Normalize the angle representation to ensure it remains on the unit circle."""
-        norm = jnp.sqrt(x[0] ** 2 + x[1] ** 2)
-        return jnp.array([x[0] / norm, x[1] / norm, x[2]], dtype=default_float)
+        return x
 
 
 class PendulumEnvState(eqx.Module):
