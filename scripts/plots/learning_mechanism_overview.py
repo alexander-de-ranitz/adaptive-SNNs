@@ -34,7 +34,7 @@ from adaptive_SNN.models import (
 from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
 from adaptive_SNN.models.RPE import UpdateAndDecayRPEModel
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.save_helper import save_part_of_state
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -157,7 +157,7 @@ def main():
             )
 
         print("Running simulation...")
-        sol = simulate_noisy_SNN(
+        sol = solve_ODE(
             model,
             solver,
             t0,

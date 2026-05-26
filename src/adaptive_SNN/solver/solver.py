@@ -28,7 +28,7 @@ DEFAULT_ARGS = {
 }
 
 
-def simulate_noisy_SNN(
+def solve_ODE(
     model,
     solver: Euler,
     t0: float,

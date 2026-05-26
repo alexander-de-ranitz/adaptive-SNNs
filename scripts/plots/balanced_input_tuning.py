@@ -19,7 +19,7 @@ from adaptive_SNN.models import (
     NoisyNetwork,
     NoisyNetworkState,
 )
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.metrics import compute_charge_ratio, compute_CV_ISI
 from adaptive_SNN.utils.save_helper import save_part_of_state
 
@@ -108,7 +108,7 @@ def main():
                     )
 
                 start = time.time()
-                sol = simulate_noisy_SNN(
+                sol = solve_ODE(
                     model,
                     solver,
                     t0,

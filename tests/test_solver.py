@@ -13,7 +13,7 @@ from helpers import (
 )
 
 from adaptive_SNN.models import LIFNetwork, NoisyNetworkState
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 
 
 def test_solver_timesteps():
@@ -43,9 +43,7 @@ def test_solver_timesteps():
 
     # Our method
     saveat = dfx.SaveAt(t0=True, t1=True, steps=True)
-    sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_at=saveat, args=args
-    )
+    sol_1 = solve_ODE(model, solver, t0, t1, dt0, y0, save_at=saveat, args=args)
     sol_1_ts = sol_1.ts
 
     # Direct diffrax call for comparison
@@ -98,9 +96,7 @@ def test_solver_timesteps_precision():
 
     # Our method
     save_at = dfx.SaveAt(subs=dfx.SubSaveAt(steps=True, t0=True, t1=True))
-    sol_1 = simulate_noisy_SNN(
-        model, solver, t0, t1, dt0, y0, save_at=save_at, args=args
-    )
+    sol_1 = solve_ODE(model, solver, t0, t1, dt0, y0, save_at=save_at, args=args)
     sol_1_ts = sol_1.ts
     # Check that time steps are consistent with dt0
     actual_dts = jnp.ediff1d(sol_1_ts)
@@ -145,7 +141,7 @@ def test_solver_output():
 
     # Our method
     save_at = dfx.SaveAt(subs=dfx.SubSaveAt(fn=save_fn, steps=True, t0=True, t1=True))
-    sol_1 = simulate_noisy_SNN(
+    sol_1 = solve_ODE(
         model,
         solver,
         t0,

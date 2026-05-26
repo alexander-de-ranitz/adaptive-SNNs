@@ -11,7 +11,7 @@ from adaptive_SNN.models import (
     NoisyNetwork,
     NoisyNetworkState,
 )
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_network_stats
 
@@ -78,7 +78,7 @@ def main():
                 return save_part_of_state(y, S=True)
 
             start = time.time()
-            sol = simulate_noisy_SNN(
+            sol = solve_ODE(
                 model,
                 solver,
                 t0,

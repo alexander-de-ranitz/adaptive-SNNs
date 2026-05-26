@@ -12,7 +12,7 @@ from adaptive_SNN.models import (
     NoisyNetwork,
     NoisyNetworkState,
 )
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_network_stats, plot_simulate_SNN_results
 
@@ -80,7 +80,7 @@ def main():
 
     print("Running simulation...")
     # with jax.profiler.trace("/tmp/jax-trace", create_perfetto_link=True):
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         model,
         solver,
         t0,

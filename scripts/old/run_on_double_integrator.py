@@ -18,7 +18,7 @@ from adaptive_SNN.models import (
 )
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import DoubleIntegratorKickControl
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.coding import poisson_rate_code
 from adaptive_SNN.utils.save_helper import save_part_of_state
 from adaptive_SNN.visualization import plot_network_stats, plot_SDI_results
@@ -112,7 +112,7 @@ def main():
         return state
 
     print("Running simulation...")
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         model,
         solver,
         t0,
