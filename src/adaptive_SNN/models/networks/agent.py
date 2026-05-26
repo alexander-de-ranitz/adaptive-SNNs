@@ -7,7 +7,7 @@ from jaxtyping import Array
 from adaptive_SNN.models.networks.noisy_network import NoisyNetwork, NoisyNetworkState
 from adaptive_SNN.models.noise import OUP
 from adaptive_SNN.models.noise.base import NoiseModelABC
-from adaptive_SNN.models.reward import AbstractRewardModel
+from adaptive_SNN.models.reward import AbstractRewardModel, RewardPrediction
 from adaptive_SNN.models.RPE import AbstractRPEModel, RPEState
 from adaptive_SNN.utils.operators import MixedPyTreeOperator
 
@@ -16,7 +16,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 class AgentState(eqx.Module):
     noisy_network: NoisyNetworkState
-    predicted_reward: Array
+    predicted_reward: RewardPrediction
     reward_noise: Array
     RPE: RPEState
 
@@ -125,7 +125,7 @@ class Agent(eqx.Module):
             x.RPE,
         )
         new_network_state = self.noisy_network.update(t, network_state, args)
-        new_predicted_reward = self.reward_model.update(t, predicted_reward, args)
+        new_reward_model_state = self.reward_model.update(t, predicted_reward, args)
         new_reward_noise = self.reward_noise.update(t, reward_noise, args)
 
         RPE_update = (
@@ -135,5 +135,5 @@ class Agent(eqx.Module):
         new_RPE = self.RPE_model.update(t, RPE, args)
 
         return AgentState(
-            new_network_state, new_predicted_reward, new_reward_noise, new_RPE
+            new_network_state, new_reward_model_state, new_reward_noise, new_RPE
         )
