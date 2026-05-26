@@ -6,7 +6,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from adaptive_SNN.models import AgentEnvSystem, NeuralNoiseOUP
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.config import SimulationConfig
 
 
@@ -109,7 +109,7 @@ def run_simulation(
         **config.args,
     }
 
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         model,
         solver,
         config.t0,

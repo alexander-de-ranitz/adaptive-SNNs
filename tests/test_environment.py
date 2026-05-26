@@ -10,7 +10,7 @@ from adaptive_SNN.models.environments import (
     InputTrackingEnvironment,
     SpikeRateEnvironment,
 )
-from adaptive_SNN.solver import simulate_noisy_SNN
+from adaptive_SNN.solver import solve_ODE
 
 
 def test_input_tracking_env():
@@ -65,7 +65,7 @@ def test_spike_rate_env():
     }
 
     y0 = model.initial
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         model,
         solver,
         t0,
@@ -106,7 +106,7 @@ def test_double_integrator_optimal_control():
     y0 = jnp.array([[1.0, 0.0]]).reshape((2,))
 
     key = jr.PRNGKey(0)
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         env,
         solver,
         t0,
@@ -139,7 +139,7 @@ def test_double_integrator_simple_control():
     dt0 = 0.001
     y0 = env.initial
     key = jr.PRNGKey(0)
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         env,
         solver,
         t0,
@@ -174,7 +174,7 @@ def test_double_integrator_kick_control():
     dt0 = 0.001
     y0 = env.initial
     key = jr.PRNGKey(0)
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         env,
         solver,
         t0,

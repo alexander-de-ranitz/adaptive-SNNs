@@ -112,7 +112,7 @@ def plot_rate_learning_results(
         agent_state, env_state = state.agent_state, state.environment_state
         network_state, predicted_reward, reward_signal = (
             agent_state.noisy_network,
-            agent_state.predicted_reward.squeeze(),
+            agent_state.predicted_reward.reward.squeeze(),
             state.reward_signal,
         )
         RPE = reward_signal - predicted_reward
@@ -174,7 +174,7 @@ def plot_SDI_results(
 
         state: SystemState = sol.ys
         agent_state, env_state = state.agent_state, state.environment_state
-        predicted_reward = agent_state.predicted_reward
+        predicted_reward = agent_state.predicted_reward.reward
         reward_signal = state.reward_signal
         RPE = reward_signal.squeeze() - predicted_reward.squeeze()
 
@@ -398,7 +398,7 @@ def plot_learning_detailed(
     agent_state, env_state = state.agent_state, state.environment_state
     network_state, predicted_reward = (
         agent_state.noisy_network,
-        agent_state.predicted_reward,
+            agent_state.predicted_reward.reward,
     )
     reward_signal = state.reward_signal
     eligibility_trace = agent_state.noisy_network.network_state.features.eligibility
@@ -563,9 +563,7 @@ def plot_weight_distribution_over_time(
 
             if plot_reward:
                 # Extract rewards for this time bin
-                reward_data = state.agent_state.predicted_reward[
-                    bin_start_idx:bin_end_idx
-                ]
+                reward_data = state.agent_state.predicted_reward.reward[bin_start_idx:bin_end_idx]
                 all_reward_bins[i].append(reward_data.flatten())
 
     # Concatenate data from all solutions
