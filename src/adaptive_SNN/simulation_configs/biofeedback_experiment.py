@@ -13,7 +13,9 @@ from jax import numpy as jnp
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.noise.poisson_jump import PoissonJumpProcess
-from adaptive_SNN.models.reward import MovingAverageRewardModel
+from adaptive_SNN.models.reward_prediction.moving_average import (
+    MovingAverageRewardModel,
+)
 from adaptive_SNN.utils.config import SimulationConfig
 
 

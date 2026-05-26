@@ -17,7 +17,10 @@ from adaptive_SNN.models.networks import Agent, LIFNetwork
 from adaptive_SNN.models.networks.base import NeuronModelABC
 from adaptive_SNN.models.noise import OUP
 from adaptive_SNN.models.noise.base import NoiseModelABC
-from adaptive_SNN.models.reward import AbstractRewardModel, MovingAverageRewardModel
+from adaptive_SNN.models.reward_prediction.base import AbstractRewardPredictor
+from adaptive_SNN.models.reward_prediction.moving_average import (
+    MovingAverageRewardModel,
+)
 from adaptive_SNN.models.RPE import AbstractRPEModel, InstantRPEModel
 
 
@@ -54,7 +57,7 @@ class SimulationConfig:
     args: dict[str, Any] = eqx.field(default_factory=lambda: {})
 
     # Reward model
-    reward_model: type[AbstractRewardModel] = MovingAverageRewardModel
+    reward_model: type[AbstractRewardPredictor] = MovingAverageRewardModel
     reward_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
     reward_fn: Callable[..., Any] | None = None
     reward_noise_model: type[NoiseModelABC] = OUP

@@ -7,7 +7,10 @@ from jaxtyping import Array
 from adaptive_SNN.models.networks.base import AbstractLIFNetwork, LIFState
 from adaptive_SNN.models.noise import OUP
 from adaptive_SNN.models.noise.base import NoiseModelABC
-from adaptive_SNN.models.reward import AbstractRewardModel, RewardPrediction
+from adaptive_SNN.models.reward_prediction.base import (
+    AbstractRewardPredictor,
+    RewardPrediction,
+)
 from adaptive_SNN.models.RPE import AbstractRPEModel, RPEState
 from adaptive_SNN.utils.operators import MixedPyTreeOperator
 
@@ -23,14 +26,14 @@ class AgentState(eqx.Module):
 
 class Agent(eqx.Module):
     network: AbstractLIFNetwork
-    reward_model: AbstractRewardModel
+    reward_model: AbstractRewardPredictor
     reward_noise: NoiseModelABC
     RPE_model: AbstractRPEModel
 
     def __init__(
         self,
         neuron_model: AbstractLIFNetwork,
-        reward_model: AbstractRewardModel,
+        reward_model: AbstractRewardPredictor,
         reward_noise: OUP,
         RPE_model: AbstractRPEModel,
     ):

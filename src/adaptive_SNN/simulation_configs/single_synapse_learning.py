@@ -12,7 +12,9 @@ from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.networks.eligibility_LIF import EligibilityLIFNetwork
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
 from adaptive_SNN.models.noise.poisson_jump import PoissonJumpProcess
-from adaptive_SNN.models.reward import MovingAverageRewardModel
+from adaptive_SNN.models.reward_prediction.moving_average import (
+    MovingAverageRewardModel,
+)
 from adaptive_SNN.models.RPE import UpdateAndDecayRPEModel
 from adaptive_SNN.utils.config import SimulationConfig
 from adaptive_SNN.utils.save_helper import save_part_of_state
