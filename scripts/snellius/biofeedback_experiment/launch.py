@@ -36,7 +36,7 @@ def create_jobs():
     jobs = Jobs()
 
     seed = 0
-    for lr in [0.0, 1.0]:
+    for lr in [20.0]:
         for model in ["gated", "eligibility"]:
             id = f"{model}_lr_{lr}"
             name = id + f"_seed_{seed}"

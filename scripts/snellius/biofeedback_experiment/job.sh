@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH -J biofeedback
-#SBATCH -t 15
+#SBATCH -t 53
 #SBATCH -p gpu_a100
 #SBATCH -N 1
-#SBATCH --ntasks=72
+#SBATCH --ntasks=36
 #SBATCH --cpus-per-task=1
-#SBATCH --gpus=4
+#SBATCH --gpus=2
 #SBATCH --mail-user=alexanderderanitz@gmail.com
 #SBATCH --mail-type=START,END,FAIL
 

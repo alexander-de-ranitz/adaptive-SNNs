@@ -50,7 +50,7 @@ def main():
         model_cls=model_cls, N_neurons=1000, key=jr.PRNGKey(args.key_seed)
     )
     cfg.connection_prob_E = 0.1
-    cfg.t1 = 1000
+    cfg.t1 = 600
     cfg.initial_rec_weight = 1.0
     cfg.initial_input_weight = 1.0
     cfg.save_file = args.output_file
@@ -65,13 +65,11 @@ def main():
     cfg.warmup_time = 5.0
 
     def save(t, x: SystemState, args):
-        """Save S, RPE, weights to target neuron, and mean weight at each time step"""
         return (
-            x.agent_state.noisy_network.network_state.S[0].astype(jnp.bool),
-            x.agent_state.RPE.RPE.astype(jnp.float32),
+            x.environment_state.astype(jnp.float32),
             x.agent_state.noisy_network.network_state.W[0].astype(jnp.float32),
             jnp.nanmean(x.agent_state.noisy_network.network_state.W),
-            x.environment_state.astype(jnp.float32),
+            jnp.nanstd(x.agent_state.noisy_network.network_state.W),
         )
 
     cfg.save_at = SaveAt(ts=jnp.linspace(cfg.t0, cfg.t1, 5000), fn=save)
