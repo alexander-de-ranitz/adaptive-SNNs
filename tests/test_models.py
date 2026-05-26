@@ -14,7 +14,7 @@ from helpers import (
     make_poisson_jump_model,
 )
 
-from adaptive_SNN.models import NoisyNetwork, NoisyNetworkState
+from adaptive_SNN.models import LIFState
 
 
 def test_initial_state():
@@ -395,21 +395,18 @@ def test_weight_plasticity():
 def test_excitatory_noise_only_affects_voltage_correctly():
     N = 7
     model = make_LIF_model(N_neurons=N, N_inputs=0)
-    state = make_baseline_state(model)
-
-    noise_E = jnp.arange(N, dtype=state.V.dtype)
+    state = make_baseline_state(model, perturbations=jnp.arange(N))
 
     args = make_default_args(
         N,
         0,
-        excitatory_noise=noise_E,
     )
 
     derivs = model.drift(0.0, state, args)
     dv, dG = derivs.V, derivs.G
 
     expected = (
-        noise_E * (model.reversal_potential_E - state.V)
+        state.perturbations * (model.reversal_potential_E - state.V)
     ) / model.membrane_capacitance
 
     assert jnp.allclose(dv, expected)
@@ -423,11 +420,11 @@ def test_noise_is_unique():
         N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
-    initial_state: NoisyNetworkState = model.initial
+    initial_state: LIFState = model.initial
 
     # Make sure the initial network state has non-zero conductances variance so that noise > 0
     initial_state = eqx.tree_at(
-        lambda s: s.network_state.var_E_conductance,
+        lambda s: s.var_E_conductance,
         initial_state,
         jnp.ones((N,)),
     )
@@ -437,7 +434,7 @@ def test_noise_is_unique():
     terms = model.terms(jr.PRNGKey(0))
 
     y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, args, None, False)
-    noise_state = y1.noise_state
+    noise_state = y1.perturbations
 
     assert not jnp.all(noise_state == 0)
     assert jnp.unique(noise_state).size > 1
@@ -450,15 +447,14 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
         N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
-    network = model.base_network
+    network = model
     network_state = make_baseline_state(network)
     args = make_default_args(N, 0)
 
     noise_state = jnp.arange(N, dtype=network_state.V.dtype)
     x = make_noisy_state(network_state, noise_state)
 
-    noisy_network_drift = model.drift(0.0, x, args)
-    network_drift = noisy_network_drift.network_state
+    network_drift = model.drift(0.0, x, args)
     dV, dS, dW, dG = network_drift.V, network_drift.S, network_drift.W, network_drift.G
 
     V_now = network_state.V
@@ -473,7 +469,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
 
     # OU drift is -1/tau * (state - mean)
     assert jnp.allclose(
-        noisy_network_drift.noise_state,
+        network_drift.perturbations,
         -1.0 / model.noise_model.tau * (noise_state - model.noise_model.mean),
     )
 
@@ -485,7 +481,7 @@ def test_NoisyNeuronModel_diffusion():
         N_neurons=N, N_inputs=0, noise_std=0.0, tau=1.0, key=key
     )
 
-    network = model.base_network
+    network = model
     network_state = make_baseline_state(network)
     initial_state = make_noisy_state(network_state)
     args = make_default_args(N, 0, noise_scale_hyperparam=0.0)
@@ -860,13 +856,15 @@ def test_noise_scaling():
     syn_var = jnp.array([20e-9])
 
     # Set variance to known value for test
-    state = eqx.tree_at(lambda s: s.network_state.var_E_conductance, state, syn_var)
+    state = eqx.tree_at(lambda s: s.var_E_conductance, state, syn_var)
 
     # Compute desired noise std and compare to expected
     desired_noise_std = model.compute_desired_noise_std(0.0, state, args)
-    expected_noise_std = noise_scale_hyperparam * jnp.sqrt(syn_var)
+    expected_noise_std = model.min_noise_std + noise_scale_hyperparam * jnp.sqrt(
+        syn_var
+    )
 
-    assert expected_noise_std > NoisyNetwork.min_noise_std, (
+    assert expected_noise_std > model.min_noise_std, (
         "Test setup invalid: synaptic std too low"
     )
     assert jnp.isclose(desired_noise_std, expected_noise_std, atol=1e-6)
@@ -908,4 +906,4 @@ def test_noise_scaling_min_clip():
 
     # Compute desired noise std. Since synaptic variance is zero at init, should be clipped to min_noise_std
     desired_noise_std = model.compute_desired_noise_std(0.0, state, args)
-    assert jnp.isclose(desired_noise_std, NoisyNetwork.min_noise_std)
+    assert jnp.isclose(desired_noise_std, model.min_noise_std)

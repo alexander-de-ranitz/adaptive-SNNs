@@ -53,7 +53,7 @@ def plot_noise_level_STA():
         sol, model = run_simulation(config, save_results=False)
         sols.append(sol)
 
-    plot_noise_STA(sols, model.agent.noisy_network, noise_levels=noise_levels)
+    plot_noise_STA(sols, model.agent.network, noise_levels=noise_levels)
 
 
 if __name__ == "__main__":

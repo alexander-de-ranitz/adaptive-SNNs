@@ -33,9 +33,7 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
     key, spike_key, reward_noise_key = jr.split(key, 3)
 
     # Output is the network's spikes
-    network_output_fn = (
-        lambda t, agent_state, args: agent_state.noisy_network.network_state.S
-    )
+    network_output_fn = lambda t, agent_state, args: agent_state.network_state.S
 
     def input_spike_fn(t, x, args):
         step_idx = jnp.asarray(jnp.rint((t - t0) / dt), dtype=jnp.int64)
@@ -48,10 +46,10 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
     def save(t, x: SystemState, args):
         """Save S, RPE, weights to target neuron, and mean weight at each time step"""
         return (
-            x.agent_state.noisy_network.network_state.S.astype(jnp.bool),
+            x.agent_state.network_state.network_state.S.astype(jnp.bool),
             x.agent_state.RPE.RPE.astype(jnp.float32),
-            x.agent_state.noisy_network.network_state.W[0].astype(jnp.float32),
-            jnp.nanmean(x.agent_state.noisy_network.network_state.W),
+            x.agent_state.network_state.network_state.W[0].astype(jnp.float32),
+            jnp.nanmean(x.agent_state.network_state.network_state.W),
             x.environment_state.astype(jnp.float32),
         )
 
@@ -59,10 +57,10 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
 
     # RPE = 1 when the target neuron spikes, 0 otherwise.
     def RPE_fn(t, agent_state, args):
-        return agent_state.noisy_network.network_state.S[0]
+        return agent_state.network_state.S[0]
 
     cfg = SimulationConfig(
-        base_network_cls=model_cls,
+        network_cls=model_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         balance=balance,

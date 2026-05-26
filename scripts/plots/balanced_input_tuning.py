@@ -15,9 +15,6 @@ from matplotlib.collections import LineCollection
 
 from adaptive_SNN.models import (
     LIFNetwork,
-    NeuralNoiseOUP,
-    NoisyNetwork,
-    NoisyNetworkState,
 )
 from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.metrics import compute_charge_ratio, compute_CV_ISI
@@ -58,12 +55,13 @@ def main():
                 initial_weight_matrix = jnp.array([[jnp.nan, E_weight, I_weight]])
                 input_types = jnp.array([1, 0])  # 1 for excitatory, 0 for inhibitory
                 # Set up models
-                neuron_model = LIFNetwork(
+                model = LIFNetwork(
                     N_neurons=N_neurons,
                     N_inputs=N_inputs,
                     fully_connected_input=True,
                     fraction_excitatory_input=0.5,
                     input_types=input_types,
+                    min_noise_std=min_noise_std,
                     initial_weight_matrix=initial_weight_matrix,
                     weight_std=0.0,
                     key=key,
@@ -71,13 +69,6 @@ def main():
                 )
 
                 key, _ = jr.split(key)
-                noise_model = NeuralNoiseOUP(tau=neuron_model.tau_E, dim=N_neurons)
-                model = NoisyNetwork(
-                    neuron_model=neuron_model,
-                    noise_model=noise_model,
-                    min_noise_std=min_noise_std,
-                )
-
                 # Run simulation
                 solver = dfx.EulerHeun()
                 init_state = model.initial
@@ -124,7 +115,7 @@ def main():
 
                 # plot_simulate_SNN_results(sol, model, split_noise=True)
 
-                state: NoisyNetworkState = sol.ys
+                state = sol.ys
 
                 charge_ratio = compute_charge_ratio(sol.ts, state, model)
                 cv_isi = compute_CV_ISI(state.network_state.S, sol.ts)

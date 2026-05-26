@@ -2,13 +2,14 @@ import jax
 
 jax.config.update("jax_enable_x64", True)
 
+import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
 from diffrax import SaveAt
 
 from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks import NoisyNetwork, NoisyNetworkState
+from adaptive_SNN.models.networks import LIFNetwork, LIFState
 from adaptive_SNN.simulation_configs.single_neuron_simulation import (
     create_single_neuron_config_extra_synapse,
 )
@@ -16,18 +17,18 @@ from adaptive_SNN.utils.runner import run_simulation
 from adaptive_SNN.utils.save_helper import save_part_of_state
 
 
-class ExternalNoiseStd(NoisyNetwork):
-    def compute_desired_noise_std(self, t, state: NoisyNetworkState, args):
+class ExternalNoiseStd(LIFNetwork):
+    def compute_desired_noise_std(self, t, state: LIFState, args):
         return args.get("external_noise_std")(t, state, args)
 
     def update(self, t, state, args):
         state = super().update(t, state, args)
-        noise_state = state.noise_state
         external_noise_std = args.get("external_noise_std")(t, state, args)
-        new_noise_state = jnp.where(
-            external_noise_std > 0, noise_state, jnp.zeros_like(noise_state)
+        perturbation = state.perturbations
+        new_perturbation = jnp.where(
+            external_noise_std > 0, perturbation, jnp.zeros_like(perturbation)
         )
-        return NoisyNetworkState(state.network_state, new_noise_state)
+        return eqx.tree_at(lambda s: s.perturbations, state, new_perturbation)
 
 
 def plot_perturbation_distribution_over_time(ax):
@@ -41,7 +42,7 @@ def plot_perturbation_distribution_over_time(ax):
     t_offset = 2.02
     external_noise_std = 10e-9
 
-    config.noisy_network_cls = ExternalNoiseStd
+    config.network_cls = ExternalNoiseStd
     config.t0 = t0
     config.t1 = t1
 
@@ -78,21 +79,21 @@ def plot_perturbation_distribution_over_time(ax):
         sol, model = run_simulation(config, save_results=True)
         state: SystemState = sol.ys
 
-        if jnp.sum(state.agent_state.noisy_network.network_state.S[:, 0]) > 0:
+        if jnp.sum(state.agent_state.network_state.network_state.S[:, 0]) > 0:
             print(
                 f"Run {i}: Spikes detected during perturbation window, skipping this run."
             )
             continue  # Skip this run if there are any spikes, as we want to analyze the voltage distribution without the influence of spiking activity
 
         V_diff = (
-            state.agent_state.noisy_network.network_state.V[:, 0]
-            - state.agent_state.noisy_network.network_state.V[:, 1]
+            state.agent_state.network_state.network_state.V[:, 0]
+            - state.agent_state.network_state.network_state.V[:, 1]
             if V_diff is None
             else jnp.vstack(
                 (
                     V_diff,
-                    state.agent_state.noisy_network.network_state.V[:, 0]
-                    - state.agent_state.noisy_network.network_state.V[:, 1],
+                    state.agent_state.network_state.network_state.V[:, 0]
+                    - state.agent_state.network_state.network_state.V[:, 1],
                 )
             )
         )
@@ -156,10 +157,10 @@ def plot_cross_correlation(ax):
     state: SystemState = sol.ys
 
     # Remove data around spike times to avoid the influence of spiking activity on the correlation analysis
-    spike_idx = jnp.where(state.agent_state.noisy_network.network_state.S[:, 0] == 1)[0]
-    V_0 = state.agent_state.noisy_network.network_state.V[:, 0]
-    V_1 = state.agent_state.noisy_network.network_state.V[:, 1]
-    noise = state.agent_state.noisy_network.noise_state[:, 0]
+    spike_idx = jnp.where(state.agent_state.network_state.network_state.S[:, 0] == 1)[0]
+    V_0 = state.agent_state.network_state.network_state.V[:, 0]
+    V_1 = state.agent_state.network_state.network_state.V[:, 1]
+    noise = state.agent_state.network_state.noise_state[:, 0]
 
     remove_spikes = True
     if remove_spikes:
@@ -167,7 +168,7 @@ def plot_cross_correlation(ax):
             WINDOW_BUFFER = 10e-3
             start_idx = max(0, spike_id - int(WINDOW_BUFFER / config.dt))
             end_idx = min(
-                state.agent_state.noisy_network.network_state.V.shape[0],
+                state.agent_state.network_state.network_state.V.shape[0],
                 spike_id + int(WINDOW_BUFFER / config.dt),
             )
             V_0 = V_0.at[start_idx:end_idx].set(jnp.nan)

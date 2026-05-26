@@ -31,12 +31,10 @@ def main():
     cfg.save_at = SaveAt(
         ts=jnp.arange(0.0, cfg.t1, cfg.dt),
         fn=lambda t, x, args: (
-            x.agent_state.noisy_network.network_state.S[0].astype(jnp.bool),
+            x.agent_state.network_state.S[0].astype(jnp.bool),
             x.agent_state.RPE.RPE.astype(jnp.float32),
-            x.agent_state.noisy_network.network_state.W[0].astype(jnp.float32),
-            x.agent_state.noisy_network.network_state.features.eligibility[0].astype(
-                jnp.float32
-            ),
+            x.agent_state.network_state.W[0].astype(jnp.float32),
+            x.agent_state.network_state.features.eligibility[0].astype(jnp.float32),
         ),
     )
 
@@ -78,7 +76,7 @@ def main():
     axs[2].set_title("Synaptic Weights")
 
     e_to_plot = eligibility[:, : cfg.N_neurons][
-        :, model.agent.noisy_network.base_network.excitatory_mask[: cfg.N_neurons]
+        :, model.agent.network.base_network.excitatory_mask[: cfg.N_neurons]
     ]
     axs[3].plot(ts * 1e3, e_to_plot)
     axs[3].set_xlabel("Time (ms)")

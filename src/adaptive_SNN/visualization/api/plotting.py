@@ -9,7 +9,6 @@ from matplotlib import pyplot as plt
 from adaptive_SNN.models import (
     AgentEnvSystem,
     LIFNetwork,
-    NoisyNetwork,
     SystemState,
 )
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
@@ -17,7 +16,6 @@ from adaptive_SNN.utils.metrics import compute_CV_ISI, compute_synchrony
 from adaptive_SNN.visualization.utils.adapters import (
     get_LIF_model,
     get_LIF_state,
-    get_noisy_network_state,
 )
 from adaptive_SNN.visualization.utils.components import (
     _plot_conductance_frequency_spectrum,
@@ -36,7 +34,7 @@ mpl.rcParams["savefig.directory"] = "../figures"
 
 def plot_simulate_SNN_results(
     sol: Solution,
-    model: LIFNetwork | NoisyNetwork,
+    model: LIFNetwork,
     split_noise: bool = False,
     split_recurrent: bool = False,
     plot_spikes: bool = True,
@@ -47,7 +45,7 @@ def plot_simulate_SNN_results(
 ):
     """Plot the results of a noisy SNN simulation.
 
-    Solution state must contain the LIFState's V, S, W, and G. If NoisyNetwork, also noise_state.
+    Solution state must contain the LIFState's V, S, W, and G.
     """
     # Get results
     t = sol.ts
@@ -111,7 +109,7 @@ def plot_rate_learning_results(
         state: SystemState = sol.ys
         agent_state, env_state = state.agent_state, state.environment_state
         network_state, predicted_reward, reward_signal = (
-            agent_state.noisy_network,
+            agent_state.network_state,
             agent_state.predicted_reward.reward.squeeze(),
             state.reward_signal,
         )
@@ -332,14 +330,10 @@ def plot_noise_STA(
         mean_var_E = jnp.mean(
             var_E_conductance[jnp.size(sol.ts) // 2 :, neurons_to_plot], axis=0
         )
-        last_state = jax.tree.map(lambda v: v[-1], get_noisy_network_state(sol.ys))
+        last_state = jax.tree.map(lambda v: v[-1], get_LIF_state(sol.ys))
         last_state = eqx.tree_at(
             lambda s: s.network_state.var_E_conductance, last_state, mean_var_E
         )
-        if not isinstance(model, NoisyNetwork):
-            raise NotImplementedError(
-                "Model must be NoisyNetwork to compute noise std."
-            )
         noise_std = model.compute_desired_noise_std(0.0, last_state, args)
 
         _plot_noise_distribution_STA(
@@ -347,7 +341,7 @@ def plot_noise_STA(
         )
 
         lif_state = get_LIF_state(sol.ys)
-        noise_state = get_noisy_network_state(sol.ys).noise_state
+        noise_state = get_LIF_state(sol.ys).perturbations
 
         CV_ISI = compute_CV_ISI(lif_state.S, sol.ts)[
             0
@@ -383,9 +377,7 @@ def plot_learning_detailed(
     t1 = t[-1]
 
     fig, axs = plt.subplots(
-        7
-        if not isinstance(model.agent.noisy_network.base_network, GatedLIFNetwork)
-        else 8,
+        7 if not isinstance(model.agent.network.base_network, GatedLIFNetwork) else 8,
         1,
         figsize=(10, 8),
         sharex=True,
@@ -397,13 +389,13 @@ def plot_learning_detailed(
     state: SystemState = sol.ys
     agent_state, env_state = state.agent_state, state.environment_state
     network_state, predicted_reward = (
-        agent_state.noisy_network,
+        agent_state.network_state,
         agent_state.predicted_reward.reward,
     )
     reward_signal = state.reward_signal
-    eligibility_trace = agent_state.noisy_network.network_state.features.eligibility
-    noise_state = agent_state.noisy_network.noise_state
-    var_E_conductance = agent_state.noisy_network.network_state.var_E_conductance
+    eligibility_trace = agent_state.network_state.network_state.features.eligibility
+    noise_state = agent_state.network_state.noise_state
+    var_E_conductance = agent_state.network_state.network_state.var_E_conductance
     RPE = reward_signal.squeeze() - predicted_reward.squeeze()
 
     axs[0].plot(t, env_state, label="Environment State")
@@ -456,7 +448,7 @@ def plot_learning_detailed(
     axs[4].set_ylabel("Eligibility Trace")
     axs[4].set_xlabel("Time (s)")
 
-    E_mask = model.agent.noisy_network.base_network.excitatory_mask[None, :]
+    E_mask = model.agent.network.base_network.excitatory_mask[None, :]
     W = network_state.network_state.W
     axs[5].plot(
         t,
@@ -483,9 +475,9 @@ def plot_learning_detailed(
 
     axs[6].plot(t, jnp.sqrt(var_E_conductance[:, 0]), label="Var E Conductance")
 
-    if isinstance(model.agent.noisy_network.base_network, GatedLIFNetwork):
+    if isinstance(model.agent.network.base_network, GatedLIFNetwork):
         print("Plotting gating function value over time for GatedLIFNetwork...")
-        gating_values = model.agent.noisy_network.base_network.gating_function(
+        gating_values = model.agent.network.base_network.gating_function(
             get_LIF_state(sol.ys).V[:, 0]
         )
         axs[7].plot(t, gating_values, label="Gating Function Value")
@@ -550,7 +542,7 @@ def plot_weight_distribution_over_time(
             bin_end_idx = jnp.searchsorted(t, bin_edges[i + 1])
 
             # Extract weights for this time bin
-            weight_data = state.agent_state.noisy_network.network_state.W[
+            weight_data = state.agent_state.network_state.network_state.W[
                 bin_start_idx:bin_end_idx, :, :
             ]
             if neurons_to_plot is not None:
@@ -830,7 +822,7 @@ def plot_weights_over_time(
     t = sol.ts
     state: SystemState = sol.ys
 
-    weight_data = state.agent_state.noisy_network.network_state.W
+    weight_data = state.agent_state.network_state.network_state.W
 
     # Extract weights over time
     if neurons_to_plot is not None:

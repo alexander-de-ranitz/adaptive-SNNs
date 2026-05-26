@@ -20,10 +20,10 @@ def main():
     sol, model = run_simulation(config, save_results=False)
 
     state = sol.ys
-    V = state.agent_state.noisy_network.network_state.V[:, 0]
-    V2 = state.agent_state.noisy_network.network_state.V[:, 1]
-    V3 = state.agent_state.noisy_network.network_state.V[:, 2]
-    noise = state.agent_state.noisy_network.noise_state[:, :]
+    V = state.agent_state.network_state.V[:, 0]
+    V2 = state.agent_state.network_state.V[:, 1]
+    V3 = state.agent_state.network_state.V[:, 2]
+    noise = state.agent_state.network_state.perturbation[:, :]
 
     plt.plot(sol.ts, V, label="Voltage")
     plt.plot(sol.ts, V2, label="Voltage 2")

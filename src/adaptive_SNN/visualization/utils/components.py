@@ -11,8 +11,6 @@ from adaptive_SNN.utils.metrics import compute_network_firing_rate
 from adaptive_SNN.visualization.utils.adapters import (
     get_LIF_model,
     get_LIF_state,
-    get_noisy_network_model,
-    get_noisy_network_state,
 )
 
 
@@ -168,8 +166,8 @@ def _plot_conductances(
                 "Cannot split noise conductances for LIFNetwork model; no noise present."
             )
 
-        noisy_network_state = get_noisy_network_state(sol.ys)
-        noise = noisy_network_state.noise_state
+        network_state = get_LIF_state(sol.ys)
+        noise = network_state.perturbations
 
         ax.plot(
             t,
@@ -198,8 +196,8 @@ def _plot_conductances(
             total_G_excitatory = weighed_G_excitatory
             total_G_inhibitory = weighed_G_inhibitory
         else:
-            noisy_network_state = get_noisy_network_state(sol.ys)
-            noise = noisy_network_state.noise_state
+            network_state = get_LIF_state(sol.ys)
+            noise = network_state.perturbations
             total_G_excitatory = weighed_G_excitatory + noise
             total_G_inhibitory = weighed_G_inhibitory
 
@@ -424,14 +422,14 @@ def _plot_conductance_frequency_spectrum(
 
     # Plot the empirical and expected spectrum of the noise
     if plot_noise:
-        noisy_network_state = get_noisy_network_state(sol.ys)
-        noise = noisy_network_state.noise_state
+        lif_state = get_LIF_state(sol.ys)
+        noise = lif_state.perturbations
         noise_signals = [noise[:, i] for i in neurons_to_plot]
         noise_labels = [f"Neuron {i + 1} Noise E Conductance" for i in neurons_to_plot]
         _plot_frequency_spectrum(ax, sol, noise_signals, noise_labels, **plot_kwargs)
 
         # Plot expected PSD for OU process
-        noise_model = get_noisy_network_model(model).noise_model
+        noise_model = get_LIF_model(model).noise_model
         # Note: PSD is not normalized
         expected_PSD = lambda f: noise_model.tau**2 / (
             1 + (2 * jnp.pi * f * noise_model.tau) ** 2
@@ -462,7 +460,7 @@ def _plot_noise_distribution_STA(
     """
     state = sol.ys
     lif_state = get_LIF_state(state)
-    noise_state = get_noisy_network_state(state).noise_state
+    noise_state = get_LIF_state(state).perturbations
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(lif_state.S.shape[1])

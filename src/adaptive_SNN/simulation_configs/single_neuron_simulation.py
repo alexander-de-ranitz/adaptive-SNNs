@@ -38,7 +38,7 @@ def create_single_neuron_config_extra_synapse(
     key, spike_key, reward_noise_key = jr.split(key, 3)
 
     network_output_fn = lambda t, agent_state, args: jnp.squeeze(
-        agent_state.noisy_network.network_state.S
+        agent_state.network_state.S
     )
 
     def input_spike_fn(t, x, args):
@@ -70,7 +70,7 @@ def create_single_neuron_config_extra_synapse(
 
     model_cls = LIFNetwork
     cfg = SimulationConfig(
-        base_network_cls=model_cls,
+        network_cls=model_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         balance=0.0,

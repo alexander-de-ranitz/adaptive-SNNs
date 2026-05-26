@@ -42,7 +42,7 @@ def create_default_config_single_synapse_task(
     key, spike_key, reward_noise_key = jr.split(key, 3)
 
     network_output_fn = lambda t, agent_state, args: jnp.squeeze(
-        agent_state.noisy_network.network_state.S
+        agent_state.network_state.S
     )
 
     def input_spike_fn(t, x, args):
@@ -70,13 +70,11 @@ def create_default_config_single_synapse_task(
     )
 
     def RPE_fn(t, x, args):
-        spike_diff = (
-            x.noisy_network.network_state.S[0] - x.noisy_network.network_state.S[1]
-        )
+        spike_diff = x.network_state.S[0] - x.network_state.S[1]
         return spike_diff.reshape((1,))
 
     cfg = SimulationConfig(
-        base_network_cls=model_cls,
+        network_cls=model_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         balance=0.0,

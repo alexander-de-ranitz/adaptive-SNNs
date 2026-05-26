@@ -32,7 +32,7 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
     key, spike_key, reward_noise_key = jr.split(key, 3)
 
     network_output_fn = lambda t, agent_state, args: jnp.squeeze(
-        jnp.sum(agent_state.noisy_network.network_state.S)
+        jnp.sum(agent_state.network_state.S)
     )
 
     def input_spike_fn(t, x, args):
@@ -44,7 +44,7 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
         )
 
     def save(t, x: SystemState, args):
-        return x.agent_state.noisy_network.network_state.S.astype(jnp.bool)
+        return x.agent_state.network_state.network_state.S.astype(jnp.bool)
 
     save_at = SaveAt(ts=jnp.arange(0.5, t1, dt), fn=save)
 
@@ -53,7 +53,7 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
 
     model_cls = LIFNetwork
     cfg = SimulationConfig(
-        base_network_cls=model_cls,
+        network_cls=model_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         balance=balance,

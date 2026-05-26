@@ -26,15 +26,15 @@ def save_part_of_state(state, **to_save):
         A new state object containing only the specified attributes.
     """
     saved_state = {}
-    for attr, value in dataclasses.asdict(state).items():
+    for attr in dataclasses.asdict(state):
+        value = getattr(state, attr)
         # Check if the attribute is to be saved, if so, add it to saved_state
         if attr in to_save and to_save[attr]:
             saved_state[attr] = value
-        # If the attribute is a dict (i.e., a nested dataclass), recursively save its parts
-        elif isinstance(value, dict):
-            # We need to pass the nested state as its own dataclass instance instead of its dict representation to ensure correct typing
-            nested_state = state.__getattribute__(attr)
-            saved_state[attr] = save_part_of_state(nested_state, **to_save)
+        # If the attribute is a dataclass (i.e., a nested dataclass), recursively save its parts
+        elif dataclasses.is_dataclass(value):
+            # Pass the nested state itself so the reconstructed object keeps its original type.
+            saved_state[attr] = save_part_of_state(value, **to_save)
         # Otherwise, set it to None
         else:
             saved_state[attr] = None

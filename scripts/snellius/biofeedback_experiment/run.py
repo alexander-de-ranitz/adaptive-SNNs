@@ -67,9 +67,9 @@ def main():
     def save(t, x: SystemState, args):
         return (
             x.environment_state.astype(jnp.float32),
-            x.agent_state.noisy_network.network_state.W[0].astype(jnp.float32),
-            jnp.nanmean(x.agent_state.noisy_network.network_state.W),
-            jnp.nanstd(x.agent_state.noisy_network.network_state.W),
+            x.agent_state.network_state.network_state.W[0].astype(jnp.float32),
+            jnp.nanmean(x.agent_state.network_state.network_state.W),
+            jnp.nanstd(x.agent_state.network_state.network_state.W),
         )
 
     cfg.save_at = SaveAt(ts=jnp.linspace(cfg.t0, cfg.t1, 5000), fn=save)

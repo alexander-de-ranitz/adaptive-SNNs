@@ -31,13 +31,11 @@ def main():
     def save(t, x: SystemState, args):
         # return x.environment_state.astype(jnp.float32)
         return (
-            x.agent_state.noisy_network.network_state.W[:10].astype(jnp.float32),
-            x.agent_state.noisy_network.network_state.G[:10].astype(jnp.float32),
+            x.agent_state.network_state.network_state.W[:10].astype(jnp.float32),
+            x.agent_state.network_state.network_state.G[:10].astype(jnp.float32),
         )
 
-    cfg.network_output_fn = (
-        lambda t, agent_state, args: agent_state.noisy_network.network_state.S
-    )
+    cfg.network_output_fn = lambda t, agent_state, args: agent_state.network_state.S
 
     cfg.save_at = SaveAt(ts=jnp.linspace(0.0, cfg.t1, 200), fn=save)
 
@@ -64,7 +62,7 @@ def main():
 
     W, G = sol.ys
     G = G * W
-    excitatory_mask = model.agent.noisy_network.base_network.excitatory_mask
+    excitatory_mask = model.agent.network.base_network.excitatory_mask
 
     print(f"G shape is {G.shape}")
 

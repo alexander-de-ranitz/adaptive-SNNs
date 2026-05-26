@@ -5,14 +5,14 @@ import diffrax as dfx
 import jax.numpy as jnp
 import jax.random as jr
 from helpers import (
-    DeterministicNoisyNeuronModel,
+    DeterministicLIFNetwork,
     DeterministicOUP,
     allclose_pytree,
     get_non_inf_ts_ys,
     make_default_args,
 )
 
-from adaptive_SNN.models import LIFNetwork, NoisyNetworkState
+from adaptive_SNN.models import LIFNetwork, LIFState
 from adaptive_SNN.solver import solve_ODE
 
 
@@ -29,8 +29,11 @@ def test_solver_timesteps():
         tau=network.tau_E, noise_std=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
     )
 
-    model = DeterministicNoisyNeuronModel(
-        neuron_model=network,
+    model = DeterministicLIFNetwork(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        dt=dt0,
+        key=key,
         noise_model=noise_model,
         t0=t0,
         t1=t1 + dt0,
@@ -81,8 +84,11 @@ def test_solver_timesteps_precision():
         tau=network.tau_E, noise_std=0.0, dim=N_neurons, t0=t0, t1=t1 + dt0
     )
 
-    model = DeterministicNoisyNeuronModel(
-        neuron_model=network,
+    model = DeterministicLIFNetwork(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        dt=dt0,
+        key=key,
         noise_model=noise_model,
         t0=t0,
         t1=t1 + dt0,
@@ -118,8 +124,11 @@ def test_solver_output():
         tau=network.tau_E, noise_std=2e-16, dim=N_neurons, t0=t0, t1=t1 + dt0
     )
 
-    model = DeterministicNoisyNeuronModel(
-        neuron_model=network,
+    model = DeterministicLIFNetwork(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        dt=dt0,
+        key=key,
         noise_model=noise_model,
         t0=t0,
         t1=t1 + dt0,
@@ -133,11 +142,8 @@ def test_solver_output():
     # Define a save function that extracts only the relevant parts of the state. Necessary because
     # diffrax does not update the spike buffer in the same way as our custom solver.
 
-    def save_fn(t, y: NoisyNetworkState, args):
-        return (
-            (y.network_state.V, y.network_state.G, y.network_state.S),
-            y.noise_state,
-        )
+    def save_fn(t, y: LIFState, args):
+        return ((y.V, y.G, y.S), y.perturbations)
 
     # Our method
     save_at = dfx.SaveAt(subs=dfx.SubSaveAt(fn=save_fn, steps=True, t0=True, t1=True))

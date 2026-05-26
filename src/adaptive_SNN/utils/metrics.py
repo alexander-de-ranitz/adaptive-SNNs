@@ -2,7 +2,6 @@ from jax import numpy as jnp
 from jaxtyping import Array
 
 from adaptive_SNN.models.networks.base import AbstractLIFNetwork
-from adaptive_SNN.models.networks.noisy_network import NoisyNetwork
 
 
 def compute_CV_ISI(spikes: Array, ts: Array) -> Array:
@@ -57,11 +56,6 @@ def compute_conductance_ratio(t, state, model) -> Array:
         network_state = state
 
         noise = jnp.zeros(base_network.N_neurons)
-    elif isinstance(model, NoisyNetwork):
-        base_network = model.base_network
-        network_state = state.network_state
-
-        noise = state.noise_state
 
     W = network_state.W
     G = network_state.G
@@ -118,11 +112,6 @@ def compute_charge_ratio(t, state, model) -> Array:
         network_state = state
 
         noise = jnp.zeros(base_network.N_neurons)
-    elif isinstance(model, NoisyNetwork):
-        base_network: AbstractLIFNetwork = model.base_network
-        network_state = state.network_state
-
-        noise = state.noise_state
 
     W = network_state.W
     G = network_state.G

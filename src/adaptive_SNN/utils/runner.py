@@ -5,7 +5,7 @@ import jax.random as jr
 import numpy as np
 from jax import numpy as jnp
 
-from adaptive_SNN.models import AgentEnvSystem, NeuralNoiseOUP
+from adaptive_SNN.models import AgentEnvSystem
 from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.config import SimulationConfig
 
@@ -51,7 +51,7 @@ def run_simulation(
 
     key, network_key, simulation_key = jr.split(key, 3)
 
-    neuron_model = config.base_network_cls(
+    neuron_model = config.network_cls(
         N_neurons=config.N_neurons,
         N_inputs=config.N_inputs,
         connection_prob_E=config.connection_prob_E,
@@ -66,22 +66,15 @@ def run_simulation(
         fraction_excitatory_recurrent=config.fraction_excitatory_recurrent,
         rec_weight_std=config.rec_weight_std,
         mean_synaptic_delay=config.mean_synaptic_delay,
+        min_noise_std=config.min_noise_std,
         key=network_key,
         **config.base_network_kwargs,
-    )
-
-    noise_model = NeuralNoiseOUP(tau=neuron_model.tau_E, dim=config.N_neurons)
-
-    network = config.noisy_network_cls(
-        neuron_model=neuron_model,
-        noise_model=noise_model,
-        min_noise_std=config.min_noise_std,
     )
 
     reward_noise = config.reward_noise_model(**config.reward_noise_kwargs)
     RPE_model = config.RPE_model(**config.RPE_model_kwargs)
     agent = config.agent_cls(
-        neuron_model=network,
+        neuron_model=neuron_model,
         reward_model=config.reward_model(**config.reward_kwargs),
         reward_noise=reward_noise,
         RPE_model=RPE_model,

@@ -123,7 +123,7 @@ def compute_eligibility_changes_around_spikes(sol) -> list[tuple[float, float]]:
 def run_sim(id, key):
     config = create_default_config_single_synapse_task(key=key)
     config.t1 = 30
-    config.base_network_cls = NoDecayGatedLIFNetwork
+    config.network_cls = NoDecayGatedLIFNetwork
     config.min_noise_std = 1e-9
     config.noise_level = 0.0
     config.initial_weight_matrix = config.initial_weight_matrix.at[:, -1].set(5.0)
@@ -133,8 +133,8 @@ def run_sim(id, key):
         pre_synaptic_spikes = args["get_input_spikes"](t, None, None)[
             0, 2
         ].squeeze()  # Get the spikes from the third input
-        post_synaptic_spikes = x.agent_state.noisy_network.network_state.S[0].squeeze()
-        eligibility = x.agent_state.noisy_network.network_state.features.eligibility[
+        post_synaptic_spikes = x.agent_state.network_state.network_state.S[0].squeeze()
+        eligibility = x.agent_state.network_state.network_state.features.eligibility[
             0, 4
         ].squeeze()  # Eligibility for the synapse from input 2 to neuron 0
         return (pre_synaptic_spikes, post_synaptic_spikes, eligibility)
@@ -145,8 +145,8 @@ def run_sim(id, key):
 
     model = (
         "gated"
-        if (config.base_network_cls == GatedLIFNetwork)
-        or (config.base_network_cls == NoDecayGatedLIFNetwork)
+        if (config.network_cls == GatedLIFNetwork)
+        or (config.network_cls == NoDecayGatedLIFNetwork)
         else "eligibility"
     )
     config.save_file = f"results/STDP_plot_new/STDP_no_decay_{model}_simulation_{id}"

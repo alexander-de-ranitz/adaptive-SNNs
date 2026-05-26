@@ -27,8 +27,6 @@ from adaptive_SNN.models import (
     Agent,
     AgentEnvSystem,
     MovingAverageRewardModel,
-    NeuralNoiseOUP,
-    NoisyNetwork,
     SystemState,
 )
 from adaptive_SNN.models.environments import SpikeRateEnvironment
@@ -92,22 +90,16 @@ def main():
             N_inputs=N_inputs,
             dt=dt,
             fully_connected_input=True,
-            input_weight=input_weight,
-            rec_weight=0.0,  # No recurrent connections
+            initial_input_weight=input_weight,
+            initial_rec_weight=0.0,  # No recurrent connections
             fraction_excitatory_input=1.0,
             fraction_excitatory_recurrent=0.8,
+            min_noise_std=1e-9,
             key=key,
         )
 
-        # Set up noise model (Ornstein-Uhlenbeck process)
-        noise_model = NeuralNoiseOUP(tau=neuron_model.tau_E, dim=N_neurons)
-
-        # Combine into NoisyNetwork
-        noisy_network = NoisyNetwork(
-            neuron_model=neuron_model, noise_model=noise_model, min_noise_std=1e-9
-        )
         agent = Agent(
-            neuron_model=noisy_network,
+            neuron_model=neuron_model,
             reward_model=MovingAverageRewardModel(reward_rate=0.1),
             reward_noise=OUP(noise_std=0.0),
             RPE_model=UpdateAndDecayRPEModel(),
@@ -131,11 +123,11 @@ def main():
             "reward_fn": lambda t, x, args: jnp.array([0.0]),
             "noise_scale_hyperparam": 1e-6,
             "network_output_fn": lambda t, agent_state, args: jnp.squeeze(
-                agent_state.noisy_network.network_state.S[0]
+                agent_state.network_state.S[0]
             ),
             "use_noise": jnp.array([True]),
             "tau_RPE": 0.05,
-            "RPE_fn": lambda t, x, args: x.noisy_network.network_state.S[
+            "RPE_fn": lambda t, x, args: x.network_state.S[
                 0
             ],  # RPE is zero for now, since we want to see how it evolves
         }
@@ -153,7 +145,7 @@ def main():
                 reward_noise=True,
                 eligibility=True,
                 V=True,
-                noise_state=True,
+                perturbations=True,
             )
 
         print("Running simulation...")
@@ -170,21 +162,17 @@ def main():
         )
 
         state: SystemState = sol.ys
-        spikes = state.agent_state.noisy_network.network_state.S[:, 0]
-        noise = state.agent_state.noisy_network.noise_state[:, 0]
-        G_total = (
-            state.agent_state.noisy_network.network_state.G[:, 0].sum(axis=-1) * 1e9
-        )
-        V = state.agent_state.noisy_network.network_state.V[:, 0] * 1000
-        eligibility = (
-            state.agent_state.noisy_network.network_state.features.eligibility[
-                :, 0
-            ].sum(axis=-1)
+        spikes = state.agent_state.network_state.S[:, 0]
+        noise = state.agent_state.network_state.perturbations[:, 0]
+        G_total = state.agent_state.network_state.G[:, 0].sum(axis=-1) * 1e9
+        V = state.agent_state.network_state.V[:, 0] * 1000
+        eligibility = state.agent_state.network_state.features.eligibility[:, 0].sum(
+            axis=-1
         )
         RPE = state.agent_state.RPE.RPE[:, 0]
-        W = state.agent_state.noisy_network.network_state.W[:, 0]
+        W = state.agent_state.network_state.W[:, 0]
         gating = neuron_model.gating_function(
-            state.agent_state.noisy_network.network_state.V[:, 0], neuron_model.delta_V
+            state.agent_state.network_state.V[:, 0], neuron_model.delta_V
         )
         t = sol.ts.squeeze() * 1000
 

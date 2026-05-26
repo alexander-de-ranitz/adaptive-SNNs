@@ -8,6 +8,8 @@ import jax.numpy as jnp
 import jax.random as jr
 from jaxtyping import Array
 
+from adaptive_SNN.models.noise.base import NoiseModelABC
+from adaptive_SNN.models.noise.oup import OUP
 from adaptive_SNN.utils.operators import (
     DefaultIfNone,
     ElementWiseMul,
@@ -63,6 +65,7 @@ class LIFState(eqx.Module):
     S: Array
     W: Array
     G: Array
+    perturbations: Array
     firing_rate: Array
     mean_E_conductance: Array
     var_E_conductance: Array
@@ -119,11 +122,17 @@ class AbstractLIFNetwork(NeuronModelABC):
     key: Array  = eqx.field(default_factory=lambda: jr.PRNGKey(0))  # Random key initialization
     EMA_tau: float = 1  # Time constant for exponential moving average of firing rate and mean/var of conductance
     buffer_size: int  = 1 # Size of spike history buffer
+    noise_model: NoiseModelABC | None = None # Noise model to add noise to the network
+    min_noise_std: float = 0.0 # Minimum std of noise to prevent it from going to zero when synaptic variance is low
 
     # fmt: on
 
     def __post_init__(self):
         """Post-initialization to set up neuron types, synaptic delays, and other derived parameters."""
+
+        # Initialize noise model
+        if self.noise_model is None:
+            self.noise_model = OUP(dim=self.N_neurons, tau=self.tau_E)
 
         # Set up neuron types for recurrent connections
         key, subkey = jr.split(self.key)
@@ -227,6 +236,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         V_init = (
             jnp.zeros((self.N_neurons,), dtype=default_float) + self.resting_potential
         )
+        perturbations_init = self.noise_model.initial
         conductance_init = jnp.zeros(
             (self.N_neurons, self.N_neurons + self.N_inputs), dtype=default_float
         )
@@ -249,6 +259,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=spikes_init,
             W=weights,
             G=conductance_init,
+            perturbations=perturbations_init,
             firing_rate=firing_rate,
             time_since_last_spike=time_since_last_spike,
             spike_buffer=spike_buffer,
@@ -282,6 +293,9 @@ class AbstractLIFNetwork(NeuronModelABC):
         dG = -1 / self.synaptic_time_constants[None, :] * state.G
         dW = self.compute_weight_updates(t, state, args)
         dS = jnp.zeros_like(state.S)  # Spikes are handled separately, so no change here
+
+        # Perturbations drift is defined by the noise model
+        d_perturbations = self.noise_model.drift(t, state.perturbations, args)
 
         # Time since last spike increases at rate 1
         d_time_since_last_spike = jnp.ones_like(state.time_since_last_spike)
@@ -317,6 +331,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=dS,
             W=dW,
             G=dG,
+            perturbations=d_perturbations,
             firing_rate=d_firing_rate,
             mean_E_conductance=d_mean_E_conductance,
             var_E_conductance=d_var_E_conductance,
@@ -348,22 +363,35 @@ class AbstractLIFNetwork(NeuronModelABC):
         Returns:
             MixedPyTreeOperator defining how noise enters the system
         """
-        tree = jax.tree.map(
-            lambda arr: DefaultIfNone(
-                default=jnp.zeros_like(arr),
-                else_do=ElementWiseMul(jnp.zeros_like(arr, dtype=default_float)),
+
+        # Start with zero/no-op diffusion everywhere and then fill in the stochastic parts.
+        diffusion = jax.tree.map(
+            lambda leaf: DefaultIfNone(
+                default=jnp.zeros_like(leaf),
+                else_do=ElementWiseMul(jnp.zeros_like(leaf, dtype=default_float)),
             ),
             state,
         )
 
-        # Replace only the features subtree (must match structure of state.features)
-        tree = eqx.tree_at(
+        # Possible features must define their diffusion
+        diffusion = eqx.tree_at(
             lambda s: s.features,
-            tree,
+            diffusion,
             self.compute_feature_diffusion(t, state, args),
         )
 
-        return MixedPyTreeOperator(tree)
+        # Diffusion of the noise process is computed in the noise model,
+        # but takes a state-dependent noise_std as input
+        noise_std = self.compute_desired_noise_std(t, state, args)
+        diffusion = eqx.tree_at(
+            lambda s: s.perturbations,
+            diffusion,
+            self.noise_model.diffusion(t, state, args, noise_std=noise_std),
+        )
+
+        # Since diffusion can consist of a mix of matrices and Lineax operators,
+        # we return it as a MixedPyTreeOperator which can handle this case.
+        return MixedPyTreeOperator(diffusion)
 
     @abstractmethod
     def compute_feature_diffusion(self, t, state: LIFState, args):
@@ -377,6 +405,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=None,
             W=None,
             G=None,
+            perturbations=self.noise_model.noise_shape,
             firing_rate=None,
             mean_E_conductance=None,
             var_E_conductance=None,
@@ -403,7 +432,9 @@ class AbstractLIFNetwork(NeuronModelABC):
 
     def update(self, t, x: LIFState, args) -> LIFState:
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
-        state = self.spike_and_reset(t, x, args)
+        perturbations = self.noise_model.update(t, x.perturbations, args)
+        state = eqx.tree_at(lambda s: s.perturbations, x, perturbations)
+        state = self.spike_and_reset(t, state, args)
         state = self.clip_weights(t, state, args)
         state = self.force_balanced_weights(t, state, args)
         return state
@@ -443,7 +474,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         synaptic_E_conductances = jnp.sum(
             weighted_conductances * self.excitatory_mask[None, :], axis=1
         )
-        E_noise = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+        E_noise = state.perturbations
         total_E_conductances = (
             synaptic_E_conductances + E_noise
         )  # Add external excitatory noise to total excitatory conductance
@@ -580,6 +611,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=recurrent_spikes,
             W=W,
             G=G_new,
+            perturbations=state.perturbations,
             firing_rate=new_firing_rate,
             mean_E_conductance=state.mean_E_conductance,
             var_E_conductance=state.var_E_conductance,
@@ -763,3 +795,23 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         weights = jnp.concatenate([rec_weights, input_weights], axis=1)
         return weights
+
+    def compute_desired_noise_std(self, t, state: LIFState, args):
+        """For each neuron, compute the desired scale of the noise to be added.
+
+        If the noise_scale_hyperparam is zero, no noise is added. Otherwise, the desired noise std is given as:
+            desired_noise_std = min_noise_std + noise_scale_hyperparam * sqrt(var_E_conductance)
+
+        Returns:
+            Array: Noise scale for each neuron.
+        """
+        synaptic_variance = state.var_E_conductance
+
+        use_noise = args.get("use_noise", jnp.array([True] * self.N_neurons))
+
+        # Compute desired noise std using the computed variance and a hyperparameter, then clip to min value
+        noise_scale_hyperparam = args.get("noise_scale_hyperparam", 0.0)
+        desired_noise_std = jnp.sqrt(synaptic_variance) * noise_scale_hyperparam
+        desired_noise_std = self.min_noise_std + desired_noise_std
+        desired_noise_std = jnp.where(use_noise, desired_noise_std, 0.0)
+        return desired_noise_std

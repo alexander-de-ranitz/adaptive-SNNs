@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.networks.noisy_network import NoisyNetwork, NoisyNetworkState
+from adaptive_SNN.models.networks.base import AbstractLIFNetwork, LIFState
 from adaptive_SNN.models.noise import OUP
 from adaptive_SNN.models.noise.base import NoiseModelABC
 from adaptive_SNN.models.reward import AbstractRewardModel, RewardPrediction
@@ -15,26 +15,26 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 class AgentState(eqx.Module):
-    noisy_network: NoisyNetworkState
+    network_state: LIFState
     predicted_reward: RewardPrediction
     reward_noise: Array
     RPE: RPEState
 
 
 class Agent(eqx.Module):
-    noisy_network: NoisyNetwork
+    network: AbstractLIFNetwork
     reward_model: AbstractRewardModel
     reward_noise: NoiseModelABC
     RPE_model: AbstractRPEModel
 
     def __init__(
         self,
-        neuron_model: NoisyNetwork,
+        neuron_model: AbstractLIFNetwork,
         reward_model: AbstractRewardModel,
         reward_noise: OUP,
         RPE_model: AbstractRPEModel,
     ):
-        self.noisy_network = neuron_model
+        self.network = neuron_model
         self.reward_model = reward_model
         self.reward_noise = reward_noise
         self.RPE_model = RPE_model
@@ -42,7 +42,7 @@ class Agent(eqx.Module):
     @property
     def initial(self):
         return AgentState(
-            self.noisy_network.initial,
+            self.network.initial,
             self.reward_model.initial,
             self.reward_noise.initial,
             self.RPE_model.initial,
@@ -64,7 +64,7 @@ class Agent(eqx.Module):
         """
 
         (network_state, predicted_reward, reward_noise, RPE) = (
-            x.noisy_network,
+            x.network_state,
             x.predicted_reward,
             x.reward_noise,
             x.RPE,
@@ -74,7 +74,7 @@ class Agent(eqx.Module):
             {"RPE": RPE.RPE + reward_noise}
         )  # Add RPE to args so that it can be used for weight updates in the network drift
 
-        neuron_drift = self.noisy_network.drift(t, network_state, args)
+        neuron_drift = self.network.drift(t, network_state, args)
         reward_drift = self.reward_model.drift(t, predicted_reward, args)
         reward_noise_drift = self.reward_noise.drift(t, reward_noise, args)
         RPE_drift = self.RPE_model.drift(t, RPE, args)
@@ -82,12 +82,12 @@ class Agent(eqx.Module):
 
     def diffusion(self, t, x: AgentState, args):
         (neuron_state, predicted_reward, reward_noise, RPE) = (
-            x.noisy_network,
+            x.network_state,
             x.predicted_reward,
             x.reward_noise,
             x.RPE,
         )
-        neuron_diffusion = self.noisy_network.diffusion(t, neuron_state, args)
+        neuron_diffusion = self.network.diffusion(t, neuron_state, args)
         reward_diffusion = self.reward_model.diffusion(t, predicted_reward, args)
         reward_noise_diffusion = self.reward_noise.diffusion(t, reward_noise, args)
         RPE_diffusion = self.RPE_model.diffusion(t, RPE, args)
@@ -103,7 +103,7 @@ class Agent(eqx.Module):
     @property
     def noise_shape(self):
         return AgentState(
-            self.noisy_network.noise_shape,
+            self.network.noise_shape,
             self.reward_model.noise_shape,
             self.reward_noise.noise_shape,
             self.RPE_model.noise_shape,
@@ -119,12 +119,12 @@ class Agent(eqx.Module):
 
     def update(self, t, x: AgentState, args):
         (network_state, predicted_reward, reward_noise, RPE) = (
-            x.noisy_network,
+            x.network_state,
             x.predicted_reward,
             x.reward_noise,
             x.RPE,
         )
-        new_network_state = self.noisy_network.update(t, network_state, args)
+        new_network_state = self.network.update(t, network_state, args)
         new_reward_model_state = self.reward_model.update(t, predicted_reward, args)
         new_reward_noise = self.reward_noise.update(t, reward_noise, args)
 

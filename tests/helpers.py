@@ -7,11 +7,9 @@ from diffrax import Solution
 from jaxtyping import Array, PyTree
 
 from adaptive_SNN.models import (
+    OUP,
     LIFNetwork,
     LIFState,
-    NeuralNoiseOUP,
-    NoisyNetwork,
-    NoisyNetworkState,
     PoissonJumpProcess,
 )
 from adaptive_SNN.models.networks.base import NeuronModelABC
@@ -31,6 +29,7 @@ def make_LIF_model(
     input_neuron_types=None,
     fully_connected_input=True,
     input_weight=1.0,
+    noise_model=None,
     key=jr.PRNGKey(0),
 ):
     """Create a LIFNetwork with configurable parameters."""
@@ -40,6 +39,7 @@ def make_LIF_model(
         dt=dt,
         fully_connected_input=fully_connected_input,
         initial_input_weight=input_weight,
+        noise_model=noise_model,
         key=key,
     )
 
@@ -64,7 +64,7 @@ def make_LIF_model(
 
 def make_OUP_model(dim=3, tau=1.0, noise_std=0.3, mean=0.0):
     """Create an Ornstein-Uhlenbeck Process model with configurable parameters."""
-    return NeuralNoiseOUP(tau=tau, noise_std=noise_std, mean=mean, dim=dim)
+    return OUP(tau=tau, noise_std=noise_std, mean=mean, dim=dim)
 
 
 def make_poisson_jump_model(
@@ -89,10 +89,9 @@ def make_poisson_jump_model(
 def make_Noisy_LIF_model(
     N_neurons=10, N_inputs=3, noise_std=0.0, tau=1.0, dt=0.1e-3, key=jr.PRNGKey(0)
 ):
-    """Create a NoisyNetwork with LIF neurons and OU noise processes."""
-    network = make_LIF_model(N_neurons, N_inputs, dt=dt, key=key)
-    noise_model = NeuralNoiseOUP(tau=tau, noise_std=noise_std, dim=N_neurons)
-    return NoisyNetwork(neuron_model=network, noise_model=noise_model)
+    """Create a noisy LIFNetwork with OU noise processes."""
+    noise_model = OUP(tau=tau, noise_std=noise_std, dim=N_neurons)
+    return make_LIF_model(N_neurons, N_inputs, dt=dt, noise_model=noise_model, key=key)
 
 
 # ============================================================================
@@ -122,6 +121,11 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
         S=jnp.zeros((N_neurons,)),
         W=jnp.zeros((N_neurons, N_neurons + N_inputs)),
         G=jnp.zeros((N_neurons, N_neurons + N_inputs)),
+        perturbations=(
+            model.noise_model.initial
+            if hasattr(model, "noise_model") and model.noise_model is not None
+            else jnp.zeros((N_neurons,))
+        ),
         firing_rate=jnp.zeros((N_neurons,)),
         mean_E_conductance=jnp.zeros((N_neurons,)),
         var_E_conductance=jnp.zeros((N_neurons,)),
@@ -138,12 +142,12 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
     return state
 
 
-def make_noisy_state(network_state: LIFState, noise_state=None) -> NoisyNetworkState:
-    """Create a NoisyNetworkState from a LIFState and optional noise state."""
+def make_noisy_state(network_state: LIFState, noise_state=None) -> LIFState:
+    """Create a LIFState with an explicit perturbation state."""
     N_neurons = network_state.V.shape[0]
     if noise_state is None:
         noise_state = jnp.zeros((N_neurons,))
-    return NoisyNetworkState(network_state, noise_state)
+    return eqx.tree_at(lambda s: s.perturbations, network_state, noise_state)
 
 
 # ============================================================================
@@ -160,8 +164,6 @@ def make_default_args(N_neurons, N_inputs, **overrides):
         **overrides: Dict of arg names to override, e.g., RPE=1.5
     """
     args = {
-        "excitatory_noise": jnp.zeros((N_neurons,)),
-        "RPE": jnp.array([0.0]),
         "get_input_spikes": lambda t, x, a: jnp.zeros((N_neurons, N_inputs)),
         "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
         "get_desired_balance": lambda t, x, a: 0.0,
@@ -192,7 +194,7 @@ def allclose_pytree(x: PyTree, y: PyTree, atol=1e-6):
     return jax.tree.all(jax.tree.map(lambda a, b: jnp.allclose(a, b, atol=atol), x, y))
 
 
-class DeterministicOUP(NeuralNoiseOUP):
+class DeterministicOUP(OUP):
     """This class is identical to OUP, except it uses a VirtualBrownianTree for the noise terms.
     This makes the noise deterministic given the same key, which is useful for testing."""
 
@@ -225,21 +227,21 @@ class DeterministicOUP(NeuralNoiseOUP):
         )
 
 
-class DeterministicNoisyNeuronModel(NoisyNetwork):
-    """This class is identical to NoisyNeuronModel, except it uses a VirtualBrownianTree for the noise terms.
-    This makes the noise deterministic given the same key, which is useful for testing."""
+class DeterministicLIFNetwork(LIFNetwork):
+    """Deterministic LIF network for tests, using a VirtualBrownianTree for noise."""
 
     t0: float
     t1: float
 
     def __init__(
         self,
-        neuron_model,
+        *args,
         noise_model,
         t0: float = 0.0,
         t1: float = 1.0,
+        **kwargs,
     ):
-        super().__init__(neuron_model, noise_model)
+        super().__init__(*args, noise_model=noise_model, **kwargs)
         self.t0 = t0
         self.t1 = t1
 

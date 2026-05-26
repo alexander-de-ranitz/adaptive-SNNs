@@ -65,7 +65,7 @@ def main():
         args.output_file if args.output_file is not None else ""
     ) + file_suffix
     print(f"Running simulation with model class {model_cls.__name__}...")
-    cfg.base_network_cls = model_cls
+    cfg.network_cls = model_cls
     sol, model = run_simulation(cfg, save_results=True)
     end = time.time()
     print(f"Simulation completed in {end - start:.2f} seconds")

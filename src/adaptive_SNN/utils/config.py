@@ -13,7 +13,7 @@ from jax import numpy as jnp
 from adaptive_SNN.models.agent_env_system import AgentEnvSystem
 from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.environments.base import AbstractEnvironment
-from adaptive_SNN.models.networks import Agent, LIFNetwork, NoisyNetwork
+from adaptive_SNN.models.networks import Agent, LIFNetwork
 from adaptive_SNN.models.networks.base import NeuronModelABC
 from adaptive_SNN.models.noise import OUP
 from adaptive_SNN.models.noise.base import NoiseModelABC
@@ -31,8 +31,7 @@ class SimulationConfig:
     save_at: SaveAt = dfx.SaveAt()
 
     # Model classes
-    base_network_cls: type[NeuronModelABC] = LIFNetwork
-    noisy_network_cls: type[NeuronModelABC] = NoisyNetwork
+    network_cls: type[NeuronModelABC] = LIFNetwork
     agent_cls: type[NeuronModelABC] = Agent
     agent_env_system_cls: type[NeuronModelABC] = AgentEnvSystem
 

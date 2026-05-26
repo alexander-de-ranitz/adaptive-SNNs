@@ -34,7 +34,7 @@ def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     with np.load(file, allow_pickle=True) as data:
         agent_state = data["sol"].item().ys.agent_state
     eligibility = np.asarray(
-        agent_state.noisy_network.network_state.features.eligibility[:, 1, -1]
+        agent_state.network_state.features.eligibility[:, 1, -1]
     ).squeeze()
     reward_noise = np.asarray(agent_state.reward_noise).squeeze()
     rpe = np.asarray(agent_state.RPE).squeeze()
