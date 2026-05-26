@@ -9,7 +9,6 @@ from jaxtyping import Array
 from adaptive_SNN.utils.operators import (
     DefaultIfNone,
     ElementWiseMul,
-    MixedPyTreeOperator,
 )
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -62,12 +61,14 @@ class MovingAverageRewardModel(AbstractRewardModel):
 
     @property
     def noise_shape(self):
-        return None
+        return RewardPrediction(reward=None)
 
     def diffusion(self, t, x, args):
-        return DefaultIfNone(
-            default=jnp.zeros_like(x.reward),
-            else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+        return RewardPrediction(
+            reward=DefaultIfNone(
+                default=jnp.zeros_like(x.reward),
+                else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+            )
         )
 
     def drift(self, t, x, args):
@@ -104,12 +105,14 @@ class StudentRewardModel(AbstractRewardModel):
 
     @property
     def noise_shape(self):
-        return None
+        return RewardPrediction(reward=None)
 
     def diffusion(self, t, x, args):
-        return DefaultIfNone(
-            default=jnp.zeros_like(x.reward),
-            else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+        return RewardPrediction(
+            reward=DefaultIfNone(
+                default=jnp.zeros_like(x.reward),
+                else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+            )
         )
 
     def drift(self, t, x, args):
@@ -143,12 +146,14 @@ class MWERewardModel(AbstractRewardModel):
 
     @property
     def noise_shape(self):
-        return None
+        return RewardPrediction(reward=None)
 
     def diffusion(self, t, x, args):
-        return DefaultIfNone(
-            default=jnp.zeros_like(x.reward),
-            else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+        return RewardPrediction(
+            reward=DefaultIfNone(
+                default=jnp.zeros_like(x.reward),
+                else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+            )
         )
 
     def drift(self, t, x, args):
@@ -198,7 +203,7 @@ class RLSRewardPrediction(AbstractRewardModel):
 
     @property
     def noise_shape(self):
-        return None
+        return RewardPredictionRLS(reward=None, weights=None, P=None)
 
     def drift(self, t, x: RewardPredictionRLS, args: dict) -> RewardPredictionRLS:
         """No drift in the reward prediction process."""
@@ -217,7 +222,7 @@ class RLSRewardPrediction(AbstractRewardModel):
             ),
             x,
         )
-        return MixedPyTreeOperator(tree)
+        return tree
 
     def update(self, t, x: RewardPredictionRLS, args: dict) -> RewardPredictionRLS:
         """Update the RLS weights based on the RPE."""
