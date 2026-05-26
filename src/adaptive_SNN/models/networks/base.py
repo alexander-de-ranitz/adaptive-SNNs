@@ -427,8 +427,8 @@ class AbstractLIFNetwork(NeuronModelABC):
     def update(self, t, x: LIFState, args) -> LIFState:
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         state = self.spike_and_reset(t, x, args)
-        state = self.force_balanced_weights(t, state, args)
         state = self.clip_weights(t, state, args)
+        state = self.force_balanced_weights(t, state, args)
         return state
 
     def compute_voltage_update(self, t, state: LIFState, args):
