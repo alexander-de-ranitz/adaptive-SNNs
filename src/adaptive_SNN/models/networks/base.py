@@ -73,11 +73,13 @@ class LIFState(eqx.Module):
 
 
 class AbstractLIFNetwork(NeuronModelABC):
-    """Leaky Integrate-and-Fire (LIF) neuron network model with conductance-based synapses.
+    """Leaky Integrate-and-Fire (LIF) neuron network model with conductance-based synapses."""
 
-    The state consists of the membrane potentials, spikes, weights, and synaptic conductances of all neurons.
-    """
+    # fmt: off
 
+    ###########################################
+    #           Biophyisical Parameters       # 
+    ###########################################
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_capacitance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
@@ -92,110 +94,78 @@ class AbstractLIFNetwork(NeuronModelABC):
     V_reset: float = -60.0 * 1e-3  # mV
     refractory_period: float = 2.0 * 1e-3  # ms
     mean_synaptic_delay: float = 1.5 * 1e-3  # ms
-    fraction_excitatory_recurrent: float = (
-        0.8  # Fraction of excitatory recurrent neurons
-    )
-    fraction_excitatory_input: float = 1.0  # Fraction of excitatory input neurons
+
+    ###########################################
+    #             Network Parameters          # 
+    ###########################################
+    N_neurons: int = 1
+    N_inputs: int = 0
+    fraction_excitatory_recurrent: float = 0.8
+    fraction_excitatory_input: float = 1.0
+    initial_input_weight: float = 1.0  # Mean input weight
+    rec_weight_std: float  = 0.0 # Standard deviation of initial recurrent weights as fraction of mean weight
+    initial_rec_weight: float  = 1.0 # Mean recurrent weight
+    initial_weight_matrix: Array | None = None # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
+    fully_connected_input: bool  = False  # If True, all input neurons connect to all neurons with weight initial_input_weight
+    input_types: Array | None  = None # Optional binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
+    excitatory_mask: Array  = eqx.field(init=False) # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
+    synaptic_time_constants: Array = eqx.field(init=False) # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
+    synaptic_delay_matrix: Array = eqx.field(init=False) # Matrix of shape (N_neurons, N_neurons) with synaptic delays for recurrent connections
+
+    ###########################################
+    #               Miscellaneous             # 
+    ###########################################
+    dt: float  = 1e-4  # Timestep size for simulation in seconds, used for delay buffer
+    key: Array  = eqx.field(default_factory=lambda: jr.PRNGKey(0))  # Random key initialization
     EMA_tau: float = 1  # Time constant for exponential moving average of firing rate and mean/var of conductance
+    buffer_size: int  = 1 # Size of spike history buffer
 
-    initial_input_weight: float  # Mean input weight
-    rec_weight_std: float  # Standard deviation of initial recurrent weights as fraction of mean weight
-    initial_rec_weight: float  # Mean recurrent weight
-    initial_weight_matrix: (
-        Array | None
-    )  # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
-    fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight initial_input_weight
-    N_neurons: int
-    N_inputs: int
-    excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
-    synaptic_time_constants: Array  # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
-    synaptic_delay_matrix: (
-        Array  # Matrix of synaptic delays (N_neurons, N_neurons) in seconds
-    )
-    buffer_size: int  # Size of spike history buffer
-    dt: float  # Timestep size for simulation in seconds, used for delay buffer
-    weight_init_key: Array  # Random key for weight initialization
+    # fmt: on
 
-    def __init__(
-        self,
-        dt,
-        N_neurons: int,
-        N_inputs: int = 0,
-        connection_prob_E: float = 0.1,
-        connection_prob_I: float = 0.2,
-        fully_connected_input: bool = True,
-        initial_input_weight: float = 1.0,
-        initial_rec_weight: float = 0.0,
-        initial_weight_matrix: Array | None = None,
-        fraction_excitatory_recurrent: float = 0.8,
-        fraction_excitatory_input: float = 1.0,
-        mean_synaptic_delay: float = 1.5e-3,
-        rec_weight_std: float = 0.2,
-        input_types: Array | None = None,
-        key: jr.PRNGKey = jr.PRNGKey(0),
-    ):
-        """Initialize LIF network model.
+    def __post_init__(self):
+        """Post-initialization to set up neuron types, synaptic delays, and other derived parameters."""
 
-        Args:
-            N_neurons: Number of neurons in the network
-            N_inputs: Number of input neurons
-            connection_prob: Probability of connection between any two neurons (for recurrent connections)
-            fully_connected_input: If True, all input neurons connect to all neurons with weight initial_input_weight
-            initial_input_weight: Mean weight of input synapses
-            initial_rec_weight: Mean weight of recurrent synapses
-            initial_weight_matrix: Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs). If None, weights are initialized randomly based on initial_input_weight, initial_rec_weight, connection_prob, and rec_weight_std.
-            fraction_excitatory_recurrent: Fraction of excitatory recurrent neurons
-            fraction_excitatory_input: Fraction of excitatory input neurons
-            rec_weight_std: Standard deviation of initial recurrent weights as fraction of mean weight
-            input_types: Optional array of shape (N_inputs,) with boolean values indicating whether each input neuron is excitatory (True) or inhibitory (False). If None, random assignment is used.
-            key: JAX random key for initialization
-        """
-        self.N_neurons = N_neurons
-        self.N_inputs = N_inputs
-        self.connection_prob_E = connection_prob_E
-        self.connection_prob_I = connection_prob_I
-        self.fully_connected_input = fully_connected_input
-        self.initial_input_weight = initial_input_weight
-        self.initial_rec_weight = initial_rec_weight
-        self.fraction_excitatory_recurrent = fraction_excitatory_recurrent
-        self.fraction_excitatory_input = fraction_excitatory_input
-        self.mean_synaptic_delay = mean_synaptic_delay
-        self.dt = dt
-        self.rec_weight_std = rec_weight_std
-        self.initial_weight_matrix = initial_weight_matrix
-
-        key, subkey = jr.split(key)
-
-        # Set neuron types, 80% excitatory, 20% inhibitory
+        # Set up neuron types for recurrent connections
+        key, subkey = jr.split(self.key)
         neuron_types = jr.permutation(
             subkey,
             jnp.concatenate(
                 [
                     jnp.ones(
-                        (int(jnp.round(fraction_excitatory_recurrent * N_neurons)),),
+                        (
+                            int(
+                                jnp.round(
+                                    self.fraction_excitatory_recurrent * self.N_neurons
+                                )
+                            ),
+                        ),
                         dtype=bool,
                     ),
                     jnp.zeros(
                         (
-                            N_neurons
-                            - int(jnp.round(fraction_excitatory_recurrent * N_neurons)),
+                            self.N_neurons
+                            - int(
+                                jnp.round(
+                                    self.fraction_excitatory_recurrent * self.N_neurons
+                                )
+                            ),
                         ),
                         dtype=bool,
                     ),
                 ]
             ),
         )
-
+        # Set up neuron types for input connections
         key, subkey = jr.split(key)
-        if input_types is not None:
-            if input_types.shape != (N_inputs,):
+        if self.input_types is not None:
+            if self.input_types.shape != (self.N_inputs,):
                 raise ValueError(
-                    f"input_types must have shape ({N_inputs},), but has shape {input_types.shape}"
+                    f"input_types must have shape ({self.N_inputs},), but has shape {self.input_types.shape}"
                 )
-            input_neuron_types = input_types
+            input_neuron_types = self.input_types
         else:
-            N_E_inputs = int(jnp.round(N_inputs * self.fraction_excitatory_input))
-            N_I_inputs = N_inputs - N_E_inputs
+            N_E_inputs = int(jnp.round(self.N_inputs * self.fraction_excitatory_input))
+            N_I_inputs = self.N_inputs - N_E_inputs
             input_neuron_types = jr.permutation(
                 subkey,
                 jnp.concatenate(
@@ -206,6 +176,7 @@ class AbstractLIFNetwork(NeuronModelABC):
                 ),
             )
 
+        # Define excitatory mask and synaptic time constants for all connections
         self.excitatory_mask = jnp.concatenate(
             [neuron_types, input_neuron_types], dtype=bool
         )
@@ -218,7 +189,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         key, subkey = jr.split(key)
         self.synaptic_delay_matrix = jr.uniform(
             subkey,
-            shape=(N_neurons, N_neurons),
+            shape=(self.N_neurons, self.N_neurons),
             minval=0.0,
             maxval=2 * self.mean_synaptic_delay,
             dtype=default_float,
@@ -228,14 +199,18 @@ class AbstractLIFNetwork(NeuronModelABC):
         self.buffer_size = int(
             jnp.ceil(jnp.max(self.synaptic_delay_matrix) / self.dt) + 1
         )
-        self.weight_init_key = key
+
+        # Store key to be used for weight initialization
+        # weights are initialised in the initial property as weights are part of the state
+        # but we need to set the key to ensure consistent key handling
+        self.key = key
 
     @property
     def initial(self):
         """Return initial network state as LIFState."""
 
         # Initialize weights
-        key, subkey = jr.split(self.weight_init_key)
+        key, subkey = jr.split(self.key)
         if self.initial_weight_matrix is not None:
             if self.initial_weight_matrix.shape != (
                 self.N_neurons,
