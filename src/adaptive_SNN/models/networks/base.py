@@ -114,6 +114,7 @@ class AbstractLIFNetwork(NeuronModelABC):
     )
     buffer_size: int  # Size of spike history buffer
     dt: float  # Timestep size for simulation in seconds, used for delay buffer
+    weight_init_key: Array  # Random key for weight initialization
 
     def __init__(
         self,
@@ -227,13 +228,14 @@ class AbstractLIFNetwork(NeuronModelABC):
         self.buffer_size = int(
             jnp.ceil(jnp.max(self.synaptic_delay_matrix) / self.dt) + 1
         )
+        self.weight_init_key = key
 
     @property
-    def initial(self, key: jr.PRNGKey = jr.PRNGKey(0)):
+    def initial(self):
         """Return initial network state as LIFState."""
 
         # Initialize weights
-        key, subkey = jr.split(key)
+        key, subkey = jr.split(self.weight_init_key)
         if self.initial_weight_matrix is not None:
             if self.initial_weight_matrix.shape != (
                 self.N_neurons,
