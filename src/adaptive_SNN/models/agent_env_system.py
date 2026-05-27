@@ -47,9 +47,14 @@ class AgentEnvSystem(eqx.Module):
         This is where we compute the reward signal based on the current state of the environment and agent output,
         and store it in the SystemState for use in the drift computation.
         """
-        reward = args["reward_fn"](t, x, args)
+        # Compute agent output based on current agent state
         agent_output = args["network_output_fn"](t, x.agent_state, args)
+        x_updated = eqx.tree_at(lambda s: s.agent_output, x, agent_output)
 
+        # Compute reward signal based on current environment state and new agent output
+        reward = args["reward_fn"](t, x_updated, args)
+
+        # Update agent and environment states
         agent_state = self.agent.pre_step_update(t, x.agent_state, args, reward)
         environment_state = self.environment.pre_step_update(
             t, x.environment_state, args
