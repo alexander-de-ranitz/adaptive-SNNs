@@ -57,7 +57,7 @@ class Agent(eqx.Module):
         reward_predictor_state = self.reward_prediction_model.pre_step_update(
             t, x.reward_predictor_state, args, reward, network_state
         )
-        predicted_reward = x.reward_predictor_state.value
+        predicted_reward = reward_predictor_state.value
         RPE = reward - predicted_reward
 
         return AgentState(
