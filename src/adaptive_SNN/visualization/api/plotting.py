@@ -136,7 +136,7 @@ def plot_rate_learning_results(
         axs[2].set_ylabel("RPE")
 
         # Plot exc synaptic weights over time for first neuron
-        axs[3].plot(t, network_state.network_state.W[:, 0, 1], color=colors[i])
+        axs[3].plot(t, network_state.W[:, 0, 1], color=colors[i])
         axs[3].set_title("Synaptic Weight")
         axs[3].set_ylabel("Weight")
         axs[3].set_xlabel("Time (s)")
@@ -419,7 +419,7 @@ def plot_learning_detailed(
         )
 
     if synapses_to_plot is None:
-        synapses_to_plot = jnp.ones_like(network_state.network_state.W[0], dtype=bool)
+        synapses_to_plot = jnp.ones_like(network_state.W[0], dtype=bool)
     axs[4].plot(
         t,
         eligibility_trace[:, synapses_to_plot],
@@ -431,7 +431,7 @@ def plot_learning_detailed(
     axs[4].set_xlabel("Time (s)")
 
     E_mask = model.agent.network.excitatory_mask[None, :]
-    W = network_state.network_state.W
+    W = network_state.W
     axs[5].plot(
         t,
         W[:, (synapses_to_plot & E_mask)],
@@ -524,7 +524,7 @@ def plot_weight_distribution_over_time(
             bin_end_idx = jnp.searchsorted(t, bin_edges[i + 1])
 
             # Extract weights for this time bin
-            weight_data = state.agent_state.network_state.network_state.W[
+            weight_data = state.agent_state.network_state.W[
                 bin_start_idx:bin_end_idx, :, :
             ]
             if neurons_to_plot is not None:
@@ -804,7 +804,7 @@ def plot_weights_over_time(
     t = sol.ts
     state: SystemState = sol.ys
 
-    weight_data = state.agent_state.network_state.network_state.W
+    weight_data = state.agent_state.network_state.W
 
     # Extract weights over time
     if neurons_to_plot is not None:
