@@ -359,7 +359,7 @@ def plot_learning_detailed(
     t1 = t[-1]
 
     fig, axs = plt.subplots(
-        7 if not isinstance(model.agent.network.base_network, GatedLIFNetwork) else 8,
+        7 if not isinstance(model.agent.network, GatedLIFNetwork) else 8,
         1,
         figsize=(10, 8),
         sharex=True,
@@ -430,7 +430,7 @@ def plot_learning_detailed(
     axs[4].set_ylabel("Eligibility Trace")
     axs[4].set_xlabel("Time (s)")
 
-    E_mask = model.agent.network.base_network.excitatory_mask[None, :]
+    E_mask = model.agent.network.excitatory_mask[None, :]
     W = network_state.network_state.W
     axs[5].plot(
         t,
@@ -457,9 +457,9 @@ def plot_learning_detailed(
 
     axs[6].plot(t, jnp.sqrt(var_E_conductance[:, 0]), label="Var E Conductance")
 
-    if isinstance(model.agent.network.base_network, GatedLIFNetwork):
+    if isinstance(model.agent.network, GatedLIFNetwork):
         print("Plotting gating function value over time for GatedLIFNetwork...")
-        gating_values = model.agent.network.base_network.gating_function(
+        gating_values = model.agent.network.gating_function(
             get_LIF_state(sol.ys).V[:, 0]
         )
         axs[7].plot(t, gating_values, label="Gating Function Value")
