@@ -387,7 +387,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         diffusion = eqx.tree_at(
             lambda s: s.perturbations,
             diffusion,
-            self.noise_model.diffusion(t, state, args, noise_std=noise_std),
+            self.noise_model.diffusion(
+                t, state.perturbations, args, noise_std=noise_std
+            ),
         )
 
         # Since diffusion can consist of a mix of matrices and Lineax operators,
