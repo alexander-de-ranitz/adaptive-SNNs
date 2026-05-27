@@ -57,7 +57,7 @@ class CoupledNoiseGatedLIFNetwork(CoupledWeightGatedLIFNetwork):
 
     def drift(self, t, x, args):
         perturbations = x.perturbations
-        perturbations.at[self.noise_coupling_indices[0]].set(
+        perturbations = perturbations.at[self.noise_coupling_indices[0]].set(
             perturbations[self.noise_coupling_indices[1]]
         )
         x = eqx.tree_at(lambda x: x.perturbations, x, perturbations)
@@ -75,7 +75,7 @@ class CoupledNoiseEligibilityLIFNetwork(CoupledWeightEligibilityLIFNetwork):
 
     def drift(self, t, x, args):
         perturbations = x.perturbations
-        perturbations.at[self.noise_coupling_indices[0]].set(
+        perturbations = perturbations.at[self.noise_coupling_indices[0]].set(
             perturbations[self.noise_coupling_indices[1]]
         )
         x = eqx.tree_at(lambda x: x.perturbations, x, perturbations)
