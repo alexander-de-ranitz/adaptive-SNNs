@@ -55,7 +55,7 @@ def main():
 
     cfg.t1 = 2500
     cfg.save_at = SaveAt(
-        ts=jnp.linspace(cfg.t0, cfg.t1, 1e3 * cfg.t1),
+        ts=jnp.linspace(cfg.t0, cfg.t1, int(1e3 * cfg.t1)),
         fn=save_fn,
     )
 
