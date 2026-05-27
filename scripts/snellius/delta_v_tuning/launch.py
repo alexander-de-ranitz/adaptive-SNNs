@@ -38,7 +38,7 @@ def create_jobs():
     jobs = Jobs()
 
     seed = 1241
-    num_iterations = 61
+    num_iterations = 7
     for i in range(num_iterations):
         seed += 129
         # Loop over delta_V values, including 0.0 for the no-gating condition

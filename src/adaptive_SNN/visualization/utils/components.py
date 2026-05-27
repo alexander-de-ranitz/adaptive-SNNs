@@ -460,7 +460,7 @@ def _plot_noise_distribution_STA(
     """
     state = sol.ys
     lif_state = get_LIF_state(state)
-    noise_state = get_LIF_state(state).perturbations
+    perturbations = get_LIF_state(state).perturbations
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(lif_state.S.shape[1])
@@ -470,16 +470,12 @@ def _plot_noise_distribution_STA(
     noise_all_time = []
     for i, neuron_idx in enumerate(neurons_to_plot):
         neuron_spike_times = spike_times[i]
-        neuron_noise = noise_state[:, neuron_idx]
+        neuron_noise = perturbations[:, neuron_idx]
         noise_values_at_spikes = neuron_noise[neuron_spike_times]
         noise_at_spike_time.append(noise_values_at_spikes)
         noise_all_time.append(neuron_noise)
 
-    x_lim = (
-        3 * noise_std.item()
-        if noise_std is not None
-        else jnp.quantile(jnp.abs(jnp.concatenate(noise_all_time)), 0.99).item()
-    )
+    x_lim = 3 * noise_std
 
     STA_noise = jnp.concatenate(noise_at_spike_time)
     STA_noise = STA_noise[

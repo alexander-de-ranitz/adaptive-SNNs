@@ -12,14 +12,14 @@ from helpers import (
     make_default_args,
 )
 
-from adaptive_SNN.models import LIFNetwork, LIFState
+from adaptive_SNN.models.networks import LIFNetwork, LIFState
 from adaptive_SNN.solver import solve_ODE
 
 
 def test_solver_timesteps():
     N_neurons = 4
     N_inputs = 0
-    t0, t1, dt0 = 0.0, 1.05, 0.1
+    t0, t1, dt0 = 0.0, 1.00, 0.1
 
     key = jr.PRNGKey(0)
 

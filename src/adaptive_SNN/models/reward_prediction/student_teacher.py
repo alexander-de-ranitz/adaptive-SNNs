@@ -18,22 +18,22 @@ class StudentRewardModel(AbstractRewardPredictor):
 
     @property
     def initial(self):
-        return RewardPrediction(reward=jnp.zeros((1,)))
+        return RewardPrediction(value=jnp.zeros((1,)))
 
     @property
     def noise_shape(self):
-        return RewardPrediction(reward=None)
+        return RewardPrediction(value=None)
 
     def diffusion(self, t, x, args):
         return RewardPrediction(
-            reward=DefaultIfNone(
-                default=jnp.zeros_like(x.reward),
-                else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+            value=DefaultIfNone(
+                default=jnp.zeros_like(x.value),
+                else_do=ElementWiseMul(jnp.zeros_like(x.value)),
             )
         )
 
-    def drift(self, t, x, args):
-        return RewardPrediction(reward=jnp.zeros_like(x.reward))
+    def drift(self, t, x, args, reward, network_state):
+        return RewardPrediction(value=jnp.zeros_like(x.value))
 
     def update(self, t, x, args):
         mean_noiseless_student_output = jnp.mean(
@@ -44,7 +44,7 @@ class StudentRewardModel(AbstractRewardPredictor):
         )  # Get the first neuron's state as the teacher signal
         reward = -jnp.square(teacher_signal - mean_noiseless_student_output)
         return RewardPrediction(
-            reward=jnp.asarray([reward])
+            value=jnp.asarray([reward])
         )  # Return the computed reward
 
     def terms(self, key):
@@ -59,22 +59,22 @@ class StudentRewardModel(AbstractRewardPredictor):
 class MWERewardModel(AbstractRewardPredictor):
     @property
     def initial(self):
-        return RewardPrediction(reward=jnp.zeros((1,)))
+        return RewardPrediction(value=jnp.zeros((1,)))
 
     @property
     def noise_shape(self):
-        return RewardPrediction(reward=None)
+        return RewardPrediction(value=None)
 
     def diffusion(self, t, x, args):
         return RewardPrediction(
-            reward=DefaultIfNone(
-                default=jnp.zeros_like(x.reward),
-                else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+            value=DefaultIfNone(
+                default=jnp.zeros_like(x.value),
+                else_do=ElementWiseMul(jnp.zeros_like(x.value)),
             )
         )
 
     def drift(self, t, x, args):
-        return RewardPrediction(reward=jnp.zeros_like(x.reward))
+        return RewardPrediction(value=jnp.zeros_like(x.value))
 
     def update(self, t, x, args):
         mean_noiseless_student_output = jnp.mean(
@@ -85,7 +85,7 @@ class MWERewardModel(AbstractRewardPredictor):
         )  # Get the first neuron's state as the teacher signal
         reward = -jnp.square(teacher_signal - mean_noiseless_student_output)
         return RewardPrediction(
-            reward=jnp.asarray([reward])
+            value=jnp.asarray([reward])
         )  # Return the computed reward
 
     def terms(self, key):

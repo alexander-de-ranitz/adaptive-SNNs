@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import equinox as eqx
 
 
-class NoiseModelABC(ABC, eqx.Module):
+class AbstractNoiseModel(ABC, eqx.Module):
     @property
     @abstractmethod
     def initial(self):

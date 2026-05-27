@@ -11,17 +11,12 @@ from diffrax import SaveAt
 from jax import numpy as jnp
 
 from adaptive_SNN.models.agent_env_system import AgentEnvSystem
-from adaptive_SNN.models.environments import SpikeRateEnvironment
-from adaptive_SNN.models.environments.base import AbstractEnvironment
-from adaptive_SNN.models.networks import Agent, LIFNetwork
-from adaptive_SNN.models.networks.base import NeuronModelABC
-from adaptive_SNN.models.noise import OUP
-from adaptive_SNN.models.noise.base import NoiseModelABC
-from adaptive_SNN.models.reward_prediction.base import AbstractRewardPredictor
-from adaptive_SNN.models.reward_prediction.moving_average import (
-    MovingAverageRewardModel,
+from adaptive_SNN.models.environments import AbstractEnvironment, SpikeRateEnvironment
+from adaptive_SNN.models.networks import AbstractNeuronModel, Agent, LIFNetwork
+from adaptive_SNN.models.reward_prediction import (
+    AbstractRewardPredictor,
+    MovingAverageRewardPredictor,
 )
-from adaptive_SNN.models.RPE import AbstractRPEModel, InstantRPEModel
 
 
 @dataclass
@@ -34,9 +29,9 @@ class SimulationConfig:
     save_at: SaveAt = dfx.SaveAt()
 
     # Model classes
-    network_cls: type[NeuronModelABC] = LIFNetwork
-    agent_cls: type[NeuronModelABC] = Agent
-    agent_env_system_cls: type[NeuronModelABC] = AgentEnvSystem
+    network_cls: type[AbstractNeuronModel] = LIFNetwork
+    agent_cls: type[AbstractNeuronModel] = Agent
+    agent_env_system_cls: type[AbstractNeuronModel] = AgentEnvSystem
 
     # Model hyperparameters
     N_neurons: int = 1
@@ -55,15 +50,15 @@ class SimulationConfig:
     mean_synaptic_delay: float = 0.0
     base_network_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
     args: dict[str, Any] = eqx.field(default_factory=lambda: {})
+    network_output_fn: Callable[..., Any] | None = None
+    network_output_shape: tuple[int, ...] = (1,)
 
     # Reward model
-    reward_model: type[AbstractRewardPredictor] = MovingAverageRewardModel
-    reward_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
+    reward_prediction_model: type[AbstractRewardPredictor] = (
+        MovingAverageRewardPredictor
+    )
+    reward_predictor_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
     reward_fn: Callable[..., Any] | None = None
-    reward_noise_model: type[NoiseModelABC] = OUP
-    reward_noise_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
-    RPE_model: type[AbstractRPEModel] = InstantRPEModel
-    RPE_model_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
 
     # Environment parameters
     environment_model: type[AbstractEnvironment] = SpikeRateEnvironment
@@ -78,7 +73,6 @@ class SimulationConfig:
     # Other
     key: int | jnp.ndarray = 0
     save_file: str | None = None
-    network_output_fn: Callable[..., Any] | None = None
 
     def __post_init__(self) -> None:
         self._validate_scalars()

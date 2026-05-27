@@ -2,8 +2,7 @@ import jax
 from jax import numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.networks.base import AbstractLIFNetwork
-from adaptive_SNN.models.networks.eligibility_LIF import ElibilityState, Eligibility
+from adaptive_SNN.models.networks import AbstractLIFNetwork, ElibilityState, Eligibility
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 
@@ -27,13 +26,13 @@ class GatedLIFNetwork(AbstractLIFNetwork):
         return tree
 
     def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
-        noise_std = args.get("noise_std", 0.0)
-        noise_conductance = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+        noise_std = self.compute_desired_noise_std(t, state, args)
+        perturbations = state.perturbations
 
         # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
         # In case the noise std is zero (no noise), avoid division by zero and set relative noise strength to zero
         relative_noise_strength = jnp.where(
-            noise_std != 0.0, noise_conductance / noise_std, 0.0
+            noise_std != 0.0, perturbations / noise_std, 0.0
         )
 
         # Map the relative noise strength to each excitatory synapse
@@ -77,11 +76,11 @@ class GatedLIFNetwork(AbstractLIFNetwork):
 
         return gating / normalization_factor
 
-    def compute_weight_updates(self, t, state: ElibilityState, args):
+    def compute_weight_updates(
+        self, t, state: ElibilityState, args, RPE: Array
+    ) -> Array:
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        RPE = args.get("RPE", jnp.array([0.0]))
-
         dW = learning_rate * RPE * state.features.eligibility
 
         dW = jnp.where(

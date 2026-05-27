@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J delta_v_tuning
-#SBATCH -t 15
+#SBATCH -t 20
 #SBATCH -p gpu_a100
 #SBATCH -N 1
 #SBATCH --ntasks=72
@@ -34,6 +34,7 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export JAX_ENABLE_X64=1 # Enable 64-bit precision in JAX, which is important for numerical stability in our simulations
+export JAX_PLATFORMS=cpu # Use CPU backend for JAX, as we are running many low-dimensional parallel jobs (1 core per simulation)
 
 echo "Running simulations..."
 python "$REPO_DIR/scripts/snellius/delta_v_tuning/launch.py" \

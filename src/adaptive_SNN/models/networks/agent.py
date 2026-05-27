@@ -5,100 +5,104 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from adaptive_SNN.models.networks.base import AbstractLIFNetwork, LIFState
-from adaptive_SNN.models.noise import OUP
-from adaptive_SNN.models.noise.base import NoiseModelABC
-from adaptive_SNN.models.reward_prediction.base import (
+from adaptive_SNN.models.reward_prediction import (
     AbstractRewardPredictor,
     RewardPrediction,
 )
-from adaptive_SNN.models.RPE import AbstractRPEModel, RPEState
-from adaptive_SNN.utils.operators import MixedPyTreeOperator
+from adaptive_SNN.utils.operators import (
+    DefaultIfNone,
+    ElementWiseMul,
+    MixedPyTreeOperator,
+)
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 class AgentState(eqx.Module):
     network_state: LIFState
-    predicted_reward: RewardPrediction
-    reward_noise: Array
-    RPE: RPEState
+    reward_predictor_state: RewardPrediction
+    RPE: Array  # Not part of the state that evolves according to the SDE, but we include it here for convenience in accessing/storing it
 
 
 class Agent(eqx.Module):
     network: AbstractLIFNetwork
-    reward_model: AbstractRewardPredictor
-    reward_noise: NoiseModelABC
-    RPE_model: AbstractRPEModel
+    reward_prediction_model: AbstractRewardPredictor
 
     def __init__(
         self,
         neuron_model: AbstractLIFNetwork,
-        reward_model: AbstractRewardPredictor,
-        reward_noise: OUP,
-        RPE_model: AbstractRPEModel,
+        reward_prediction_model: AbstractRewardPredictor,
     ):
         self.network = neuron_model
-        self.reward_model = reward_model
-        self.reward_noise = reward_noise
-        self.RPE_model = RPE_model
+        self.reward_prediction_model = reward_prediction_model
 
     @property
     def initial(self):
         return AgentState(
             self.network.initial,
-            self.reward_model.initial,
-            self.reward_noise.initial,
-            self.RPE_model.initial,
+            self.reward_prediction_model.initial,
+            jnp.zeros(1),  # RPE initial state
         )
 
-    def drift(self, t, x: AgentState, args):
-        """Compute deterministic time derivatives for LearningModel state.
+    def pre_step_update(self, t, x: AgentState, args, reward: Array = jnp.zeros(1)):
+        """Perform any necessary updates to the state before computing the drift/diffusion.
 
-        The state consists of (network_state, predicted_reward). The args dict
-        must contain the reward received from the environment.
+        This is where we compute the reward prediction error (RPE) based on the current state of the reward predictor and the reward signal from the environment, and store it in the AgentState for use in the drift computation.
+        """
+
+        # Apply pre-step updates (currently no-op)
+        network_state = self.network.pre_step_update(t, x.network_state, args)
+
+        # Compute reward-prediction features and update reward predictor state
+        reward_predictor_state = self.reward_prediction_model.pre_step_update(
+            t, x.reward_predictor_state, args, reward, network_state
+        )
+        predicted_reward = x.reward_predictor_state.value
+        RPE = reward - predicted_reward
+
+        return AgentState(
+            network_state=network_state,
+            reward_predictor_state=reward_predictor_state,
+            RPE=RPE,
+        )
+
+    def drift(self, t, x: AgentState, args, reward: Array):
+        """Compute deterministic time derivatives for LearningModel state.
 
         Args:
             t: time
-            x: (network_state, predicted_reward)
-            args: dict containing keys:
-                - reward -> scalar
+            x: (network_state, predicted_reward, RPE)
+            args: dict
+            reward: reward signal from environment at time t
+
         Returns:
             (d_network_state, d_predicted_reward)
         """
 
-        (network_state, predicted_reward, reward_noise, RPE) = (
+        (network_state, predicted_reward, RPE) = (
             x.network_state,
-            x.predicted_reward,
-            x.reward_noise,
+            x.reward_predictor_state,
             x.RPE,
         )
+        neuron_drift = self.network.drift(t, network_state, args, RPE)
+        reward_predictor_drift = self.reward_prediction_model.drift(
+            t, predicted_reward, args, reward, network_state
+        )
 
-        args.update(
-            {"RPE": RPE.RPE + reward_noise}
-        )  # Add RPE to args so that it can be used for weight updates in the network drift
-
-        neuron_drift = self.network.drift(t, network_state, args)
-        reward_drift = self.reward_model.drift(t, predicted_reward, args)
-        reward_noise_drift = self.reward_noise.drift(t, reward_noise, args)
-        RPE_drift = self.RPE_model.drift(t, RPE, args)
-        return AgentState(neuron_drift, reward_drift, reward_noise_drift, RPE_drift)
+        return AgentState(neuron_drift, reward_predictor_drift, jnp.zeros_like(RPE))
 
     def diffusion(self, t, x: AgentState, args):
-        (neuron_state, predicted_reward, reward_noise, RPE) = (
-            x.network_state,
-            x.predicted_reward,
-            x.reward_noise,
-            x.RPE,
+        neuron_diffusion = self.network.diffusion(t, x.network_state, args)
+        reward_predictor_diffusion = self.reward_prediction_model.diffusion(
+            t, x.reward_predictor_state, args
         )
-        neuron_diffusion = self.network.diffusion(t, neuron_state, args)
-        reward_diffusion = self.reward_model.diffusion(t, predicted_reward, args)
-        reward_noise_diffusion = self.reward_noise.diffusion(t, reward_noise, args)
-        RPE_diffusion = self.RPE_model.diffusion(t, RPE, args)
+        RPE_diffusion = DefaultIfNone(
+            default=jnp.zeros_like(x.RPE), else_do=ElementWiseMul(jnp.zeros_like(x.RPE))
+        )
         return MixedPyTreeOperator(
             AgentState(
                 neuron_diffusion,
-                reward_diffusion,
-                reward_noise_diffusion,
+                reward_predictor_diffusion,
                 RPE_diffusion,
             )
         )
@@ -106,10 +110,7 @@ class Agent(eqx.Module):
     @property
     def noise_shape(self):
         return AgentState(
-            self.network.noise_shape,
-            self.reward_model.noise_shape,
-            self.reward_noise.noise_shape,
-            self.RPE_model.noise_shape,
+            self.network.noise_shape, self.reward_prediction_model.noise_shape, None
         )
 
     def terms(self, key):
@@ -121,22 +122,10 @@ class Agent(eqx.Module):
         )
 
     def update(self, t, x: AgentState, args):
-        (network_state, predicted_reward, reward_noise, RPE) = (
-            x.network_state,
-            x.predicted_reward,
-            x.reward_noise,
-            x.RPE,
-        )
-        new_network_state = self.network.update(t, network_state, args)
-        new_reward_model_state = self.reward_model.update(t, predicted_reward, args)
-        new_reward_noise = self.reward_noise.update(t, reward_noise, args)
+        # Update components
+        new_network_state = self.network.update(t, x.network_state, args)
+        new_reward_predictor_state = self.reward_prediction_model.update(
+            t, x.reward_predictor_state, args
+        )  # reward and network_state are not needed for the current reward predictor update, but we include them here for future extensibility
 
-        RPE_update = (
-            args.get("RPE_fn")(t, x, args) if "RPE_fn" in args else jnp.zeros_like(RPE)
-        )
-        args.update({"RPE_update": RPE_update})  # Used in RPE model
-        new_RPE = self.RPE_model.update(t, RPE, args)
-
-        return AgentState(
-            new_network_state, new_reward_model_state, new_reward_noise, new_RPE
-        )
+        return AgentState(new_network_state, new_reward_predictor_state, x.RPE)

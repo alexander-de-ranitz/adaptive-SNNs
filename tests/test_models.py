@@ -14,7 +14,7 @@ from helpers import (
     make_poisson_jump_model,
 )
 
-from adaptive_SNN.models import LIFState
+from adaptive_SNN.models.networks import LIFState
 
 
 def test_initial_state():
@@ -330,7 +330,8 @@ def test_weight_plasticity():
     """Test that dW is computed correctly when RPE and noises are provided."""
     N = 4
     key = jr.PRNGKey(123)
-    model = make_LIF_model(N_neurons=N, N_inputs=0, key=key)
+    noise_std = 2.5e-9
+    model = make_LIF_model(N_neurons=N, N_inputs=0, key=key, min_noise_std=noise_std)
 
     # Override excitatory mask for test
     excitatory_mask = jnp.array([True, False, True, False], dtype=bool)
@@ -348,20 +349,19 @@ def test_weight_plasticity():
 
     # Define deterministic noise and RPE
     E_noise = (jnp.arange(N) + 1.0) * model.synaptic_increment
-    noise_std = jnp.arange(3, N + 3, dtype=state.V.dtype) * 0.1
+    state = eqx.tree_at(
+        lambda s: s.perturbations, state, E_noise
+    )  # Inject noise into state
 
     RPE_value = 2.0
 
     args = make_default_args(
         N,
         0,
-        excitatory_noise=E_noise,
-        RPE=RPE_value,
         get_learning_rate=lambda t, x, a: 0.1,
-        noise_std=noise_std,
     )
 
-    derivs = model.drift(0.0, state, args)
+    derivs = model.drift(0.0, state, args, RPE=RPE_value)
     dW = derivs.W
 
     # Build expected dW
@@ -372,23 +372,13 @@ def test_weight_plasticity():
     assert dW[0, 1] == 0.0  # inhibitory presynaptic neuron
 
     # Manual sanity check to ensure elements are in the right place
-    assert (
-        dW[0, 2]
-        == 0.1
-        * RPE_value
-        * E_noise[0]
-        / noise_std[0]
-        * G[0, 2]
-        / model.synaptic_increment
+    assert jnp.allclose(
+        dW[0, 2],
+        0.1 * RPE_value * E_noise[0] / noise_std * G[0, 2] / model.synaptic_increment,
     )
-    assert (
-        dW[1, 0]
-        == 0.1
-        * RPE_value
-        * E_noise[1]
-        / noise_std[1]
-        * G[1, 0]
-        / model.synaptic_increment
+    assert jnp.allclose(
+        dW[1, 0],
+        0.1 * RPE_value * E_noise[1] / noise_std * G[1, 0] / model.synaptic_increment,
     )
 
 
@@ -434,10 +424,10 @@ def test_noise_is_unique():
     terms = model.terms(jr.PRNGKey(0))
 
     y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, args, None, False)
-    noise_state = y1.perturbations
+    perturbations = y1.perturbations
 
-    assert not jnp.all(noise_state == 0)
-    assert jnp.unique(noise_state).size > 1
+    assert not jnp.all(perturbations == 0)
+    assert jnp.unique(perturbations).size > 1
 
 
 def test_NoisyNeuronModel_forwards_noise_into_network_drift():
@@ -451,15 +441,15 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     network_state = make_baseline_state(network)
     args = make_default_args(N, 0)
 
-    noise_state = jnp.arange(N, dtype=network_state.V.dtype)
-    x = make_noisy_state(network_state, noise_state)
+    perturbations = jnp.arange(N, dtype=network_state.V.dtype)
+    x = make_noisy_state(network_state, perturbations)
 
     network_drift = model.drift(0.0, x, args)
     dV, dS, dW, dG = network_drift.V, network_drift.S, network_drift.W, network_drift.G
 
     V_now = network_state.V
     expected_dv = (
-        noise_state * (network.reversal_potential_E - V_now)
+        perturbations * (network.reversal_potential_E - V_now)
     ) / network.membrane_capacitance
 
     assert jnp.allclose(dV, expected_dv)
@@ -470,7 +460,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     # OU drift is -1/tau * (state - mean)
     assert jnp.allclose(
         network_drift.perturbations,
-        -1.0 / model.noise_model.tau * (noise_state - model.noise_model.mean),
+        -1.0 / model.noise_model.tau * (perturbations - model.noise_model.mean),
     )
 
 

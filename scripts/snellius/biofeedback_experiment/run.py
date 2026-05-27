@@ -10,9 +10,8 @@ from jax import numpy as jnp
 from jax import random as jr
 
 from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks.eligibility_LIF import EligibilityLIFNetwork
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.simulation_configs.biofeedback_experiment import create_config
+from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
+from adaptive_SNN.simulation_configs.biofeedback_config import create_config
 from adaptive_SNN.utils.runner import run_simulation
 
 

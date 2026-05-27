@@ -93,7 +93,7 @@ def main():
                         G=True,
                         W=True,
                         S=True,
-                        noise_state=True,
+                        perturbations=True,
                         # mean_E_conductance=True,
                         # var_E_conductance=True,
                     )

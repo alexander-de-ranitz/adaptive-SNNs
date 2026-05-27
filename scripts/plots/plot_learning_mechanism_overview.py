@@ -23,45 +23,17 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
 from adaptive_SNN.models import (
-    OUP,
     Agent,
     AgentEnvSystem,
-    MovingAverageRewardModel,
     SystemState,
 )
 from adaptive_SNN.models.environments import SpikeRateEnvironment
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.models.RPE import UpdateAndDecayRPEModel
+from adaptive_SNN.models.networks import GatedLIFNetwork
+from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
 from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.save_helper import save_part_of_state
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
-
-
-def alpha_function(t, t_start, tau_rise=2e-3, tau_fall=10e-3, amplitude=1.0):
-    """
-    Double exponential (alpha) function for RPE signal.
-
-    Args:
-        t: Current time
-        t_start: Time when the function starts
-        tau_rise: Rise time constant
-        tau_fall: Fall time constant
-        amplitude: Peak amplitude
-
-    Returns:
-        Value of alpha function at time t
-    """
-    dt = t - t_start
-
-    # Normalize so peak is at amplitude
-    normalization = (tau_fall / tau_rise) ** (tau_rise / (tau_fall - tau_rise))
-
-    # Use jnp.where to handle the condition without Python control flow
-    result = (
-        amplitude * normalization * (jnp.exp(-dt / tau_fall) - jnp.exp(-dt / tau_rise))
-    )
-    return jnp.where(dt < 0, 0.0, result)
 
 
 def main():
@@ -100,10 +72,9 @@ def main():
 
         agent = Agent(
             neuron_model=neuron_model,
-            reward_model=MovingAverageRewardModel(reward_rate=0.1),
-            reward_noise=OUP(noise_std=0.0),
-            RPE_model=UpdateAndDecayRPEModel(),
+            reward_prediction_model=MovingAverageRewardPredictor(rate=0.0),
         )
+
         model = AgentEnvSystem(agent=agent, environment=SpikeRateEnvironment(rate=50))
 
         solver = dfx.EulerHeun()
@@ -117,19 +88,21 @@ def main():
                 jnp.array([[0.0]]),
             )
 
+        def reward_fn(t, x: SystemState, args):
+            return jnp.exp(
+                -x.agent_state.network_state.time_since_last_spike[0] / 0.05
+            ).reshape((1,))
+
         args = {
             "get_input_spikes": get_input_spikes,
             "get_learning_rate": lambda t, x, args: learning_rate,
-            "reward_fn": lambda t, x, args: jnp.array([0.0]),
+            "reward_fn": reward_fn,
             "noise_scale_hyperparam": 1e-6,
-            "network_output_fn": lambda t, agent_state, args: jnp.squeeze(
-                agent_state.network_state.S[0]
-            ),
+            "network_output_fn": lambda t,
+            agent_state,
+            args: agent_state.network_state.S[0].reshape((1,)),
             "use_noise": jnp.array([True]),
-            "tau_RPE": 0.05,
-            "RPE_fn": lambda t, x, args: x.network_state.S[
-                0
-            ],  # RPE is zero for now, since we want to see how it evolves
+            "feature_fn": lambda t, x, args: jnp.zeros(1),
         }
 
         # Define what to save
@@ -142,7 +115,8 @@ def main():
                 G=True,
                 S=True,
                 RPE=True,
-                reward_noise=True,
+                reward_signal=True,
+                time_since_last_spike=True,
                 eligibility=True,
                 V=True,
                 perturbations=True,
@@ -169,7 +143,7 @@ def main():
         eligibility = state.agent_state.network_state.features.eligibility[:, 0].sum(
             axis=-1
         )
-        RPE = state.agent_state.RPE.RPE[:, 0]
+        RPE = state.agent_state.RPE[:, 0]
         W = state.agent_state.network_state.W[:, 0]
         gating = neuron_model.gating_function(
             state.agent_state.network_state.V[:, 0], neuron_model.delta_V
@@ -318,7 +292,7 @@ def main():
         axes.append(ax7)
         ax7.plot(t, W, color=color_weight, linewidth=linewidth, label="Weight change")
         ax7.set_xlabel(r"Time (ms)")
-        ax7.set_ylim(bottom=input_weight * 0.95)  # Zoom in around initial weight
+        ax7.set_ylim(bottom=input_weight * 0.985)  # Zoom in around initial weight
         # ax7.grid(alpha=0.3, linewidth=0.5)
 
         y_labels = [

@@ -31,11 +31,9 @@ def main():
     def save(t, x: SystemState, args):
         # return x.environment_state.astype(jnp.float32)
         return (
-            x.agent_state.network_state.network_state.W[:10].astype(jnp.float32),
-            x.agent_state.network_state.network_state.G[:10].astype(jnp.float32),
+            x.agent_state.network_state.W[:10].astype(jnp.float32),
+            x.agent_state.network_state.G[:10].astype(jnp.float32),
         )
-
-    cfg.network_output_fn = lambda t, agent_state, args: agent_state.network_state.S
 
     cfg.save_at = SaveAt(ts=jnp.linspace(0.0, cfg.t1, 200), fn=save)
 
@@ -54,7 +52,9 @@ def main():
     cfg.input_spike_fn = input_spike_fn
 
     start = time.time()
-    sol, model = run_simulation(cfg, overwrite=False, save_results=True)
+    sol, model = run_simulation(
+        cfg, overwrite=False, save_results=False, load_if_exists=True
+    )
     end = time.time()
     print(f"Simulation took {end - start:.2f} seconds.")
 
@@ -62,7 +62,7 @@ def main():
 
     W, G = sol.ys
     G = G * W
-    excitatory_mask = model.agent.network.base_network.excitatory_mask
+    excitatory_mask = model.agent.network.excitatory_mask
 
     print(f"G shape is {G.shape}")
 
@@ -78,7 +78,6 @@ def main():
     plt.xlabel("Time (s)")
     plt.ylabel("Synaptic Trace (G)")
     plt.title("Synaptic Traces")
-    plt.tight_layout()
     plt.show()
 
 

@@ -2,42 +2,38 @@ import diffrax as dfx
 import jax.numpy as jnp
 
 from adaptive_SNN.models.reward_prediction.base import (
-    AbstractRewardModel,
+    AbstractRewardPredictor,
     RewardPrediction,
 )
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 
-class MovingAverageRewardModel(AbstractRewardModel):
-    reward_rate: float = 1  # Rate at which the reward is integrated
+class MovingAverageRewardPredictor(AbstractRewardPredictor):
+    rate: float = 1  # Rate at which the reward is integrated
     dim: int = 1  # Dimension of the reward process
 
-    def __init__(self, reward_rate: float = 1, dim: int = 1):
-        self.reward_rate = reward_rate
+    def __init__(self, rate: float = 1, dim: int = 1):
+        self.rate = rate
         self.dim = dim
 
     @property
     def initial(self):
-        return RewardPrediction(reward=jnp.zeros((self.dim,)))
+        return RewardPrediction(value=jnp.zeros((self.dim,)))
 
     @property
     def noise_shape(self):
-        return RewardPrediction(reward=None)
+        return RewardPrediction(value=None)
 
-    def diffusion(self, t, x, args):
+    def diffusion(self, t, x: RewardPrediction, args):
         return RewardPrediction(
-            reward=DefaultIfNone(
-                default=jnp.zeros_like(x.reward),
-                else_do=ElementWiseMul(jnp.zeros_like(x.reward)),
+            value=DefaultIfNone(
+                default=jnp.zeros_like(x.value),
+                else_do=ElementWiseMul(jnp.zeros_like(x.value)),
             )
         )
 
-    def drift(self, t, x, args):
-        if args is None or "reward" not in args:
-            raise ValueError(
-                "RewardModel requires 'reward' in args for drift computation."
-            )
-        return RewardPrediction(reward=self.reward_rate * (args["reward"] - x.reward))
+    def drift(self, t, x: RewardPrediction, args, reward, network_state):
+        return RewardPrediction(value=self.rate * (reward - x.value))
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
@@ -47,6 +43,6 @@ class MovingAverageRewardModel(AbstractRewardModel):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args):
+    def update(self, t, x: RewardPrediction, args):
         """No non-differential updates needed for this reward model."""
         return x

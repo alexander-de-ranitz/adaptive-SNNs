@@ -1,43 +1,14 @@
 import diffrax as dfx
 import jax.numpy as jnp
-import jax.random as jr
 from helpers import DummySpikingNetwork
 
 from adaptive_SNN.models import AgentEnvSystem, SystemState
 from adaptive_SNN.models.environments import (
-    InputTrackingEnvironment,
     SpikeRateEnvironment,
 )
+from adaptive_SNN.models.networks import Agent
+from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
 from adaptive_SNN.solver import solve_ODE
-
-
-def test_input_tracking_env():
-    env = InputTrackingEnvironment(dim=1)
-
-    args = {"get_env_input": lambda t, x, args: jnp.array([1.0])}
-    solver = dfx.Euler()
-    t0 = 0.0
-    t1 = 10.0
-    dt0 = 0.01
-    y0 = env.initial
-    key = jr.PRNGKey(0)
-    terms = env.terms(key)
-    sol = dfx.diffeqsolve(
-        terms,
-        solver,
-        t0=t0,
-        t1=t1,
-        dt0=dt0,
-        y0=y0,
-        args=args,
-        saveat=dfx.SaveAt(t1=True),
-        adjoint=dfx.ForwardMode(),
-    )
-
-    ts = sol.ts
-    ys = sol.ys
-    assert ys.shape == (ts.shape[0], env.dim)
-    assert jnp.allclose(ys[-1], jnp.array([1.0]), atol=1e-2)
 
 
 def test_spike_rate_env():
@@ -51,14 +22,18 @@ def test_spike_rate_env():
 
     env = SpikeRateEnvironment(dim=dim)
     network = DummySpikingNetwork(output_dim=dim, output_rates=rates, dt=dt0)
-
+    agent = Agent(
+        neuron_model=network,
+        reward_prediction_model=MovingAverageRewardPredictor(rate=0.0),
+    )
     model = AgentEnvSystem(
-        agent=network,
+        agent=agent,
         environment=env,
+        agent_output_shape=dim,
     )
 
     args = {
-        "network_output_fn": lambda t, agent_state, args: agent_state.S,
+        "network_output_fn": lambda t, agent_state, args: agent_state.network_state.S,
         "reward_fn": lambda t, environment_state, args: jnp.array([0.0]),
     }
 

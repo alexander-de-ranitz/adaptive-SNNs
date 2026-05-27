@@ -10,8 +10,8 @@ from diffrax import SaveAt
 
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.networks import LIFNetwork, LIFState
-from adaptive_SNN.simulation_configs.single_neuron_simulation import (
-    create_single_neuron_config_extra_synapse,
+from adaptive_SNN.simulation_configs.single_synapse_config import (
+    create_single_synapse_learning_config,
 )
 from adaptive_SNN.utils.runner import run_simulation
 from adaptive_SNN.utils.save_helper import save_part_of_state
@@ -32,7 +32,9 @@ class ExternalNoiseStd(LIFNetwork):
 
 
 def plot_perturbation_distribution_over_time(ax):
-    config = create_single_neuron_config_extra_synapse(N_neurons=2)
+    config = create_single_synapse_learning_config(
+        initial_synapse_weight=5.0, key=jr.PRNGKey(125)
+    )
 
     config.N_neurons = 2
     t0 = 0.0
@@ -40,14 +42,14 @@ def plot_perturbation_distribution_over_time(ax):
     t_start_saving = 2.0
     t_onset = 2.01
     t_offset = 2.02
-    external_noise_std = 10e-9
+    external_noise_std = 1e-9
 
     config.network_cls = ExternalNoiseStd
     config.t0 = t0
     config.t1 = t1
 
     config.save_at = SaveAt(
-        ts=jnp.linspace(t_start_saving, t1, int((t1 - t_start_saving) / config.dt)),
+        ts=jnp.arange(t_start_saving, t1, config.dt),
         fn=lambda t, x, args: save_part_of_state(
             x,
             V=True,
@@ -64,7 +66,6 @@ def plot_perturbation_distribution_over_time(ax):
         ),
         jnp.zeros((config.N_neurons,)),
     )
-    config.args["tau_RPE"] = 0.1
     config.args["use_noise"] = jnp.array([True, False])
 
     n_iterations = 100
@@ -73,27 +74,43 @@ def plot_perturbation_distribution_over_time(ax):
     for i in range(n_iterations):
         print(f"Running simulation {i + 1}/{n_iterations}...", end="\r")
         key = jr.fold_in(key, i)
-        config.key = key
+        cfg_key, spike_key = jr.split(key, 2)
+        config.key = cfg_key
         config.save_file = "results/perturbation_dist/run_" + str(i)
+
+        def input_spike_fn(t, x, args):
+            step_idx = jnp.asarray(jnp.rint((t - t0) / config.dt), dtype=jnp.int64)
+            spikes_1d = jr.poisson(
+                jr.fold_in(spike_key, step_idx),
+                jnp.array([5000, 1250, 10]) * config.dt,
+                shape=(1, config.N_inputs),
+            )
+            return jnp.tile(spikes_1d, (config.N_neurons, 1))
+
+        config.input_spike_fn = input_spike_fn
 
         sol, model = run_simulation(config, save_results=True)
         state: SystemState = sol.ys
 
-        if jnp.sum(state.agent_state.network_state.network_state.S[:, 0]) > 0:
+        if jnp.sum(state.agent_state.network_state.S) > 0:
             print(
                 f"Run {i}: Spikes detected during perturbation window, skipping this run."
             )
             continue  # Skip this run if there are any spikes, as we want to analyze the voltage distribution without the influence of spiking activity
 
+        if not jnp.allclose(jnp.diff(sol.ts), config.dt):
+            diff = jnp.diff(sol.ts)
+            print(diff.max(), diff.min())
+
         V_diff = (
-            state.agent_state.network_state.network_state.V[:, 0]
-            - state.agent_state.network_state.network_state.V[:, 1]
+            state.agent_state.network_state.V[:, 0]
+            - state.agent_state.network_state.V[:, 1]
             if V_diff is None
             else jnp.vstack(
                 (
                     V_diff,
-                    state.agent_state.network_state.network_state.V[:, 0]
-                    - state.agent_state.network_state.network_state.V[:, 1],
+                    state.agent_state.network_state.V[:, 0]
+                    - state.agent_state.network_state.V[:, 1],
                 )
             )
         )
@@ -131,36 +148,33 @@ def plot_perturbation_distribution_over_time(ax):
 
 
 def plot_cross_correlation(ax):
-    config = create_single_neuron_config_extra_synapse(N_neurons=2)
+    config = create_single_synapse_learning_config(
+        key=jr.PRNGKey(15105), initial_synapse_weight=10.0
+    )
     config.t1 = 20
     t_start_saving = 2.0
 
     config.save_at = SaveAt(
-        ts=jnp.linspace(
-            t_start_saving, config.t1, int((config.t1 - t_start_saving) // config.dt)
-        ),
+        ts=jnp.arange(t_start_saving, config.t1, config.dt),
         fn=lambda t, x, args: save_part_of_state(
             x,
             V=True,
             S=True,
-            noise_state=True,
+            perturbations=True,
         ),
     )
     config.args["use_noise"] = jnp.array([True, False])
-    config.min_noise_std = 5e-9
-
-    key = jr.PRNGKey(15105)
-    config.key = key
+    config.min_noise_std = 1e-9
 
     config.save_file = "results/perturbation_dist/correlation_run"
     sol, model = run_simulation(config, save_results=True)
     state: SystemState = sol.ys
 
     # Remove data around spike times to avoid the influence of spiking activity on the correlation analysis
-    spike_idx = jnp.where(state.agent_state.network_state.network_state.S[:, 0] == 1)[0]
-    V_0 = state.agent_state.network_state.network_state.V[:, 0]
-    V_1 = state.agent_state.network_state.network_state.V[:, 1]
-    noise = state.agent_state.network_state.noise_state[:, 0]
+    spike_idx = jnp.where(state.agent_state.network_state.S[:, 0] == 1)[0]
+    V_0 = state.agent_state.network_state.V[:, 0]
+    V_1 = state.agent_state.network_state.V[:, 1]
+    noise = state.agent_state.network_state.perturbations[:, 0]
 
     remove_spikes = True
     if remove_spikes:
@@ -168,7 +182,7 @@ def plot_cross_correlation(ax):
             WINDOW_BUFFER = 10e-3
             start_idx = max(0, spike_id - int(WINDOW_BUFFER / config.dt))
             end_idx = min(
-                state.agent_state.network_state.network_state.V.shape[0],
+                state.agent_state.network_state.V.shape[0],
                 spike_id + int(WINDOW_BUFFER / config.dt),
             )
             V_0 = V_0.at[start_idx:end_idx].set(jnp.nan)

@@ -1,7 +1,5 @@
 import jax
 
-from adaptive_SNN.models.RPE import BiphasicRPEModel
-
 jax.config.update(
     "jax_enable_x64", True
 )  # Enable 64-bit precision for better numerical stability
@@ -12,11 +10,13 @@ from jax import numpy as jnp
 
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import SpikeRateEnvironment
-from adaptive_SNN.models.noise.poisson_jump import PoissonJumpProcess
-from adaptive_SNN.models.reward_prediction.moving_average import (
-    MovingAverageRewardModel,
-)
+from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
 from adaptive_SNN.utils.config import SimulationConfig
+
+# TODO: fix this config if needed
+# It relied on the old RPEModel implementation, which has been removed
+# The appropriate reward should be computed inside the environment
+# However, we might not use this script for the thesis, so it is not a priority to fix it right now.
 
 
 def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
@@ -25,7 +25,6 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
     dt = 1e-4
     lr = 0.0
     noise_level = 0.0
-    RPE_noise_rate = 0.0
     N_inputs = 1
     min_noise_std = 1e-9
     balance = 0.5
@@ -48,18 +47,14 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
     def save(t, x: SystemState, args):
         """Save S, RPE, weights to target neuron, and mean weight at each time step"""
         return (
-            x.agent_state.network_state.network_state.S.astype(jnp.bool),
-            x.agent_state.RPE.RPE.astype(jnp.float32),
-            x.agent_state.network_state.network_state.W[0].astype(jnp.float32),
-            jnp.nanmean(x.agent_state.network_state.network_state.W),
+            x.agent_state.network_state.S.astype(jnp.bool),
+            x.agent_state.RPE.astype(jnp.float32),
+            x.agent_state.network_state.W[0].astype(jnp.float32),
+            jnp.nanmean(x.agent_state.network_state.W),
             x.environment_state.astype(jnp.float32),
         )
 
     save_at = SaveAt(steps=True, fn=save)
-
-    # RPE = 1 when the target neuron spikes, 0 otherwise.
-    def RPE_fn(t, agent_state, args):
-        return agent_state.network_state.S[0]
 
     cfg = SimulationConfig(
         network_cls=model_cls,
@@ -85,27 +80,15 @@ def create_config(model_cls, N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConf
         save_at=save_at,
         save_file="results/biofeedback/biofeedback_experiment.npz",
         network_output_fn=network_output_fn,
+        network_output_shape=(N_neurons,),
         input_spike_fn=input_spike_fn,
         reward_fn=lambda t, x, args: jnp.array([0.0]),
         environment_model=SpikeRateEnvironment,
         environment_kwargs={"rate": 1, "dim": N_neurons},
-        reward_model=MovingAverageRewardModel,
-        reward_kwargs={"reward_rate": 0.0, "dim": 1},
-        reward_noise_model=PoissonJumpProcess,
-        reward_noise_kwargs={
-            "jump_rate": RPE_noise_rate,
-            "jump_mean": 0.0,
-            "jump_std": 1.0,
-            "dim": 1,
-            "dt": dt,
-            "tau": 0.05,
-            "key": reward_noise_key,
-        },
-        RPE_model=BiphasicRPEModel,
-        RPE_model_kwargs={"time_constants": jnp.array([0.1, 1.0]), "scale": 1.0},
+        reward_prediction_model=MovingAverageRewardPredictor,
+        reward_predictor_kwargs={"rate": 0.0, "dim": 1},
         args={
             "use_noise": jnp.array([True] * N_neurons),
-            "RPE_fn": RPE_fn,
         },
     )
     return cfg

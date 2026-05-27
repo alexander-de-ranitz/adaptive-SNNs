@@ -9,7 +9,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 class RewardPrediction(eqx.Module):
-    reward: Array  # Scalar array reward prediction
+    value: Array  # Scalar array reward prediction
 
 
 class AbstractRewardPredictor(ABC, eqx.Module):
@@ -19,12 +19,21 @@ class AbstractRewardPredictor(ABC, eqx.Module):
         pass
 
     @abstractmethod
-    def drift(self, t, x, args):
+    def drift(self, t, x, args, reward, network_state):
         pass
 
     @abstractmethod
     def diffusion(self, t, x, args):
         pass
+
+    @abstractmethod
+    def update(self, t, x, args):
+        """Apply non-differential updates"""
+        pass
+
+    def pre_step_update(self, t, x, args, reward, network_state):
+        """Apply any necessary updates to the state before computing the drift/diffusion."""
+        return x
 
     @property
     @abstractmethod
@@ -33,9 +42,4 @@ class AbstractRewardPredictor(ABC, eqx.Module):
 
     @abstractmethod
     def terms(self, key):
-        pass
-
-    @abstractmethod
-    def update(self, t, x, args):
-        """Apply non-differential updates"""
         pass

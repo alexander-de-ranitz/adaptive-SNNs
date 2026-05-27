@@ -6,13 +6,8 @@ import jax.random as jr
 from diffrax import Solution
 from jaxtyping import Array, PyTree
 
-from adaptive_SNN.models import (
-    OUP,
-    LIFNetwork,
-    LIFState,
-    PoissonJumpProcess,
-)
-from adaptive_SNN.models.networks.base import NeuronModelABC
+from adaptive_SNN.models.networks import AbstractNeuronModel, LIFNetwork, LIFState
+from adaptive_SNN.models.noise import OUP, PoissonJumpProcess
 from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
 
 # ============================================================================
@@ -28,6 +23,7 @@ def make_LIF_model(
     dt=0.1e-3,
     input_neuron_types=None,
     fully_connected_input=True,
+    min_noise_std=0.0,
     input_weight=1.0,
     noise_model=None,
     key=jr.PRNGKey(0),
@@ -40,6 +36,7 @@ def make_LIF_model(
         fully_connected_input=fully_connected_input,
         initial_input_weight=input_weight,
         noise_model=noise_model,
+        min_noise_std=min_noise_std,
         key=key,
     )
 
@@ -142,12 +139,12 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
     return state
 
 
-def make_noisy_state(network_state: LIFState, noise_state=None) -> LIFState:
+def make_noisy_state(network_state: LIFState, perturbations=None) -> LIFState:
     """Create a LIFState with an explicit perturbation state."""
     N_neurons = network_state.V.shape[0]
-    if noise_state is None:
-        noise_state = jnp.zeros((N_neurons,))
-    return eqx.tree_at(lambda s: s.perturbations, network_state, noise_state)
+    if perturbations is None:
+        perturbations = jnp.zeros((N_neurons,))
+    return eqx.tree_at(lambda s: s.perturbations, network_state, perturbations)
 
 
 # ============================================================================
@@ -259,7 +256,7 @@ class DeterministicLIFNetwork(LIFNetwork):
         )
 
 
-class DummySpikingNetwork(NeuronModelABC):
+class DummySpikingNetwork(AbstractNeuronModel):
     """A dummy network model that outputs deterministic spikes at a defined rate."""
 
     N_neurons: int
@@ -290,7 +287,7 @@ class DummySpikingNetwork(NeuronModelABC):
     def init_features(self):
         pass
 
-    def drift(self, t, x, args):
+    def drift(self, t, x, args, RPE=None):
         return jax.tree.map(
             lambda arr: jnp.zeros_like(arr, dtype=arr.dtype),
             x,

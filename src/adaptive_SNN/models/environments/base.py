@@ -3,6 +3,12 @@ from abc import ABC, abstractmethod
 import equinox as eqx
 
 
+class AbstractEnvironmentState(eqx.Module):
+    """State of the environment process."""
+
+    pass
+
+
 class AbstractEnvironment(ABC, eqx.Module):
     @property
     @abstractmethod
@@ -15,7 +21,7 @@ class AbstractEnvironment(ABC, eqx.Module):
         pass
 
     @abstractmethod
-    def drift(self, t, x, args):
+    def drift(self, t, x, args, env_input):
         pass
 
     @abstractmethod
@@ -26,7 +32,10 @@ class AbstractEnvironment(ABC, eqx.Module):
     def terms(self, key):
         pass
 
-    @abstractmethod
-    def update(self, t, x, args):
-        """Update function for applying non-differentiable updates to the environment state."""
+    def update(self, t, x, args, env_input):
+        """Optional update function for applying non-differentiable updates to the environment state."""
         pass
+
+    def pre_step_update(self, t, x, args):
+        """Optional function to apply updates to the environment state before computing the drift/diffusion."""
+        return x

@@ -71,18 +71,17 @@ def run_simulation(
         **config.base_network_kwargs,
     )
 
-    reward_noise = config.reward_noise_model(**config.reward_noise_kwargs)
-    RPE_model = config.RPE_model(**config.RPE_model_kwargs)
     agent = config.agent_cls(
         neuron_model=neuron_model,
-        reward_model=config.reward_model(**config.reward_kwargs),
-        reward_noise=reward_noise,
-        RPE_model=RPE_model,
+        reward_prediction_model=config.reward_prediction_model(
+            **config.reward_predictor_kwargs
+        ),
     )
 
     model = config.agent_env_system_cls(
         agent=agent,
         environment=config.environment_model(**config.environment_kwargs),
+        agent_output_shape=config.network_output_shape,
     )
 
     solver = dfx.EulerHeun()

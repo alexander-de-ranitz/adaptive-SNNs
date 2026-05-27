@@ -3,12 +3,12 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.noise.base import NoiseModelABC
+from adaptive_SNN.models.noise import AbstractNoiseModel
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class OUP(NoiseModelABC):
+class OUP(AbstractNoiseModel):
     tau: float | Array = 1.0
     noise_std: float | Array = 0.0
     mean: float | Array = 0.0

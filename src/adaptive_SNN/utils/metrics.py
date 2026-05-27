@@ -1,7 +1,7 @@
 from jax import numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.networks.base import AbstractLIFNetwork
+from adaptive_SNN.models.networks import AbstractLIFNetwork
 
 
 def compute_CV_ISI(spikes: Array, ts: Array) -> Array:

@@ -8,7 +8,7 @@ from matplotlib.colors import LinearSegmentedColormap, LogNorm
 from matplotlib.ticker import LogFormatterMathtext, LogLocator
 from matplotlib.transforms import ScaledTranslation
 
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
+from adaptive_SNN.models.networks import GatedLIFNetwork
 
 
 @dataclass

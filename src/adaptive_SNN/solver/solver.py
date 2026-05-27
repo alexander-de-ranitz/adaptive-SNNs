@@ -129,6 +129,7 @@ def step(i, carry, t0, t1, dt, solver, terms, args, save_indices, model, save_fn
     t_end = t0_64 + (i + 1) * dt_64
     t_end = jnp.minimum(t_end, t1_64)  # Ensure we don't go past t1
 
+    y = model.pre_step_update(t_start, y, args)
     y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
     y = model.update(t_end, y, args)
 

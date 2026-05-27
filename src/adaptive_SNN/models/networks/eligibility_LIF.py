@@ -3,7 +3,7 @@ import jax
 from jax import numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models.networks.base import AbstractLIFNetwork
+from adaptive_SNN.models.networks import AbstractLIFNetwork, LIFState
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 
@@ -11,17 +11,7 @@ class Eligibility(eqx.Module):
     eligibility: Array
 
 
-class ElibilityState(eqx.Module):
-    V: Array
-    S: Array
-    W: Array
-    G: Array
-    firing_rate: Array
-    mean_E_conductance: Array
-    var_E_conductance: Array
-    time_since_last_spike: Array
-    spike_buffer: Array
-    buffer_index: Array  # Scalar array to maintain JAX compatibility
+class ElibilityState(LIFState):
     features: Eligibility
 
 
@@ -44,13 +34,13 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
         return tree
 
     def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
-        noise_std = args.get("noise_std", 0.0)
-        noise_conductance = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+        noise_std = self.compute_desired_noise_std(t, state, args)
+        perturbations = state.perturbations
 
         # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
         # In case the noise std is zero (no noise), avoid division by zero and set relative noise strength to zero
         relative_noise_strength = jnp.where(
-            noise_std != 0.0, noise_conductance / noise_std, 0.0
+            noise_std != 0.0, perturbations / noise_std, 0.0
         )
 
         # Map the relative noise strength to each excitatory synapse
@@ -69,13 +59,12 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
     def noise_shape_features(self) -> Eligibility:
         return Eligibility(eligibility=None)
 
-    def compute_weight_updates(self, t, state: ElibilityState, args):
+    def compute_weight_updates(
+        self, t, state: ElibilityState, args, RPE: Array
+    ) -> Array:
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        RPE = args.get("RPE", jnp.array(0.0))
-
         dW = learning_rate * RPE * state.features.eligibility
-
         dW = jnp.where(
             jnp.isnan(state.W), 0.0, dW
         )  # No weight change for non-existing connections

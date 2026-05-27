@@ -8,8 +8,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jaxtyping import Array
 
-from adaptive_SNN.models.noise.base import NoiseModelABC
-from adaptive_SNN.models.noise.oup import OUP
+from adaptive_SNN.models.noise import OUP, AbstractNoiseModel
 from adaptive_SNN.utils.operators import (
     DefaultIfNone,
     ElementWiseMul,
@@ -19,7 +18,7 @@ from adaptive_SNN.utils.operators import (
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class NeuronModelABC(ABC, eqx.Module):
+class AbstractNeuronModel(ABC, eqx.Module):
     @property
     @abstractmethod
     def initial(self):
@@ -46,6 +45,10 @@ class NeuronModelABC(ABC, eqx.Module):
     def update(self, t, x, args):
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         pass
+
+    def pre_step_update(self, t, x, args):
+        """Optional function to apply updates to the state before computing the drift/diffusion."""
+        return x
 
 
 class LIFState(eqx.Module):
@@ -75,7 +78,7 @@ class LIFState(eqx.Module):
     features: Any
 
 
-class AbstractLIFNetwork(NeuronModelABC):
+class AbstractLIFNetwork(AbstractNeuronModel):
     """Leaky Integrate-and-Fire (LIF) neuron network model with conductance-based synapses."""
 
     # fmt: off
@@ -111,9 +114,9 @@ class AbstractLIFNetwork(NeuronModelABC):
     initial_weight_matrix: Array | None = None # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
     fully_connected_input: bool  = False  # If True, all input neurons connect to all neurons with weight initial_input_weight
     input_types: Array | None  = None # Optional binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
-    excitatory_mask: Array  = eqx.field(init=False) # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
-    synaptic_time_constants: Array = eqx.field(init=False) # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
-    synaptic_delay_matrix: Array = eqx.field(init=False) # Matrix of shape (N_neurons, N_neurons) with synaptic delays for recurrent connections
+    excitatory_mask: Array  | None = None # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
+    synaptic_time_constants: Array | None = None # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
+    synaptic_delay_matrix: Array | None = None # Matrix of shape (N_neurons, N_neurons) with synaptic delays for recurrent connections
 
     ###########################################
     #               Miscellaneous             # 
@@ -122,7 +125,7 @@ class AbstractLIFNetwork(NeuronModelABC):
     key: Array  = eqx.field(default_factory=lambda: jr.PRNGKey(0))  # Random key initialization
     EMA_tau: float = 1  # Time constant for exponential moving average of firing rate and mean/var of conductance
     buffer_size: int  = 1 # Size of spike history buffer
-    noise_model: NoiseModelABC | None = None # Noise model to add noise to the network
+    noise_model: AbstractNoiseModel | None = None # Noise model to add noise to the network
     min_noise_std: float = 0.0 # Minimum std of noise to prevent it from going to zero when synaptic variance is low
 
     # fmt: on
@@ -273,17 +276,15 @@ class AbstractLIFNetwork(NeuronModelABC):
     def init_features(self):
         raise NotImplementedError
 
-    def drift(self, t, state: LIFState, args) -> LIFState:
+    def drift(self, t, state: LIFState, args, RPE: Array = jnp.zeros(1)) -> LIFState:
         """Compute deterministic time derivatives for LIF state.
 
         Args:
             t: time (unused for autonomous dynamics)
             state: LIFState current state
-            args: dict containing keys:
-                - inhibitory_noise-> (N_neurons,)
-                - excitatory_noise-> (N_neurons,)
-                - learning_rate(t, state, args) -> scalar
-                - RPE(t, state, args) -> scalar
+            args: dict of optional args
+            RPE: Reward prediction error signal that can be used for learning rules
+
         Returns:
             LIFState of derivatives (dV, dS, dW, dG)
         """
@@ -291,7 +292,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         # Compute derivatives of the state variables
         dV = self.compute_voltage_update(t, state, args)
         dG = -1 / self.synaptic_time_constants[None, :] * state.G
-        dW = self.compute_weight_updates(t, state, args)
+        dW = self.compute_weight_updates(t, state, args, RPE)
         dS = jnp.zeros_like(state.S)  # Spikes are handled separately, so no change here
 
         # Perturbations drift is defined by the noise model
@@ -495,7 +496,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         return dV
 
     @abstractmethod
-    def compute_weight_updates(self, t, state: LIFState, args) -> Array:
+    def compute_weight_updates(self, t, state: LIFState, args, RPE: Array) -> Array:
         raise NotImplementedError
 
     def clip_weights(self, t, state, args):

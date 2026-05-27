@@ -15,7 +15,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 class RewardPredictionRLS(RewardPrediction):
-    reward: Array  # Scalar reward prediction
+    value: Array  # Scalar reward prediction
     weights: Array  # (n, ) Weight matrix for the RLS predictor
     P: Array  # (n, n) Inverse covariance matrix for the RLS predictor
 
@@ -30,19 +30,37 @@ class RLSRewardPrediction(AbstractRewardPredictor):
     @property
     def initial(self):
         return RewardPredictionRLS(
-            reward=jnp.zeros((1,)),
+            value=jnp.zeros((1,)),
             weights=jnp.zeros((self.input_dim,)),
             P=jnp.eye(self.input_dim) * self.P_init,
         )
 
     @property
     def noise_shape(self):
-        return RewardPredictionRLS(reward=None, weights=None, P=None)
+        return RewardPredictionRLS(value=None, weights=None, P=None)
 
-    def drift(self, t, x: RewardPredictionRLS, args: dict) -> RewardPredictionRLS:
+    def pre_step_update(self, t, x: RewardPredictionRLS, args, reward, network_state):
+        features = args["feature_fn"](t, network_state, args)
+        weights = x.weights
+        predicted_reward = weights @ features
+
+        # Update weights using RLS update rule
+        error = reward - predicted_reward
+        gain = x.P @ features / (self.lambda_ + features.T @ x.P @ features)
+        new_weights = weights + gain * error
+        new_P = (x.P - gain[:, None] @ features[None, :] @ x.P) / self.lambda_
+
+        # Symmetrize new_P to ensure it remains positive definite, which can help with numerical stability
+        new_P = (new_P + new_P.T) / 2
+
+        return RewardPredictionRLS(value=predicted_reward, weights=new_weights, P=new_P)
+
+    def drift(
+        self, t, x: RewardPredictionRLS, args: dict, reward: Array, network_state: Array
+    ) -> RewardPredictionRLS:
         """No drift in the reward prediction process."""
         return RewardPredictionRLS(
-            reward=jnp.zeros_like(x.reward),
+            value=jnp.zeros_like(x.value),
             weights=jnp.zeros_like(x.weights),
             P=jnp.zeros_like(x.P),
         )
@@ -59,29 +77,4 @@ class RLSRewardPrediction(AbstractRewardPredictor):
         return tree
 
     def update(self, t, x: RewardPredictionRLS, args: dict) -> RewardPredictionRLS:
-        """Update the RLS weights based on the RPE."""
-        if args is None or "RPE" not in args or "features" not in args:
-            raise ValueError(
-                "RLSRewardPrediction requires 'RPE' and 'features' in args for update."
-            )
-        RPE = args["RPE"]
-        features = args["features"]
-        weights = x.weights
-
-        # Update weights using RLS update rule
-        gain = x.P @ features / (self.lambda_ + features.T @ x.P @ features)
-        new_weights = weights + gain * RPE
-        new_P = (x.P - gain[:, None] @ features[None, :] @ x.P) / self.lambda_
-
-        # Symmetrize new_P to ensure it remains positive definite, which can help with numerical stability
-        new_P = (new_P + new_P.T) / 2
-
-        return RewardPredictionRLS(reward=x.reward, weights=new_weights, P=new_P)
-
-    def compute_next_reward_prediction(
-        self, t, x: RewardPredictionRLS, args: dict
-    ) -> RewardPredictionRLS:
-        """Compute the reward prediction based on the current weights and input features."""
-        features = args["features"]
-        weights = x.weights
-        return RewardPredictionRLS(reward=features @ weights, weights=weights, P=x.P)
+        return x

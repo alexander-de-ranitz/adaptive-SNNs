@@ -9,14 +9,14 @@ import matplotlib.pyplot as plt
 from diffrax import SaveAt
 
 from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks.eligibility_LIF import (
+from adaptive_SNN.models.networks import (
     ElibilityState,
     Eligibility,
     EligibilityLIFNetwork,
+    GatedLIFNetwork,
 )
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.simulation_configs.single_synapse_learning import (
-    create_default_config_single_synapse_task,
+from adaptive_SNN.simulation_configs.single_synapse_config import (
+    create_single_synapse_learning_config,
 )
 from adaptive_SNN.utils.runner import run_simulation
 
@@ -121,7 +121,7 @@ def compute_eligibility_changes_around_spikes(sol) -> list[tuple[float, float]]:
 
 
 def run_sim(id, key):
-    config = create_default_config_single_synapse_task(key=key)
+    config = create_single_synapse_learning_config(key=key)
     config.t1 = 30
     config.network_cls = NoDecayGatedLIFNetwork
     config.min_noise_std = 1e-9

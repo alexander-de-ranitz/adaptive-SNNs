@@ -8,18 +8,23 @@ from jax import numpy as jnp
 from jax import random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
+from adaptive_SNN.models.networks import GatedLIFNetwork
 from adaptive_SNN.models.RPE import BiphasicRPEModel
-from adaptive_SNN.simulation_configs.biofeedback_experiment import create_config
+from adaptive_SNN.simulation_configs.biofeedback_config import create_config
 from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.runner import run_simulation
+
+# TODO: fix this script if needed
+# It relied on the old RPEModel implementation, which has been removed
+# The appropriate reward should be computed inside the environment
+# However, we might not use this script for the thesis, so it is not a priority to fix it right now.
 
 
 def main():
     cfg = create_config(
         model_cls=GatedLIFNetwork, N_neurons=1000, key=jr.PRNGKey(192837465)
     )
-    cfg.t1 = 2.0
+    cfg.t1 = 0.2
     # Only recurrent synapses are plastic in this experiment, so we set the learning rate for input synapses to zero
     cfg.lr = 25.0 * jnp.hstack(
         [
