@@ -52,7 +52,7 @@ from adaptive_SNN.models.networks.per_synapse_noisy_network import (  # noqa: E4
 from adaptive_SNN.models.networks.noisy_network import NoisyNetwork  # noqa: E402
 from adaptive_SNN.models.noise.oup import NeuralNoiseOUP  # noqa: E402
 from adaptive_SNN.models.noise.per_synapse_oup import PerSynapseOUP  # noqa: E402
-from adaptive_SNN.solver import simulate_noisy_SNN  # noqa: E402
+from adaptive_SNN.solver import solve_ODE  # noqa: E402
 
 MASTER_SEED = 42
 N_NEURONS, N_INPUTS = 2, 3
@@ -146,7 +146,7 @@ def run_one(name, agent, args, T):
     save_ts = jnp.linspace(0.0, T, N_SAVE)
     saveat = dfx.SaveAt(subs=dfx.SubSaveAt(ts=save_ts, fn=_save_fn(name)))
     key = jr.PRNGKey(7)
-    return simulate_noisy_SNN(agent, dfx.EulerHeun(), 0.0, T, DT, agent.initial,
+    return solve_ODE(agent, dfx.EulerHeun(), 0.0, T, DT, agent.initial,
                               save_at=saveat, args=args, key=key)
 
 

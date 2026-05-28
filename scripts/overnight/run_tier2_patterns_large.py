@@ -44,7 +44,7 @@ from adaptive_SNN.models.networks.per_synapse_noisy_network import (  # noqa: E4
 )
 from adaptive_SNN.models.noise.oup import NeuralNoiseOUP  # noqa: E402
 from adaptive_SNN.models.noise.per_synapse_oup import PerSynapseOUP  # noqa: E402
-from adaptive_SNN.solver import simulate_noisy_SNN  # noqa: E402
+from adaptive_SNN.solver import solve_ODE  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tier-2 large-scale task parameters (impl plan §5.2 target)
@@ -209,7 +209,7 @@ def calibrate_network(T_warm=5.0):
 
     agent = LearningAgent(noisy)
     saveat = dfx.SaveAt(subs=dfx.SubSaveAt(ts=save_ts, fn=save_fn))
-    sol = simulate_noisy_SNN(agent, dfx.EulerHeun(), 0.0, T_warm, DT, agent.initial,
+    sol = solve_ODE(agent, dfx.EulerHeun(), 0.0, T_warm, DT, agent.initial,
                              save_at=saveat, args=args, key=brown_key)
     G_E = np.asarray(sol.ys["G_inputs"]) / float(base_net.synaptic_increment)
     s2 = float(np.mean(G_E ** 2))
@@ -243,7 +243,7 @@ def run_cell(cell_id, seed, sigma_pn, sigma_ps, T=T_TOTAL):
                        LEARNING_RATES.get(cell_id, 1.0), target_pattern)
     save_ts = jnp.linspace(0.0, T, N_SAVE)
     saveat = dfx.SaveAt(subs=dfx.SubSaveAt(ts=save_ts, fn=_save_fn(cell_id)))
-    return simulate_noisy_SNN(agent, dfx.EulerHeun(), 0.0, T, DT, agent.initial,
+    return solve_ODE(agent, dfx.EulerHeun(), 0.0, T, DT, agent.initial,
                               save_at=saveat, args=args, key=brown_key)
 
 

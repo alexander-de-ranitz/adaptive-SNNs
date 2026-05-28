@@ -48,7 +48,7 @@ from adaptive_SNN.models.networks.per_synapse_noisy_network import (  # noqa: E4
 )
 from adaptive_SNN.models.noise.oup import NeuralNoiseOUP  # noqa: E402
 from adaptive_SNN.models.noise.per_synapse_oup import PerSynapseOUP  # noqa: E402
-from adaptive_SNN.solver import simulate_noisy_SNN  # noqa: E402
+from adaptive_SNN.solver import solve_ODE  # noqa: E402
 
 # ---------------------------------------------------------------------------
 MASTER_SEED = 42
@@ -184,7 +184,7 @@ def run_cell(cell_id, delta_V, seed, sigma_pn, sigma_ps, T=T_TOTAL, learning_rat
     args = _build_args(spike_key, sigma_ps, learning_rate=learning_rate)
     save_ts = jnp.linspace(0.0, T, N_SAVE)
     saveat = dfx.SaveAt(subs=dfx.SubSaveAt(ts=save_ts, fn=_make_save_fn(cell_id)))
-    return simulate_noisy_SNN(
+    return solve_ODE(
         wrap, dfx.EulerHeun(), 0.0, T, DT, wrap.initial,
         save_at=saveat, args=args, key=brown_key,
     )
@@ -215,7 +215,7 @@ def calibrate(T_warm=20.0, seed=MASTER_SEED):
         }
 
     saveat = dfx.SaveAt(subs=dfx.SubSaveAt(ts=save_ts, fn=save_fn))
-    sol = simulate_noisy_SNN(
+    sol = solve_ODE(
         wrap, dfx.EulerHeun(), 0.0, T_warm, DT, wrap.initial,
         save_at=saveat, args=args, key=brown_key,
     )

@@ -49,7 +49,7 @@ from adaptive_SNN.models.networks.per_synapse_noisy_network import (  # noqa: E4
 )
 from adaptive_SNN.models.noise.oup import NeuralNoiseOUP  # noqa: E402
 from adaptive_SNN.models.noise.per_synapse_oup import PerSynapseOUP  # noqa: E402
-from adaptive_SNN.solver import simulate_noisy_SNN  # noqa: E402
+from adaptive_SNN.solver import solve_ODE  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Task parameters (Tier-2; simplified for overnight budget)
@@ -230,7 +230,7 @@ def run_cell(cell_id, seed, sigma_pn, sigma_ps, T=T_TOTAL):
     args = _build_args(spike_key, rpe_key, seed * 13 + 7, sigma_ps, LEARNING_RATES.get(cell_id, 1.0), target_pattern)
     save_ts = jnp.linspace(0.0, T, N_SAVE)
     saveat = dfx.SaveAt(subs=dfx.SubSaveAt(ts=save_ts, fn=_save_fn(cell_id)))
-    return simulate_noisy_SNN(agent, dfx.EulerHeun(), 0.0, T, DT, agent.initial, save_at=saveat, args=args, key=brown_key)
+    return solve_ODE(agent, dfx.EulerHeun(), 0.0, T, DT, agent.initial, save_at=saveat, args=args, key=brown_key)
 
 
 def main():
