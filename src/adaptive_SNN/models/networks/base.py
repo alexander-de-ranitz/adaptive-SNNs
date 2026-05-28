@@ -458,16 +458,26 @@ class AbstractLIFNetwork(NeuronModelABC):
         # Compute leak current
         leak_current = -self.leak_conductance * (V - self.resting_potential)
 
-        # Compute E/I currents from recurrent connections
-        weighted_conductances = (
-            jnp.where(jnp.isnan(W), 0.0, W) * G
-        )  # For non-existing connections, set weighted conductance to 0
+        # Per-synapse multiplicative-on-weight noise (unified §2.1, Eq. 2.1a):
+        # effective W = (W + zeta) where zeta is masked to excitatory synapses
+        # by the PerSynapseOUP. When the per-synapse noise term is absent the
+        # behaviour reduces exactly to the original additive-on-aggregate
+        # per-neuron path.
+        E_noise_per_synapse = args.get(
+            "per_synapse_excitatory_noise", jnp.zeros_like(W)
+        )
+
+        effective_W = jnp.where(jnp.isnan(W), 0.0, W + E_noise_per_synapse)
+        weighted_conductances = effective_W * G
+
         total_I_conductances = jnp.sum(
             weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
         )
         synaptic_E_conductances = jnp.sum(
             weighted_conductances * self.excitatory_mask[None, :], axis=1
         )
+
+        # Per-neuron noise (Alexander's existing additive-on-aggregate path).
         E_noise = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
         total_E_conductances = (
             synaptic_E_conductances + E_noise
