@@ -21,8 +21,8 @@ class ExternalNoiseStd(LIFNetwork):
     def compute_desired_noise_std(self, t, state: LIFState, args):
         return args.get("external_noise_std")(t, state, args)
 
-    def update(self, t, state, args):
-        state = super().update(t, state, args)
+    def update(self, t, state, args, input_spikes):
+        state = super().update(t, state, args, input_spikes)
         external_noise_std = args.get("external_noise_std")(t, state, args)
         perturbation = state.perturbations
         new_perturbation = jnp.where(
