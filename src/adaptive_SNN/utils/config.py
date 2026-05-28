@@ -8,7 +8,7 @@ from typing import Any, Callable
 import diffrax as dfx
 import equinox as eqx
 from diffrax import SaveAt
-from jax import numpy as jnp
+from jaxtyping import Array
 
 from adaptive_SNN.models.agent_env_system import AgentEnvSystem
 from adaptive_SNN.models.environments import AbstractEnvironment, SpikeRateEnvironment
@@ -46,7 +46,7 @@ class SimulationConfig:
     min_noise_std: float = 0.0
     fraction_excitatory_recurrent: float = 0.8
     fraction_excitatory_input: float = 0.8
-    initial_weight_matrix: jnp.ndarray | None = None
+    initial_weight_matrix: Array | None = None
     mean_synaptic_delay: float = 0.0
     base_network_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
     args: dict[str, Any] = eqx.field(default_factory=lambda: {})
@@ -66,12 +66,12 @@ class SimulationConfig:
 
     # Input parameters
     input_spike_fn: Callable[..., Any] | None = None
-    input_types: jnp.ndarray | None = None
+    input_types: Array | None = None
     fully_connected_input: bool = True
     initial_input_weight: float = 0.0
 
     # Other
-    key: int | jnp.ndarray = 0
+    key: int | Array = 0
     save_file: str | None = None
 
     def __post_init__(self) -> None:
