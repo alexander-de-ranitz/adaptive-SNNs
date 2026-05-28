@@ -13,9 +13,7 @@ from jax import numpy as jnp
 from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 
-from adaptive_SNN.models import (
-    LIFNetwork,
-)
+from adaptive_SNN.models.networks import LIFNetwork
 from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.metrics import compute_charge_ratio, compute_CV_ISI
 from adaptive_SNN.utils.save_helper import save_part_of_state
