@@ -433,11 +433,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             ),
         )
 
-    def update(self, t, x: LIFState, args) -> LIFState:
+    def update(self, t, x: LIFState, args, input_spikes: Array) -> LIFState:
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         perturbations = self.noise_model.update(t, x.perturbations, args)
         state = eqx.tree_at(lambda s: s.perturbations, x, perturbations)
-        state = self.spike_and_reset(t, state, args)
+        state = self.spike_and_reset(t, state, args, input_spikes)
         state = self.clip_weights(t, state, args)
         state = self.force_balanced_weights(t, state, args)
         return state
@@ -542,7 +542,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         delayed_spikes = jax.vmap(get_neuron_inputs)(jnp.arange(self.N_neurons))
         return delayed_spikes
 
-    def spike_and_reset(self, t, state: LIFState, args) -> LIFState:
+    def spike_and_reset(
+        self, t, state: LIFState, args, input_spikes: Array
+    ) -> LIFState:
         """Handle spiking and resetting of neurons.
 
         Neurons that cross the firing threshold emit a spike and have their membrane potential reset.
@@ -556,6 +558,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             state: Current LIFState
             args: Dictionary of additional arguments, must contain:
                 - get_input_spikes(t, state, args) -> Array of shape (N_neurons, N_inputs) representing current input spikes
+            input_spikes: Array of shape (N_neurons, N_inputs) representing input spikes
 
         Returns:
             Updated LIFState after spiking and updates
@@ -586,15 +589,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         # Update conductances from recurrent spikes
         G_new = G.at[:, : self.N_neurons].add(delayed_spikes * self.synaptic_increment)
 
-        # Update conductances from input spikes
-        input_spikes = args["get_input_spikes"](t, state, args)
-
-        # Check input_spikes shape, to catch when using old shape assumptions
+        # Update conductances based on current input spikes
         if input_spikes.shape != (self.N_neurons, self.N_inputs):
             raise ValueError(
                 f"Input spikes shape {input_spikes.shape} does not match expected shape {(self.N_neurons, self.N_inputs)}"
             )
-
         G_new = G_new.at[:, self.N_neurons :].add(
             input_spikes * self.synaptic_increment
         )

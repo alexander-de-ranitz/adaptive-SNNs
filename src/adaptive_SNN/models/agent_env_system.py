@@ -134,10 +134,15 @@ class AgentEnvSystem(eqx.Module):
         )
 
     def update(self, t, x: SystemState, args: dict):
+        # Get input spikes for the agent and update
+        agent_input_spikes = args["input_spike_fn"](t, x, args)
+        new_agent_state = self.agent.update(
+            t, x.agent_state, args, input_spikes=agent_input_spikes
+        )
+
         new_env_state = self.environment.update(
             t, x.environment_state, args, env_input=x.agent_output
         )
-        new_agent_state = self.agent.update(t, x.agent_state, args)
         return SystemState(
             new_agent_state, new_env_state, x.agent_output, x.reward_signal
         )

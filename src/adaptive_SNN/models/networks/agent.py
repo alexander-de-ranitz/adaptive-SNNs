@@ -121,9 +121,11 @@ class Agent(eqx.Module):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x: AgentState, args):
+    def update(self, t, x: AgentState, args, input_spikes: Array | None = None):
         # Update components
-        new_network_state = self.network.update(t, x.network_state, args)
+        new_network_state = self.network.update(
+            t, x.network_state, args, input_spikes=input_spikes
+        )
         new_reward_predictor_state = self.reward_prediction_model.update(
             t, x.reward_predictor_state, args
         )  # reward and network_state are not needed for the current reward predictor update, but we include them here for future extensibility
