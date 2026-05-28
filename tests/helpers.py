@@ -6,6 +6,7 @@ import jax.random as jr
 from diffrax import Solution
 from jaxtyping import Array, PyTree
 
+from adaptive_SNN.models.environments import AbstractEnvironment
 from adaptive_SNN.models.networks import AbstractNeuronModel, LIFNetwork, LIFState
 from adaptive_SNN.models.noise import OUP, PoissonJumpProcess
 from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
@@ -161,7 +162,7 @@ def make_default_args(N_neurons, N_inputs, **overrides):
         **overrides: Dict of arg names to override, e.g., RPE=1.5
     """
     args = {
-        "get_input_spikes": lambda t, x, a: jnp.zeros((N_neurons, N_inputs)),
+        "input_spike_fn": lambda t, x, a: jnp.zeros((N_neurons, N_inputs)),
         "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
         "get_desired_balance": lambda t, x, a: 0.0,
         "noise_scale_hyperparam": 0.0,
@@ -209,6 +210,9 @@ class DeterministicOUP(OUP):
         super().__init__(tau=tau, noise_std=noise_std, dim=dim)
         self.t0 = t0
         self.t1 = t1
+
+    def pre_step_update(self, t, x, args):
+        return x
 
     def terms(self, key):
         process_noise = dfx.VirtualBrownianTree(
@@ -309,7 +313,41 @@ class DummySpikingNetwork(AbstractNeuronModel):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args):
+    def update(self, t, x, args, input_spikes):
         # Generate spikes based on output rates
         spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
         return eqx.tree_at(lambda s: s.S, x, spikes)
+
+
+class DummyEnvironment(AbstractEnvironment):
+    """A dummy environment that outputs deterministic observations and rewards."""
+
+    @property
+    def initial(self):
+        return jnp.arange(3).astype(default_float)  # example state
+
+    def pre_step_update(self, t, x, args):
+        return x
+
+    def drift(self, t, x, args, env_input=None):
+        return -x + jnp.arange(2, x.shape[0] + 2) * 0.1  # arbitrary drift
+
+    def diffusion(self, t, x, args):
+        return (
+            jnp.eye(x.shape[0]) * jnp.arange(1, x.shape[0] + 1) * 0.1
+        )  # small independent noise
+
+    def update(self, t, x, args, env_input=None):
+        return x
+
+    @property
+    def noise_shape(self):
+        return jax.ShapeDtypeStruct(shape=self.initial.shape, dtype=default_float)
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )

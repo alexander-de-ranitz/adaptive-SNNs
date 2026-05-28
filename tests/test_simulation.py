@@ -1,6 +1,7 @@
 import diffrax as dfx
 import equinox as eqx
 import jax.numpy as jnp
+from jaxtyping import Array
 
 from adaptive_SNN.models import AgentEnvSystem, SystemState
 from adaptive_SNN.models.environments.base import (
@@ -18,15 +19,17 @@ from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 
 class DummyNetworkState(eqx.Module):
-    value: jnp.ndarray
+    value: Array
 
 
 class DummyEnvironmentState(AbstractEnvironmentState):
-    value: jnp.ndarray
+    value: Array
 
 
 class DummyNetwork(AbstractNeuronModel):
-    initial_value: jnp.ndarray
+    initial_value: Array
+    N_neurons: int = 1
+    N_inputs: int = 0
 
     def __init__(self, initial_value: float):
         self.initial_value = jnp.array([initial_value])
@@ -63,12 +66,12 @@ class DummyNetwork(AbstractNeuronModel):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args):
+    def update(self, t, x, args, input_spikes):
         return DummyNetworkState(value=x.value + args["net_update_add"])
 
 
 class DummyRewardPredictor(AbstractRewardPredictor):
-    initial_value: jnp.ndarray
+    initial_value: Array
 
     def __init__(self, initial_value: float = 0.0):
         self.initial_value = jnp.array([initial_value])
@@ -103,7 +106,7 @@ class DummyRewardPredictor(AbstractRewardPredictor):
 
 
 class DummyEnvironment(AbstractEnvironment):
-    initial_value: jnp.ndarray
+    initial_value: Array
 
     def __init__(self, initial_value: float):
         self.initial_value = jnp.array([initial_value])
@@ -170,6 +173,7 @@ def test_agent_env_system_pre_step_update_order():
         "env_drift_scale": jnp.array([0.0]),
         "env_update_scale": jnp.array([0.0]),
         "env_update_bias": jnp.array([0.0]),
+        "input_spike_fn": lambda t, x, args: None,
     }
 
     x0 = model.initial
@@ -221,6 +225,9 @@ def test_agent_env_system_update_uses_agent_output():
         "net_update_add": jnp.array([0.5]),
         "env_update_scale": jnp.array([2.0]),
         "env_update_bias": jnp.array([1.0]),
+        "input_spike_fn": lambda t, x, args: jnp.zeros(
+            (model.agent.network.N_neurons, model.agent.network.N_inputs)
+        ),
     }
 
     agent_state = AgentState(
@@ -273,6 +280,7 @@ def test_solve_ode_runs_pre_step_and_update():
         "env_drift_scale": jnp.array([0.0]),
         "env_update_scale": jnp.array([3.0]),
         "env_update_bias": jnp.array([0.1]),
+        "input_spike_fn": lambda t, x, args: None,
     }
 
     def save_fn(t, y, a):
