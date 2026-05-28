@@ -23,12 +23,11 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
 from adaptive_SNN.models import (
-    Agent,
     AgentEnvSystem,
     SystemState,
 )
 from adaptive_SNN.models.environments import SpikeRateEnvironment
-from adaptive_SNN.models.networks import GatedLIFNetwork
+from adaptive_SNN.models.networks import Agent, GatedLIFNetwork
 from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
 from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.save_helper import save_part_of_state
@@ -75,7 +74,11 @@ def main():
             reward_prediction_model=MovingAverageRewardPredictor(rate=0.0),
         )
 
-        model = AgentEnvSystem(agent=agent, environment=SpikeRateEnvironment(rate=50))
+        model = AgentEnvSystem(
+            agent=agent,
+            environment=SpikeRateEnvironment(rate=50),
+            agent_output_shape=(1,),
+        )
 
         solver = dfx.EulerHeun()
         init_state = model.initial

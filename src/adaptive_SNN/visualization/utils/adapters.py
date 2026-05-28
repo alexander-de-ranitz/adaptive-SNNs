@@ -1,12 +1,15 @@
 from adaptive_SNN.models import (
-    Agent,
     AgentEnvSystem,
-    AgentState,
-    LIFNetwork,
-    LIFState,
     SystemState,
 )
-from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
+from adaptive_SNN.models.networks import (
+    Agent,
+    AgentState,
+    EligibilityLIFNetwork,
+    GatedLIFNetwork,
+    LIFNetwork,
+    LIFState,
+)
 
 
 def get_LIF_state(state) -> LIFState:

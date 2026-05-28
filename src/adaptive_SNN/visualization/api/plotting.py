@@ -7,10 +7,9 @@ from matplotlib import pyplot as plt
 
 from adaptive_SNN.models import (
     AgentEnvSystem,
-    LIFNetwork,
     SystemState,
 )
-from adaptive_SNN.models.networks import GatedLIFNetwork
+from adaptive_SNN.models.networks import GatedLIFNetwork, LIFNetwork
 from adaptive_SNN.utils.metrics import compute_CV_ISI, compute_synchrony
 from adaptive_SNN.visualization.utils.adapters import (
     get_LIF_model,
