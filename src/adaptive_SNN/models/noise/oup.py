@@ -36,6 +36,9 @@ class OUP(AbstractNoiseModel):
     def update(self, t, x, args):
         return x
 
+    def pre_step_update(self, t, x, args):
+        return x
+
     @property
     def noise_shape(self):
         return jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float)

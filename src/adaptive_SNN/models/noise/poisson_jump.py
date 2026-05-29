@@ -85,6 +85,9 @@ class PoissonJumpProcess(AbstractNoiseModel):
         )
         return x + increments
 
+    def pre_step_update(self, t, x, args):
+        return x
+
     @property
     def noise_shape(self):
         return None

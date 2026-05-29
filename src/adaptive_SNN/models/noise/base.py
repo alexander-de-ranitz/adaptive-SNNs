@@ -19,7 +19,12 @@ class AbstractNoiseModel(ABC, eqx.Module):
 
     @abstractmethod
     def update(self, t, x, args):
-        """Apply non-differential updates"""
+        """Apply non-differential updates after the diffrax step."""
+        pass
+
+    @abstractmethod
+    def pre_step_update(self, t, x, args):
+        """Apply non-differential updates before the diffrax step."""
         pass
 
     @property
