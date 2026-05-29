@@ -79,6 +79,7 @@ def create_single_synapse_learning_config(
         t1=t1,
         dt=dt,
         initial_weight_matrix=initial_weights,
+        mean_synaptic_delay=0.0,
         lr=jnp.zeros_like(initial_weights),
         noise_level=jnp.array([noise_level] * N_neurons),
         min_noise_std=min_noise_std,
