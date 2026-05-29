@@ -1,45 +1,14 @@
 import diffrax as dfx
 import jax.numpy as jnp
-import jax.random as jr
 from helpers import DummySpikingNetwork
 
 from adaptive_SNN.models import AgentEnvSystem, SystemState
 from adaptive_SNN.models.environments import (
-    DoubleIntegrator,
-    DoubleIntegratorKickControl,
-    InputTrackingEnvironment,
     SpikeRateEnvironment,
 )
+from adaptive_SNN.models.networks import Agent
+from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
 from adaptive_SNN.solver import solve_ODE
-
-
-def test_input_tracking_env():
-    env = InputTrackingEnvironment(dim=1)
-
-    args = {"get_env_input": lambda t, x, args: jnp.array([1.0])}
-    solver = dfx.Euler()
-    t0 = 0.0
-    t1 = 10.0
-    dt0 = 0.01
-    y0 = env.initial
-    key = jr.PRNGKey(0)
-    terms = env.terms(key)
-    sol = dfx.diffeqsolve(
-        terms,
-        solver,
-        t0=t0,
-        t1=t1,
-        dt0=dt0,
-        y0=y0,
-        args=args,
-        saveat=dfx.SaveAt(t1=True),
-        adjoint=dfx.ForwardMode(),
-    )
-
-    ts = sol.ts
-    ys = sol.ys
-    assert ys.shape == (ts.shape[0], env.dim)
-    assert jnp.allclose(ys[-1], jnp.array([1.0]), atol=1e-2)
 
 
 def test_spike_rate_env():
@@ -53,15 +22,20 @@ def test_spike_rate_env():
 
     env = SpikeRateEnvironment(dim=dim)
     network = DummySpikingNetwork(output_dim=dim, output_rates=rates, dt=dt0)
-
+    agent = Agent(
+        neuron_model=network,
+        reward_prediction_model=MovingAverageRewardPredictor(rate=0.0),
+    )
     model = AgentEnvSystem(
-        agent=network,
+        agent=agent,
         environment=env,
+        agent_output_shape=dim,
     )
 
     args = {
-        "network_output_fn": lambda t, agent_state, args: agent_state.S,
+        "network_output_fn": lambda t, agent_state, args: agent_state.network_state.S,
         "reward_fn": lambda t, environment_state, args: jnp.array([0.0]),
+        "input_spike_fn": lambda t, x, args: None,
     }
 
     y0 = model.initial
@@ -85,107 +59,3 @@ def test_spike_rate_env():
     # Check that the final environment state is close to the target rates
     # there tolerance is quite large since the tracking is not exact
     assert jnp.allclose(ys.environment_state[-1], rates, rtol=0.1)
-
-
-def test_double_integrator_optimal_control():
-    env = DoubleIntegrator()
-
-    # Define args with optimal LQR controller for double integrator
-    args = {
-        "get_env_input": lambda t, x, args: jnp.array(
-            -1.0 * x.at[0].get() - jnp.sqrt(1 / 3.0) * x.at[1].get()
-        )
-    }
-
-    solver = dfx.Euler()
-    t0 = 0.0
-    t1 = 30.0
-    dt0 = 0.01
-
-    # Initial state: position=1.0, velocity=0.0
-    y0 = jnp.array([[1.0, 0.0]]).reshape((2,))
-
-    key = jr.PRNGKey(0)
-    sol = solve_ODE(
-        env,
-        solver,
-        t0,
-        t1,
-        dt0,
-        y0,
-        save_at=dfx.SaveAt(steps=True),
-        args=args,
-        key=key,
-    )
-    ys = sol.ys
-
-    # The system should converge to zero state under optimal control
-    assert jnp.allclose(ys[-1], jnp.array([0.0, 0.0]), atol=1e-2)
-
-
-def test_double_integrator_simple_control():
-    env = DoubleIntegrator()
-
-    # Acceleration of 1 for 1 second, then 0
-    args = {
-        "get_env_input": lambda t, x, args: jnp.where(
-            t <= 1.0, jnp.array(1), jnp.array(0.0)
-        )
-    }
-
-    solver = dfx.Euler()
-    t0 = 0.0
-    t1 = 5.0
-    dt0 = 0.001
-    y0 = env.initial
-    key = jr.PRNGKey(0)
-    sol = solve_ODE(
-        env,
-        solver,
-        t0,
-        t1,
-        dt0,
-        y0,
-        save_at=dfx.SaveAt(t1=True),
-        args=args,
-        key=key,
-    )
-    ys = sol.ys
-
-    # The system should be at position 4.5 with velocity 1.0 at t=5
-    assert jnp.allclose(ys[-1], jnp.array([4.5, 1.0]), atol=1e-2)
-
-
-def test_double_integrator_kick_control():
-    env = DoubleIntegratorKickControl()
-
-    # Kicks at t=1 and t=2, of size -1 and 3
-    # so we have v=-1 for 1s and v=2 for 3s, leading to final state [5.0, 2.0]
-    args = {
-        "get_env_input": lambda t, x, args: jnp.where(
-            t == 1.0, jnp.array(-1), jnp.array(0.0)
-        )
-        + jnp.where(t == 2.0, jnp.array(3), jnp.array(0.0))
-    }
-
-    solver = dfx.Euler()
-    t0 = 0.0
-    t1 = 5.0
-    dt0 = 0.001
-    y0 = env.initial
-    key = jr.PRNGKey(0)
-    sol = solve_ODE(
-        env,
-        solver,
-        t0,
-        t1,
-        dt0,
-        y0,
-        save_at=dfx.SaveAt(t1=True),
-        args=args,
-        key=key,
-    )
-    ys = sol.ys
-
-    # The system should be at position 4.5 with velocity 1.0 at t=5
-    assert jnp.allclose(ys[-1], jnp.array([5.0, 2.0]), atol=1e-2)

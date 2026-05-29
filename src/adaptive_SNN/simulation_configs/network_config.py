@@ -1,8 +1,6 @@
 import jax
 
-jax.config.update(
-    "jax_enable_x64", True
-)  # Enable 64-bit precision for better numerical stability
+jax.config.update("jax_enable_x64", True)
 
 import jax.random as jr
 from diffrax import SaveAt
@@ -11,8 +9,7 @@ from jax import numpy as jnp
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import SpikeRateEnvironment
 from adaptive_SNN.models.networks import LIFNetwork
-from adaptive_SNN.models.noise.poisson_jump import PoissonJumpProcess
-from adaptive_SNN.models.reward import MovingAverageRewardModel
+from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
 from adaptive_SNN.utils.config import SimulationConfig
 
 
@@ -22,18 +19,15 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
     dt = 1e-4
     lr = 0.0
     noise_level = 0.0
-    RPE_noise_rate = 0.0
     N_inputs = 1
     min_noise_std = 1e-9
     balance = 1.4285
 
     rate = jnp.array([1500.0])  # High frequency background input
 
-    key, spike_key, reward_noise_key = jr.split(key, 3)
+    key, spike_key = jr.split(key, 2)
 
-    network_output_fn = lambda t, agent_state, args: jnp.squeeze(
-        jnp.sum(agent_state.noisy_network.network_state.S)
-    )
+    network_output_fn = lambda t, agent_state, args: agent_state.network_state.S
 
     def input_spike_fn(t, x, args):
         step_idx = jnp.asarray(jnp.rint((t - t0) / dt), dtype=jnp.int64)
@@ -44,16 +38,13 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
         )
 
     def save(t, x: SystemState, args):
-        return x.agent_state.noisy_network.network_state.S.astype(jnp.bool)
+        return x.agent_state.network_state.S.astype(jnp.bool)
 
     save_at = SaveAt(ts=jnp.arange(0.5, t1, dt), fn=save)
 
-    def RPE_fn(t, x, args):
-        return jnp.zeros((1,))
-
     model_cls = LIFNetwork
     cfg = SimulationConfig(
-        base_network_cls=model_cls,
+        network_cls=model_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         balance=balance,
@@ -76,25 +67,15 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
         save_at=save_at,
         save_file=f"results/network_b_{balance}_.npz",
         network_output_fn=network_output_fn,
+        network_output_shape=(N_neurons,),
         input_spike_fn=input_spike_fn,
         reward_fn=lambda t, x, args: jnp.array([0.0]),
         environment_model=SpikeRateEnvironment,
         environment_kwargs={"rate": 1, "dim": N_neurons},
-        reward_model=MovingAverageRewardModel,
-        reward_kwargs={"reward_rate": 0.0, "dim": 1},
-        reward_noise_model=PoissonJumpProcess,
-        reward_noise_kwargs={
-            "jump_rate": RPE_noise_rate,
-            "jump_mean": 0.0,
-            "jump_std": 0.0,
-            "dim": 1,
-            "dt": dt,
-            "tau": 0.05,
-            "key": reward_noise_key,
-        },
+        reward_prediction_model=MovingAverageRewardPredictor,
+        reward_predictor_kwargs={"rate": 0.0, "dim": 1},
         args={
             "use_noise": jnp.array([True] * N_neurons),
-            "RPE_fn": RPE_fn,
         },
     )
     return cfg

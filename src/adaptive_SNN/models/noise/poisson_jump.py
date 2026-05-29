@@ -4,13 +4,13 @@ import jax.numpy as jnp
 import jax.random as jr
 from jaxtyping import Array
 
-from adaptive_SNN.models.noise.base import NoiseModelABC
+from adaptive_SNN.models.noise import AbstractNoiseModel
 from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class PoissonJumpProcess(NoiseModelABC):
+class PoissonJumpProcess(AbstractNoiseModel):
     jump_rate: float | Array
     jump_mean: float | Array
     jump_std: float | Array

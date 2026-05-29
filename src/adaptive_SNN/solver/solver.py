@@ -17,7 +17,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 # note that is important that these are saved outside of the function definition to avoid recompilation on each call
 DEFAULT_ARGS = {
     "get_learning_rate": lambda t, x, args: 0.0,
-    "get_input_spikes": lambda t, x, args: jnp.zeros(
+    "input_spike_fn": lambda t, x, args: jnp.zeros(
         shape=(
             x.W.shape[0],
             x.W.shape[1] - x.W.shape[0],
@@ -129,6 +129,7 @@ def step(i, carry, t0, t1, dt, solver, terms, args, save_indices, model, save_fn
     t_end = t0_64 + (i + 1) * dt_64
     t_end = jnp.minimum(t_end, t1_64)  # Ensure we don't go past t1
 
+    y = model.pre_step_update(t_start, y, args)
     y, _, _, _, _ = solver.step(terms, t_start, t_end, y, args, None, False)
     y = model.update(t_end, y, args)
 

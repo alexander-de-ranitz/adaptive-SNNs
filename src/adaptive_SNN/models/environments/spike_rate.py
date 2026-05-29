@@ -33,7 +33,7 @@ class SpikeRateEnvironment(AbstractEnvironment):
     def noise_shape(self):
         return None
 
-    def drift(self, t, x, args):
+    def drift(self, t, x, args, env_input=None):
         return -self.rate * x  # Exponential decay of spike rate
 
     def diffusion(self, t, x, args):
@@ -49,12 +49,6 @@ class SpikeRateEnvironment(AbstractEnvironment):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args):
+    def update(self, t, x, args, env_input=None):
         """Non-differential update to increment the state based on the input."""
-        if args is None or "get_env_input" not in args:
-            raise ValueError(
-                "SpikeRateEnvironment requires 'get_env_input' in args for update."
-            )
-        return (
-            x + args["get_env_input"](t, x, args) * self.rate
-        )  # Increment by spike count
+        return x + env_input * self.rate  # Increment by spike count

@@ -14,7 +14,7 @@ from helpers import (
     make_poisson_jump_model,
 )
 
-from adaptive_SNN.models import NoisyNetwork, NoisyNetworkState
+from adaptive_SNN.models.networks import LIFState
 
 
 def test_initial_state():
@@ -330,7 +330,8 @@ def test_weight_plasticity():
     """Test that dW is computed correctly when RPE and noises are provided."""
     N = 4
     key = jr.PRNGKey(123)
-    model = make_LIF_model(N_neurons=N, N_inputs=0, key=key)
+    noise_std = 2.5e-9
+    model = make_LIF_model(N_neurons=N, N_inputs=0, key=key, min_noise_std=noise_std)
 
     # Override excitatory mask for test
     excitatory_mask = jnp.array([True, False, True, False], dtype=bool)
@@ -348,20 +349,19 @@ def test_weight_plasticity():
 
     # Define deterministic noise and RPE
     E_noise = (jnp.arange(N) + 1.0) * model.synaptic_increment
-    noise_std = jnp.arange(3, N + 3, dtype=state.V.dtype) * 0.1
+    state = eqx.tree_at(
+        lambda s: s.perturbations, state, E_noise
+    )  # Inject noise into state
 
     RPE_value = 2.0
 
     args = make_default_args(
         N,
         0,
-        excitatory_noise=E_noise,
-        RPE=RPE_value,
         get_learning_rate=lambda t, x, a: 0.1,
-        noise_std=noise_std,
     )
 
-    derivs = model.drift(0.0, state, args)
+    derivs = model.drift(0.0, state, args, RPE=RPE_value)
     dW = derivs.W
 
     # Build expected dW
@@ -372,44 +372,31 @@ def test_weight_plasticity():
     assert dW[0, 1] == 0.0  # inhibitory presynaptic neuron
 
     # Manual sanity check to ensure elements are in the right place
-    assert (
-        dW[0, 2]
-        == 0.1
-        * RPE_value
-        * E_noise[0]
-        / noise_std[0]
-        * G[0, 2]
-        / model.synaptic_increment
+    assert jnp.allclose(
+        dW[0, 2],
+        0.1 * RPE_value * E_noise[0] / noise_std * G[0, 2] / model.synaptic_increment,
     )
-    assert (
-        dW[1, 0]
-        == 0.1
-        * RPE_value
-        * E_noise[1]
-        / noise_std[1]
-        * G[1, 0]
-        / model.synaptic_increment
+    assert jnp.allclose(
+        dW[1, 0],
+        0.1 * RPE_value * E_noise[1] / noise_std * G[1, 0] / model.synaptic_increment,
     )
 
 
 def test_excitatory_noise_only_affects_voltage_correctly():
     N = 7
     model = make_LIF_model(N_neurons=N, N_inputs=0)
-    state = make_baseline_state(model)
-
-    noise_E = jnp.arange(N, dtype=state.V.dtype)
+    state = make_baseline_state(model, perturbations=jnp.arange(N))
 
     args = make_default_args(
         N,
         0,
-        excitatory_noise=noise_E,
     )
 
     derivs = model.drift(0.0, state, args)
     dv, dG = derivs.V, derivs.G
 
     expected = (
-        noise_E * (model.reversal_potential_E - state.V)
+        state.perturbations * (model.reversal_potential_E - state.V)
     ) / model.membrane_capacitance
 
     assert jnp.allclose(dv, expected)
@@ -423,11 +410,11 @@ def test_noise_is_unique():
         N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
-    initial_state: NoisyNetworkState = model.initial
+    initial_state: LIFState = model.initial
 
     # Make sure the initial network state has non-zero conductances variance so that noise > 0
     initial_state = eqx.tree_at(
-        lambda s: s.network_state.var_E_conductance,
+        lambda s: s.var_E_conductance,
         initial_state,
         jnp.ones((N,)),
     )
@@ -437,10 +424,10 @@ def test_noise_is_unique():
     terms = model.terms(jr.PRNGKey(0))
 
     y1, _, _, _, _ = solver.step(terms, 0.0, 0.01, initial_state, args, None, False)
-    noise_state = y1.noise_state
+    perturbations = y1.perturbations
 
-    assert not jnp.all(noise_state == 0)
-    assert jnp.unique(noise_state).size > 1
+    assert not jnp.all(perturbations == 0)
+    assert jnp.unique(perturbations).size > 1
 
 
 def test_NoisyNeuronModel_forwards_noise_into_network_drift():
@@ -450,20 +437,19 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
         N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
     )
 
-    network = model.base_network
+    network = model
     network_state = make_baseline_state(network)
     args = make_default_args(N, 0)
 
-    noise_state = jnp.arange(N, dtype=network_state.V.dtype)
-    x = make_noisy_state(network_state, noise_state)
+    perturbations = jnp.arange(N, dtype=network_state.V.dtype)
+    x = make_noisy_state(network_state, perturbations)
 
-    noisy_network_drift = model.drift(0.0, x, args)
-    network_drift = noisy_network_drift.network_state
+    network_drift = model.drift(0.0, x, args)
     dV, dS, dW, dG = network_drift.V, network_drift.S, network_drift.W, network_drift.G
 
     V_now = network_state.V
     expected_dv = (
-        noise_state * (network.reversal_potential_E - V_now)
+        perturbations * (network.reversal_potential_E - V_now)
     ) / network.membrane_capacitance
 
     assert jnp.allclose(dV, expected_dv)
@@ -473,8 +459,8 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
 
     # OU drift is -1/tau * (state - mean)
     assert jnp.allclose(
-        noisy_network_drift.noise_state,
-        -1.0 / model.noise_model.tau * (noise_state - model.noise_model.mean),
+        network_drift.perturbations,
+        -1.0 / model.noise_model.tau * (perturbations - model.noise_model.mean),
     )
 
 
@@ -485,7 +471,7 @@ def test_NoisyNeuronModel_diffusion():
         N_neurons=N, N_inputs=0, noise_std=0.0, tau=1.0, key=key
     )
 
-    network = model.base_network
+    network = model
     network_state = make_baseline_state(network)
     initial_state = make_noisy_state(network_state)
     args = make_default_args(N, 0, noise_scale_hyperparam=0.0)
@@ -510,10 +496,11 @@ def test_spike_generation():
     )
 
     V = jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
-    state = make_baseline_state(model, V=V)
+    W = jnp.ones((N, N))
+    state = make_baseline_state(model, V=V, W=W)
     args = make_default_args(N, 0)
 
-    new_state = model.spike_and_reset(0.0, state, args)
+    new_state = model.spike_and_reset(0.0, state, args, input_spikes=jnp.zeros((N, 0)))
 
     expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
     expected_V_new = (
@@ -552,15 +539,14 @@ def test_spike_generation_with_input():
     )
 
     V = jnp.array([-70.0, -70.0, -45.0, -60.0]) * 1e-3
-    state = make_baseline_state(model, V=V)
+    W = jnp.ones((N_neurons, N_neurons + N_inputs))
+    state = make_baseline_state(model, V=V, W=W)
 
-    def input_spikes_fn(t, x, args):
-        spike_vec = jnp.array([1.0, 0.0, 0.0])
-        return jnp.broadcast_to(spike_vec, (N_neurons, N_inputs))
+    input_spikes = jnp.tile(jnp.array([1, 0, 0]), (N_neurons, 1))
 
-    args = make_default_args(N_neurons, N_inputs, get_input_spikes=input_spikes_fn)
+    args = make_default_args(N_neurons, N_inputs)
 
-    new_state = model.spike_and_reset(0.0, state, args=args)
+    new_state = model.spike_and_reset(0.0, state, args=args, input_spikes=input_spikes)
     V_new, spikes, W_new, G_new = new_state.V, new_state.S, new_state.W, new_state.G
 
     expected_spikes = jnp.array([0, 0, 1, 0], dtype=bool)
@@ -572,15 +558,18 @@ def test_spike_generation_with_input():
     recurrent_G = G_new[:, : model.N_neurons]
     input_G = G_new[:, model.N_neurons :]
 
-    assert jnp.allclose(recurrent_G[:, 2], model.synaptic_increment)
+    assert jnp.allclose(recurrent_G[:, 2], model.synaptic_increment, atol=1e-10)
     assert jnp.allclose(recurrent_G[:, jnp.array([0, 1, 3])], 0.0, atol=1e-10)
-    assert jnp.allclose(input_G[:, 0], model.synaptic_increment)
+    assert jnp.allclose(input_G[:, 0], model.synaptic_increment, atol=1e-10)
     assert jnp.allclose(input_G[:, 1:], 0.0, atol=1e-10)
     assert jnp.all(W_new == state.W)
 
     # Check conductance decay
     derivs = model.drift(0.0, new_state, args)
-    _, dS, _, dG = derivs.V, derivs.S, derivs.W, derivs.G
+    dS = derivs.S
+    dG = derivs.G
+    print(dG)
+    print(new_state.G)
     assert jnp.all(dS == 0)
     assert jnp.all(dG[:, model.N_neurons + 0] < 0)
     assert jnp.all(dG[:, model.N_neurons + 1 :] == 0)
@@ -816,7 +805,7 @@ def test_synaptic_delays():
     args = make_default_args(N_neurons, N_inputs)
 
     state = model.spike_and_reset(
-        0.0, init_state, args
+        0.0, init_state, args, input_spikes=jnp.zeros((N_neurons, N_inputs))
     )  # Generate spikes to fill buffer
     assert jnp.all(state.S == expected_spikes)
     assert jnp.all(
@@ -830,7 +819,9 @@ def test_synaptic_delays():
     state = init_state
     num_events = 0
     while t < max_delay + dt:
-        state = model.spike_and_reset(t, state, args)
+        state = model.spike_and_reset(
+            t, state, args, input_spikes=jnp.zeros((N_neurons, N_inputs))
+        )
         i, j = jnp.nonzero(state.G == model.synaptic_increment)
         num_events += jnp.size(i)
 
@@ -860,13 +851,15 @@ def test_noise_scaling():
     syn_var = jnp.array([20e-9])
 
     # Set variance to known value for test
-    state = eqx.tree_at(lambda s: s.network_state.var_E_conductance, state, syn_var)
+    state = eqx.tree_at(lambda s: s.var_E_conductance, state, syn_var)
 
     # Compute desired noise std and compare to expected
     desired_noise_std = model.compute_desired_noise_std(0.0, state, args)
-    expected_noise_std = noise_scale_hyperparam * jnp.sqrt(syn_var)
+    expected_noise_std = model.min_noise_std + noise_scale_hyperparam * jnp.sqrt(
+        syn_var
+    )
 
-    assert expected_noise_std > NoisyNetwork.min_noise_std, (
+    assert expected_noise_std > model.min_noise_std, (
         "Test setup invalid: synaptic std too low"
     )
     assert jnp.isclose(desired_noise_std, expected_noise_std, atol=1e-6)
@@ -908,4 +901,4 @@ def test_noise_scaling_min_clip():
 
     # Compute desired noise std. Since synaptic variance is zero at init, should be clipped to min_noise_std
     desired_noise_std = model.compute_desired_noise_std(0.0, state, args)
-    assert jnp.isclose(desired_noise_std, NoisyNetwork.min_noise_std)
+    assert jnp.isclose(desired_noise_std, model.min_noise_std)

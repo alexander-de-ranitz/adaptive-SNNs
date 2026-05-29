@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jaxtyping import Array
 
+from adaptive_SNN.models.noise import OUP, AbstractNoiseModel
 from adaptive_SNN.utils.operators import (
     DefaultIfNone,
     ElementWiseMul,
@@ -17,7 +18,7 @@ from adaptive_SNN.utils.operators import (
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class NeuronModelABC(ABC, eqx.Module):
+class AbstractNeuronModel(ABC, eqx.Module):
     @property
     @abstractmethod
     def initial(self):
@@ -45,6 +46,10 @@ class NeuronModelABC(ABC, eqx.Module):
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         pass
 
+    def pre_step_update(self, t, x, args):
+        """Optional function to apply updates to the state before computing the drift/diffusion."""
+        return x
+
 
 class LIFState(eqx.Module):
     """State container for LIF network.
@@ -63,6 +68,7 @@ class LIFState(eqx.Module):
     S: Array
     W: Array
     G: Array
+    perturbations: Array
     firing_rate: Array
     mean_E_conductance: Array
     var_E_conductance: Array
@@ -72,12 +78,14 @@ class LIFState(eqx.Module):
     features: Any
 
 
-class AbstractLIFNetwork(NeuronModelABC):
-    """Leaky Integrate-and-Fire (LIF) neuron network model with conductance-based synapses.
+class AbstractLIFNetwork(AbstractNeuronModel):
+    """Leaky Integrate-and-Fire (LIF) neuron network model with conductance-based synapses."""
 
-    The state consists of the membrane potentials, spikes, weights, and synaptic conductances of all neurons.
-    """
+    # fmt: off
 
+    ###########################################
+    #           Biophyisical Parameters       # 
+    ###########################################
     leak_conductance: float = 16.7 * 1e-9  # nS
     membrane_capacitance: float = 250 * 1e-12  # pF
     resting_potential: float = -70.0 * 1e-3  # mV
@@ -92,110 +100,84 @@ class AbstractLIFNetwork(NeuronModelABC):
     V_reset: float = -60.0 * 1e-3  # mV
     refractory_period: float = 2.0 * 1e-3  # ms
     mean_synaptic_delay: float = 1.5 * 1e-3  # ms
-    fraction_excitatory_recurrent: float = (
-        0.8  # Fraction of excitatory recurrent neurons
-    )
-    fraction_excitatory_input: float = 1.0  # Fraction of excitatory input neurons
+
+    ###########################################
+    #             Network Parameters          # 
+    ###########################################
+    N_neurons: int = 1
+    N_inputs: int = 0
+    fraction_excitatory_recurrent: float = 0.8
+    fraction_excitatory_input: float = 1.0
+    initial_input_weight: float = 1.0  # Mean input weight
+    rec_weight_std: float  = 0.0 # Standard deviation of initial recurrent weights as fraction of mean weight
+    initial_rec_weight: float  = 1.0 # Mean recurrent weight
+    initial_weight_matrix: Array | None = None # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
+    fully_connected_input: bool  = False  # If True, all input neurons connect to all neurons with weight initial_input_weight
+    input_types: Array | None  = None # Optional binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
+    excitatory_mask: Array  | None = None # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
+    synaptic_time_constants: Array | None = None # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
+    synaptic_delay_matrix: Array | None = None # Matrix of shape (N_neurons, N_neurons) with synaptic delays for recurrent connections
+
+    ###########################################
+    #               Miscellaneous             # 
+    ###########################################
+    dt: float  = 1e-4  # Timestep size for simulation in seconds, used for delay buffer
+    key: Array  = eqx.field(default_factory=lambda: jr.PRNGKey(0))  # Random key initialization
     EMA_tau: float = 1  # Time constant for exponential moving average of firing rate and mean/var of conductance
+    buffer_size: int  = 1 # Size of spike history buffer
+    noise_model: AbstractNoiseModel | None = None # Noise model to add noise to the network
+    min_noise_std: float = 0.0 # Minimum std of noise to prevent it from going to zero when synaptic variance is low
 
-    initial_input_weight: float  # Mean input weight
-    rec_weight_std: float  # Standard deviation of initial recurrent weights as fraction of mean weight
-    initial_rec_weight: float  # Mean recurrent weight
-    initial_weight_matrix: (
-        Array | None
-    )  # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
-    fully_connected_input: bool  # If True, all input neurons connect to all neurons with weight initial_input_weight
-    N_neurons: int
-    N_inputs: int
-    excitatory_mask: Array  # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
-    synaptic_time_constants: Array  # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
-    synaptic_delay_matrix: (
-        Array  # Matrix of synaptic delays (N_neurons, N_neurons) in seconds
-    )
-    buffer_size: int  # Size of spike history buffer
-    dt: float  # Timestep size for simulation in seconds, used for delay buffer
-    weight_init_key: Array  # Random key for weight initialization
+    # fmt: on
 
-    def __init__(
-        self,
-        dt,
-        N_neurons: int,
-        N_inputs: int = 0,
-        connection_prob_E: float = 0.1,
-        connection_prob_I: float = 0.2,
-        fully_connected_input: bool = True,
-        initial_input_weight: float = 1.0,
-        initial_rec_weight: float = 0.0,
-        initial_weight_matrix: Array | None = None,
-        fraction_excitatory_recurrent: float = 0.8,
-        fraction_excitatory_input: float = 1.0,
-        mean_synaptic_delay: float = 1.5e-3,
-        rec_weight_std: float = 0.2,
-        input_types: Array | None = None,
-        key: jr.PRNGKey = jr.PRNGKey(0),
-    ):
-        """Initialize LIF network model.
+    def __post_init__(self):
+        """Post-initialization to set up neuron types, synaptic delays, and other derived parameters."""
 
-        Args:
-            N_neurons: Number of neurons in the network
-            N_inputs: Number of input neurons
-            connection_prob: Probability of connection between any two neurons (for recurrent connections)
-            fully_connected_input: If True, all input neurons connect to all neurons with weight initial_input_weight
-            initial_input_weight: Mean weight of input synapses
-            initial_rec_weight: Mean weight of recurrent synapses
-            initial_weight_matrix: Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs). If None, weights are initialized randomly based on initial_input_weight, initial_rec_weight, connection_prob, and rec_weight_std.
-            fraction_excitatory_recurrent: Fraction of excitatory recurrent neurons
-            fraction_excitatory_input: Fraction of excitatory input neurons
-            rec_weight_std: Standard deviation of initial recurrent weights as fraction of mean weight
-            input_types: Optional array of shape (N_inputs,) with boolean values indicating whether each input neuron is excitatory (True) or inhibitory (False). If None, random assignment is used.
-            key: JAX random key for initialization
-        """
-        self.N_neurons = N_neurons
-        self.N_inputs = N_inputs
-        self.connection_prob_E = connection_prob_E
-        self.connection_prob_I = connection_prob_I
-        self.fully_connected_input = fully_connected_input
-        self.initial_input_weight = initial_input_weight
-        self.initial_rec_weight = initial_rec_weight
-        self.fraction_excitatory_recurrent = fraction_excitatory_recurrent
-        self.fraction_excitatory_input = fraction_excitatory_input
-        self.mean_synaptic_delay = mean_synaptic_delay
-        self.dt = dt
-        self.rec_weight_std = rec_weight_std
-        self.initial_weight_matrix = initial_weight_matrix
+        # Initialize noise model
+        if self.noise_model is None:
+            self.noise_model = OUP(dim=self.N_neurons, tau=self.tau_E)
 
-        key, subkey = jr.split(key)
-
-        # Set neuron types, 80% excitatory, 20% inhibitory
+        # Set up neuron types for recurrent connections
+        key, subkey = jr.split(self.key)
         neuron_types = jr.permutation(
             subkey,
             jnp.concatenate(
                 [
                     jnp.ones(
-                        (int(jnp.round(fraction_excitatory_recurrent * N_neurons)),),
+                        (
+                            int(
+                                jnp.round(
+                                    self.fraction_excitatory_recurrent * self.N_neurons
+                                )
+                            ),
+                        ),
                         dtype=bool,
                     ),
                     jnp.zeros(
                         (
-                            N_neurons
-                            - int(jnp.round(fraction_excitatory_recurrent * N_neurons)),
+                            self.N_neurons
+                            - int(
+                                jnp.round(
+                                    self.fraction_excitatory_recurrent * self.N_neurons
+                                )
+                            ),
                         ),
                         dtype=bool,
                     ),
                 ]
             ),
         )
-
+        # Set up neuron types for input connections
         key, subkey = jr.split(key)
-        if input_types is not None:
-            if input_types.shape != (N_inputs,):
+        if self.input_types is not None:
+            if self.input_types.shape != (self.N_inputs,):
                 raise ValueError(
-                    f"input_types must have shape ({N_inputs},), but has shape {input_types.shape}"
+                    f"input_types must have shape ({self.N_inputs},), but has shape {self.input_types.shape}"
                 )
-            input_neuron_types = input_types
+            input_neuron_types = self.input_types
         else:
-            N_E_inputs = int(jnp.round(N_inputs * self.fraction_excitatory_input))
-            N_I_inputs = N_inputs - N_E_inputs
+            N_E_inputs = int(jnp.round(self.N_inputs * self.fraction_excitatory_input))
+            N_I_inputs = self.N_inputs - N_E_inputs
             input_neuron_types = jr.permutation(
                 subkey,
                 jnp.concatenate(
@@ -206,6 +188,7 @@ class AbstractLIFNetwork(NeuronModelABC):
                 ),
             )
 
+        # Define excitatory mask and synaptic time constants for all connections
         self.excitatory_mask = jnp.concatenate(
             [neuron_types, input_neuron_types], dtype=bool
         )
@@ -218,7 +201,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         key, subkey = jr.split(key)
         self.synaptic_delay_matrix = jr.uniform(
             subkey,
-            shape=(N_neurons, N_neurons),
+            shape=(self.N_neurons, self.N_neurons),
             minval=0.0,
             maxval=2 * self.mean_synaptic_delay,
             dtype=default_float,
@@ -228,14 +211,18 @@ class AbstractLIFNetwork(NeuronModelABC):
         self.buffer_size = int(
             jnp.ceil(jnp.max(self.synaptic_delay_matrix) / self.dt) + 1
         )
-        self.weight_init_key = key
+
+        # Store key to be used for weight initialization
+        # weights are initialised in the initial property as weights are part of the state
+        # but we need to set the key to ensure consistent key handling
+        self.key = key
 
     @property
     def initial(self):
         """Return initial network state as LIFState."""
 
         # Initialize weights
-        key, subkey = jr.split(self.weight_init_key)
+        key, subkey = jr.split(self.key)
         if self.initial_weight_matrix is not None:
             if self.initial_weight_matrix.shape != (
                 self.N_neurons,
@@ -252,6 +239,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         V_init = (
             jnp.zeros((self.N_neurons,), dtype=default_float) + self.resting_potential
         )
+        perturbations_init = self.noise_model.initial
         conductance_init = jnp.zeros(
             (self.N_neurons, self.N_neurons + self.N_inputs), dtype=default_float
         )
@@ -274,6 +262,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=spikes_init,
             W=weights,
             G=conductance_init,
+            perturbations=perturbations_init,
             firing_rate=firing_rate,
             time_since_last_spike=time_since_last_spike,
             spike_buffer=spike_buffer,
@@ -287,17 +276,15 @@ class AbstractLIFNetwork(NeuronModelABC):
     def init_features(self):
         raise NotImplementedError
 
-    def drift(self, t, state: LIFState, args) -> LIFState:
+    def drift(self, t, state: LIFState, args, RPE: Array = jnp.zeros(1)) -> LIFState:
         """Compute deterministic time derivatives for LIF state.
 
         Args:
             t: time (unused for autonomous dynamics)
             state: LIFState current state
-            args: dict containing keys:
-                - inhibitory_noise-> (N_neurons,)
-                - excitatory_noise-> (N_neurons,)
-                - learning_rate(t, state, args) -> scalar
-                - RPE(t, state, args) -> scalar
+            args: dict of optional args
+            RPE: Reward prediction error signal that can be used for learning rules
+
         Returns:
             LIFState of derivatives (dV, dS, dW, dG)
         """
@@ -305,8 +292,11 @@ class AbstractLIFNetwork(NeuronModelABC):
         # Compute derivatives of the state variables
         dV = self.compute_voltage_update(t, state, args)
         dG = -1 / self.synaptic_time_constants[None, :] * state.G
-        dW = self.compute_weight_updates(t, state, args)
+        dW = self.compute_weight_updates(t, state, args, RPE)
         dS = jnp.zeros_like(state.S)  # Spikes are handled separately, so no change here
+
+        # Perturbations drift is defined by the noise model
+        d_perturbations = self.noise_model.drift(t, state.perturbations, args)
 
         # Time since last spike increases at rate 1
         d_time_since_last_spike = jnp.ones_like(state.time_since_last_spike)
@@ -342,6 +332,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=dS,
             W=dW,
             G=dG,
+            perturbations=d_perturbations,
             firing_rate=d_firing_rate,
             mean_E_conductance=d_mean_E_conductance,
             var_E_conductance=d_var_E_conductance,
@@ -373,22 +364,37 @@ class AbstractLIFNetwork(NeuronModelABC):
         Returns:
             MixedPyTreeOperator defining how noise enters the system
         """
-        tree = jax.tree.map(
-            lambda arr: DefaultIfNone(
-                default=jnp.zeros_like(arr),
-                else_do=ElementWiseMul(jnp.zeros_like(arr, dtype=default_float)),
+
+        # Start with zero/no-op diffusion everywhere and then fill in the stochastic parts.
+        diffusion = jax.tree.map(
+            lambda leaf: DefaultIfNone(
+                default=jnp.zeros_like(leaf),
+                else_do=ElementWiseMul(jnp.zeros_like(leaf, dtype=default_float)),
             ),
             state,
         )
 
-        # Replace only the features subtree (must match structure of state.features)
-        tree = eqx.tree_at(
+        # Possible features must define their diffusion
+        diffusion = eqx.tree_at(
             lambda s: s.features,
-            tree,
+            diffusion,
             self.compute_feature_diffusion(t, state, args),
         )
 
-        return MixedPyTreeOperator(tree)
+        # Diffusion of the noise process is computed in the noise model,
+        # but takes a state-dependent noise_std as input
+        noise_std = self.compute_desired_noise_std(t, state, args)
+        diffusion = eqx.tree_at(
+            lambda s: s.perturbations,
+            diffusion,
+            self.noise_model.diffusion(
+                t, state.perturbations, args, noise_std=noise_std
+            ),
+        )
+
+        # Since diffusion can consist of a mix of matrices and Lineax operators,
+        # we return it as a MixedPyTreeOperator which can handle this case.
+        return MixedPyTreeOperator(diffusion)
 
     @abstractmethod
     def compute_feature_diffusion(self, t, state: LIFState, args):
@@ -402,6 +408,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=None,
             W=None,
             G=None,
+            perturbations=self.noise_model.noise_shape,
             firing_rate=None,
             mean_E_conductance=None,
             var_E_conductance=None,
@@ -426,9 +433,13 @@ class AbstractLIFNetwork(NeuronModelABC):
             ),
         )
 
-    def update(self, t, x: LIFState, args) -> LIFState:
+    # TODO: input spikes is now required for the update function, but this means this class can not be simulated standalone without a wrapper that provides the input
+    # consider refactoring to make input_spikes optional or provide a default value (e.g. zeros) to allow standalone simulation
+    def update(self, t, x: LIFState, args, input_spikes: Array) -> LIFState:
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
-        state = self.spike_and_reset(t, x, args)
+        perturbations = self.noise_model.update(t, x.perturbations, args)
+        state = eqx.tree_at(lambda s: s.perturbations, x, perturbations)
+        state = self.spike_and_reset(t, state, args, input_spikes)
         state = self.clip_weights(t, state, args)
         state = self.force_balanced_weights(t, state, args)
         return state
@@ -468,7 +479,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         synaptic_E_conductances = jnp.sum(
             weighted_conductances * self.excitatory_mask[None, :], axis=1
         )
-        E_noise = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+        E_noise = state.perturbations
         total_E_conductances = (
             synaptic_E_conductances + E_noise
         )  # Add external excitatory noise to total excitatory conductance
@@ -489,7 +500,7 @@ class AbstractLIFNetwork(NeuronModelABC):
         return dV
 
     @abstractmethod
-    def compute_weight_updates(self, t, state: LIFState, args) -> Array:
+    def compute_weight_updates(self, t, state: LIFState, args, RPE: Array) -> Array:
         raise NotImplementedError
 
     def clip_weights(self, t, state, args):
@@ -533,7 +544,9 @@ class AbstractLIFNetwork(NeuronModelABC):
         delayed_spikes = jax.vmap(get_neuron_inputs)(jnp.arange(self.N_neurons))
         return delayed_spikes
 
-    def spike_and_reset(self, t, state: LIFState, args) -> LIFState:
+    def spike_and_reset(
+        self, t, state: LIFState, args, input_spikes: Array
+    ) -> LIFState:
         """Handle spiking and resetting of neurons.
 
         Neurons that cross the firing threshold emit a spike and have their membrane potential reset.
@@ -546,7 +559,8 @@ class AbstractLIFNetwork(NeuronModelABC):
             t: Current time
             state: Current LIFState
             args: Dictionary of additional arguments, must contain:
-                - get_input_spikes(t, state, args) -> Array of shape (N_neurons, N_inputs) representing current input spikes
+                - input_spike_fn(t, state, args) -> Array of shape (N_neurons, N_inputs) representing current input spikes
+            input_spikes: Array of shape (N_neurons, N_inputs) representing input spikes
 
         Returns:
             Updated LIFState after spiking and updates
@@ -577,15 +591,11 @@ class AbstractLIFNetwork(NeuronModelABC):
         # Update conductances from recurrent spikes
         G_new = G.at[:, : self.N_neurons].add(delayed_spikes * self.synaptic_increment)
 
-        # Update conductances from input spikes
-        input_spikes = args["get_input_spikes"](t, state, args)
-
-        # Check input_spikes shape, to catch when using old shape assumptions
+        # Update conductances based on current input spikes
         if input_spikes.shape != (self.N_neurons, self.N_inputs):
             raise ValueError(
                 f"Input spikes shape {input_spikes.shape} does not match expected shape {(self.N_neurons, self.N_inputs)}"
             )
-
         G_new = G_new.at[:, self.N_neurons :].add(
             input_spikes * self.synaptic_increment
         )
@@ -605,6 +615,7 @@ class AbstractLIFNetwork(NeuronModelABC):
             S=recurrent_spikes,
             W=W,
             G=G_new,
+            perturbations=state.perturbations,
             firing_rate=new_firing_rate,
             mean_E_conductance=state.mean_E_conductance,
             var_E_conductance=state.var_E_conductance,
@@ -788,3 +799,23 @@ class AbstractLIFNetwork(NeuronModelABC):
 
         weights = jnp.concatenate([rec_weights, input_weights], axis=1)
         return weights
+
+    def compute_desired_noise_std(self, t, state: LIFState, args):
+        """For each neuron, compute the desired scale of the noise to be added.
+
+        If the noise_scale_hyperparam is zero, no noise is added. Otherwise, the desired noise std is given as:
+            desired_noise_std = min_noise_std + noise_scale_hyperparam * sqrt(var_E_conductance)
+
+        Returns:
+            Array: Noise scale for each neuron.
+        """
+        synaptic_variance = state.var_E_conductance
+
+        use_noise = args.get("use_noise", jnp.array([True] * self.N_neurons))
+
+        # Compute desired noise std using the computed variance and a hyperparameter, then clip to min value
+        noise_scale_hyperparam = args.get("noise_scale_hyperparam", 0.0)
+        desired_noise_std = jnp.sqrt(synaptic_variance) * noise_scale_hyperparam
+        desired_noise_std = self.min_noise_std + desired_noise_std
+        desired_noise_std = jnp.where(use_noise, desired_noise_std, 0.0)
+        return desired_noise_std

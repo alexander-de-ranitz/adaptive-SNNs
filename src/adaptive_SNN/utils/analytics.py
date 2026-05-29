@@ -1,6 +1,6 @@
 from jax import numpy as jnp
 
-from adaptive_SNN.models.networks.default_LIF import LIFNetwork
+from adaptive_SNN.models.networks import LIFNetwork
 
 
 def compute_required_input_weight(

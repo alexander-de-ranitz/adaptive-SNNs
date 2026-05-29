@@ -26,14 +26,9 @@ class InputTrackingEnvironment(AbstractEnvironment):
     def noise_shape(self):
         return None
 
-    def drift(self, t, x, args):
-        if args is None or "get_env_input" not in args:
-            raise ValueError(
-                "EnvironmentModel requires 'env_input' in args for drift computation."
-            )
-        return self.rate * (
-            args["get_env_input"](t, x, args) - x
-        )  # Simple dynamics towards input
+    def drift(self, t, x, args, env_input=None):
+        input = jnp.where(env_input is not None, env_input, jnp.zeros_like(x))
+        return self.rate * (input - x)  # Simple dynamics towards input
 
     def diffusion(self, t, x, args):
         return DefaultIfNone(
@@ -48,5 +43,5 @@ class InputTrackingEnvironment(AbstractEnvironment):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args):
+    def update(self, t, x, args, env_input=None):
         return x

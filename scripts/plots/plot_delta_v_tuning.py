@@ -2,13 +2,14 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import jax
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, LogNorm
 from matplotlib.ticker import LogFormatterMathtext, LogLocator
 from matplotlib.transforms import ScaledTranslation
 
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
+from adaptive_SNN.models.networks import GatedLIFNetwork
 
 
 @dataclass
@@ -18,27 +19,28 @@ class RunFile:
     method: str
 
 
-DATA_DIR = Path("results/delta_v_tuning_20260418_003224/results")
+DATA_DIR = Path("results/delta_v_tuning_20260528_114946/results")
 OUTPUT_PATH = Path("figures/delta_v_tuning")
 
 
 def parse_run_file(file: Path) -> RunFile:
     parts = file.stem.split("_")
     dv = float(parts[1])
-    method = parts[-1]
-    assert method in {"gated", "default"}, method
+    method = "gated" if dv != 0.0 else "default"
     return RunFile(path=file, dv=dv, method=method)
 
 
 def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     with np.load(file, allow_pickle=True) as data:
-        agent_state = data["sol"].item().ys.agent_state
-    eligibility = np.asarray(
-        agent_state.noisy_network.network_state.features.eligibility[:, 1, -1]
-    ).squeeze()
-    reward_noise = np.asarray(agent_state.reward_noise).squeeze()
-    rpe = np.asarray(agent_state.RPE).squeeze()
-    return eligibility, reward_noise, rpe
+        reward, reward_noise, eligibility = (
+            data["sol"].item().ys
+        )  # Unpack the saved tuple
+        eligibility = np.asarray(jax.device_get(eligibility))[
+            :, 0, -1
+        ].squeeze()  # Remove extra dimensions if present
+        reward_noise = np.asarray(jax.device_get(reward_noise)).squeeze()
+        reward = np.asarray(jax.device_get(reward)).squeeze()
+        return eligibility, reward_noise, reward
 
 
 def get_grouped_files() -> list[tuple[float, str, list[Path]]]:
@@ -61,47 +63,26 @@ def get_grouped_files() -> list[tuple[float, str, list[Path]]]:
 
 
 def compute_summary_stats(files: list[Path]) -> dict[str, float]:
-    all_dW_task = []
-    all_dW_noise = []
-    print(f"Computing stats for {len(files)} files...")
-    N_points = None
+    alignments = []
+    snrs = []
     for file in files:
         eligibility, reward_noise, rpe = load_run_arrays(file)
-        N_points = eligibility.size if N_points is None else N_points
-        assert eligibility.size == N_points, (
-            f"Expected {N_points} points, got {eligibility.size} in file {file}"
-        )
         dW_task = (eligibility * rpe).ravel()
         dW_noise = (eligibility * reward_noise).ravel()
-        all_dW_task.append(dW_task)
-        all_dW_noise.append(dW_noise)
-    print("N points per file:", N_points)
-    all_dW_task = np.vstack(all_dW_task)
-    all_dW_noise = np.vstack(all_dW_noise)
 
-    # TODO: hacky way to simulate having fewer, longer runs instead of many short runs
-    # this produces more stable estimates. Instead, we should just run longer simulations
-    N = 6  # amount of artificial "runs" to generate
-    segments_task = [
-        all_dW_task[i * N : (i + 1) * N, :] for i in range(all_dW_task.shape[0] // N)
-    ]
-    segments_noise = [
-        all_dW_noise[i * N : (i + 1) * N, :] for i in range(all_dW_noise.shape[0] // N)
-    ]
-    all_dW_task = np.hstack(segments_task)
-    all_dW_noise = np.hstack(segments_noise)
+        alignment = np.sum(dW_task) / np.sum(np.abs(dW_task))
+        snr = np.sum(dW_task) / np.sum(np.abs(dW_noise))
 
-    print(
-        f"all_dw shape: {all_dW_task.shape}, all_dW_noise shape: {all_dW_noise.shape}"
-    )
-    alignment = np.sum(all_dW_task, axis=1) / np.sum(np.abs(all_dW_task), axis=1)
-    snr = np.sum(all_dW_task, axis=1) / np.sum(np.abs(all_dW_noise), axis=1)
-    print(snr.shape, alignment.shape)
+        alignments.append(alignment)
+        snrs.append(snr)
+
+    alignments = np.array(alignments)
+    snrs = np.array(snrs)
     return {
-        "alignment": np.mean(alignment),
-        "SNR": np.mean(snr),
-        "alignment_std": np.std(alignment),
-        "SNR_std": np.std(snr),
+        "alignment": float(np.mean(alignments)),
+        "SNR": float(np.mean(snrs)),
+        "alignment_std": float(np.std(alignments)),
+        "SNR_std": float(np.std(snrs)),
     }
 
 
@@ -134,6 +115,7 @@ def plot_figure():
     )
 
     for i, (dv, method, files) in enumerate(groups):
+        print(f"Processing dv={dv}, method={method}, {len(files)} files")
         stats = compute_summary_stats(files)
         if method == "gated":
             color = dv_cmap(dv_norm(dv))

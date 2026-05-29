@@ -6,15 +6,9 @@ import jax.random as jr
 from diffrax import Solution
 from jaxtyping import Array, PyTree
 
-from adaptive_SNN.models import (
-    LIFNetwork,
-    LIFState,
-    NeuralNoiseOUP,
-    NoisyNetwork,
-    NoisyNetworkState,
-    PoissonJumpProcess,
-)
-from adaptive_SNN.models.networks.base import NeuronModelABC
+from adaptive_SNN.models.environments import AbstractEnvironment
+from adaptive_SNN.models.networks import AbstractNeuronModel, LIFNetwork, LIFState
+from adaptive_SNN.models.noise import OUP, PoissonJumpProcess
 from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
 
 # ============================================================================
@@ -30,7 +24,9 @@ def make_LIF_model(
     dt=0.1e-3,
     input_neuron_types=None,
     fully_connected_input=True,
+    min_noise_std=0.0,
     input_weight=1.0,
+    noise_model=None,
     key=jr.PRNGKey(0),
 ):
     """Create a LIFNetwork with configurable parameters."""
@@ -40,6 +36,8 @@ def make_LIF_model(
         dt=dt,
         fully_connected_input=fully_connected_input,
         initial_input_weight=input_weight,
+        noise_model=noise_model,
+        min_noise_std=min_noise_std,
         key=key,
     )
 
@@ -64,7 +62,7 @@ def make_LIF_model(
 
 def make_OUP_model(dim=3, tau=1.0, noise_std=0.3, mean=0.0):
     """Create an Ornstein-Uhlenbeck Process model with configurable parameters."""
-    return NeuralNoiseOUP(tau=tau, noise_std=noise_std, mean=mean, dim=dim)
+    return OUP(tau=tau, noise_std=noise_std, mean=mean, dim=dim)
 
 
 def make_poisson_jump_model(
@@ -89,10 +87,9 @@ def make_poisson_jump_model(
 def make_Noisy_LIF_model(
     N_neurons=10, N_inputs=3, noise_std=0.0, tau=1.0, dt=0.1e-3, key=jr.PRNGKey(0)
 ):
-    """Create a NoisyNetwork with LIF neurons and OU noise processes."""
-    network = make_LIF_model(N_neurons, N_inputs, dt=dt, key=key)
-    noise_model = NeuralNoiseOUP(tau=tau, noise_std=noise_std, dim=N_neurons)
-    return NoisyNetwork(neuron_model=network, noise_model=noise_model)
+    """Create a noisy LIFNetwork with OU noise processes."""
+    noise_model = OUP(tau=tau, noise_std=noise_std, dim=N_neurons)
+    return make_LIF_model(N_neurons, N_inputs, dt=dt, noise_model=noise_model, key=key)
 
 
 # ============================================================================
@@ -122,6 +119,11 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
         S=jnp.zeros((N_neurons,)),
         W=jnp.zeros((N_neurons, N_neurons + N_inputs)),
         G=jnp.zeros((N_neurons, N_neurons + N_inputs)),
+        perturbations=(
+            model.noise_model.initial
+            if hasattr(model, "noise_model") and model.noise_model is not None
+            else jnp.zeros((N_neurons,))
+        ),
         firing_rate=jnp.zeros((N_neurons,)),
         mean_E_conductance=jnp.zeros((N_neurons,)),
         var_E_conductance=jnp.zeros((N_neurons,)),
@@ -138,12 +140,12 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
     return state
 
 
-def make_noisy_state(network_state: LIFState, noise_state=None) -> NoisyNetworkState:
-    """Create a NoisyNetworkState from a LIFState and optional noise state."""
+def make_noisy_state(network_state: LIFState, perturbations=None) -> LIFState:
+    """Create a LIFState with an explicit perturbation state."""
     N_neurons = network_state.V.shape[0]
-    if noise_state is None:
-        noise_state = jnp.zeros((N_neurons,))
-    return NoisyNetworkState(network_state, noise_state)
+    if perturbations is None:
+        perturbations = jnp.zeros((N_neurons,))
+    return eqx.tree_at(lambda s: s.perturbations, network_state, perturbations)
 
 
 # ============================================================================
@@ -160,9 +162,7 @@ def make_default_args(N_neurons, N_inputs, **overrides):
         **overrides: Dict of arg names to override, e.g., RPE=1.5
     """
     args = {
-        "excitatory_noise": jnp.zeros((N_neurons,)),
-        "RPE": jnp.array([0.0]),
-        "get_input_spikes": lambda t, x, a: jnp.zeros((N_neurons, N_inputs)),
+        "input_spike_fn": lambda t, x, a: jnp.zeros((N_neurons, N_inputs)),
         "get_learning_rate": lambda t, x, a: jnp.array([0.0]),
         "get_desired_balance": lambda t, x, a: 0.0,
         "noise_scale_hyperparam": 0.0,
@@ -192,7 +192,7 @@ def allclose_pytree(x: PyTree, y: PyTree, atol=1e-6):
     return jax.tree.all(jax.tree.map(lambda a, b: jnp.allclose(a, b, atol=atol), x, y))
 
 
-class DeterministicOUP(NeuralNoiseOUP):
+class DeterministicOUP(OUP):
     """This class is identical to OUP, except it uses a VirtualBrownianTree for the noise terms.
     This makes the noise deterministic given the same key, which is useful for testing."""
 
@@ -211,6 +211,9 @@ class DeterministicOUP(NeuralNoiseOUP):
         self.t0 = t0
         self.t1 = t1
 
+    def pre_step_update(self, t, x, args):
+        return x
+
     def terms(self, key):
         process_noise = dfx.VirtualBrownianTree(
             self.t0,
@@ -225,21 +228,21 @@ class DeterministicOUP(NeuralNoiseOUP):
         )
 
 
-class DeterministicNoisyNeuronModel(NoisyNetwork):
-    """This class is identical to NoisyNeuronModel, except it uses a VirtualBrownianTree for the noise terms.
-    This makes the noise deterministic given the same key, which is useful for testing."""
+class DeterministicLIFNetwork(LIFNetwork):
+    """Deterministic LIF network for tests, using a VirtualBrownianTree for noise."""
 
     t0: float
     t1: float
 
     def __init__(
         self,
-        neuron_model,
+        *args,
         noise_model,
         t0: float = 0.0,
         t1: float = 1.0,
+        **kwargs,
     ):
-        super().__init__(neuron_model, noise_model)
+        super().__init__(*args, noise_model=noise_model, **kwargs)
         self.t0 = t0
         self.t1 = t1
 
@@ -257,7 +260,7 @@ class DeterministicNoisyNeuronModel(NoisyNetwork):
         )
 
 
-class DummySpikingNetwork(NeuronModelABC):
+class DummySpikingNetwork(AbstractNeuronModel):
     """A dummy network model that outputs deterministic spikes at a defined rate."""
 
     N_neurons: int
@@ -288,7 +291,7 @@ class DummySpikingNetwork(NeuronModelABC):
     def init_features(self):
         pass
 
-    def drift(self, t, x, args):
+    def drift(self, t, x, args, RPE=None):
         return jax.tree.map(
             lambda arr: jnp.zeros_like(arr, dtype=arr.dtype),
             x,
@@ -310,7 +313,41 @@ class DummySpikingNetwork(NeuronModelABC):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args):
+    def update(self, t, x, args, input_spikes):
         # Generate spikes based on output rates
         spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
         return eqx.tree_at(lambda s: s.S, x, spikes)
+
+
+class DummyEnvironment(AbstractEnvironment):
+    """A dummy environment that outputs deterministic observations and rewards."""
+
+    @property
+    def initial(self):
+        return jnp.arange(3).astype(default_float)  # example state
+
+    def pre_step_update(self, t, x, args):
+        return x
+
+    def drift(self, t, x, args, env_input=None):
+        return -x + jnp.arange(2, x.shape[0] + 2) * 0.1  # arbitrary drift
+
+    def diffusion(self, t, x, args):
+        return (
+            jnp.eye(x.shape[0]) * jnp.arange(1, x.shape[0] + 1) * 0.1
+        )  # small independent noise
+
+    def update(self, t, x, args, env_input=None):
+        return x
+
+    @property
+    def noise_shape(self):
+        return jax.ShapeDtypeStruct(shape=self.initial.shape, dtype=default_float)
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )

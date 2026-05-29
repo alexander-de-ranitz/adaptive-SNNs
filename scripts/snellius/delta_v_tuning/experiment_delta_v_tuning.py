@@ -11,15 +11,12 @@ import jax.numpy as jnp
 import jax.random as jr
 from diffrax import SaveAt
 
-from adaptive_SNN.models.networks.coupled import (
-    CoupledNoiseEligibilityLIFNetwork,
-    CoupledNoiseGatedLIFNetwork,
-)
-from adaptive_SNN.simulation_configs.single_synapse_learning import (
-    create_default_config_single_synapse_task,
+from adaptive_SNN.models import SystemState
+from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
+from adaptive_SNN.simulation_configs.single_synapse_config import (
+    create_single_synapse_learning_config,
 )
 from adaptive_SNN.utils.runner import run_simulation
-from adaptive_SNN.utils.save_helper import save_part_of_state
 
 
 def main():
@@ -37,36 +34,37 @@ def main():
 
     args = parser.parse_args()
 
-    cfg = create_default_config_single_synapse_task(
-        RPE_noise_rate=1.0,
+    if args.delta_V == 0.0:
+        model_cls = EligibilityLIFNetwork
+    else:
+        model_cls = GatedLIFNetwork
+
+    cfg = create_single_synapse_learning_config(
+        network_cls=model_cls,
+        reward_noise_jump_rate=1.0,
         key=jr.PRNGKey(args.key_seed),
     )
 
+    def save_fn(t, x: SystemState, args):
+        reward = x.environment_state.reward.astype(jnp.float32)
+        reward_noise = x.environment_state.reward_noise.astype(jnp.float32)
+        eligibility = x.agent_state.network_state.features.eligibility.astype(
+            jnp.float32
+        )
+        return (reward, reward_noise, eligibility)
+
+    cfg.t1 = 2500
     cfg.save_at = SaveAt(
-        ts=jnp.linspace(cfg.t0, cfg.t1, 50000),
-        fn=lambda t, x, args: save_part_of_state(
-            x,
-            RPE=True,
-            reward_noise=True,
-            eligibility=True,
-        ),
+        ts=jnp.linspace(cfg.t0, cfg.t1, int(1e3 * cfg.t1)),
+        fn=save_fn,
     )
 
-    cfg.t1 = 300
-    cfg.args.update({"delta_V": args.delta_V})
-    if args.delta_V == 0.0:
-        print("NO GATING")
-        model_cls = CoupledNoiseEligibilityLIFNetwork
-    else:
-        model_cls = CoupledNoiseGatedLIFNetwork
+    cfg.save_file = args.output_file
 
-    file_suffix = "_gated" if model_cls == CoupledNoiseGatedLIFNetwork else "_default"
-    cfg.save_file = (
-        args.output_file if args.output_file is not None else ""
-    ) + file_suffix
-    print(f"Running simulation with model class {model_cls.__name__}...")
-    cfg.base_network_cls = model_cls
+    cfg.args.update({"delta_V": args.delta_V})
+
     sol, model = run_simulation(cfg, save_results=True)
+
     end = time.time()
     print(f"Simulation completed in {end - start:.2f} seconds")
 

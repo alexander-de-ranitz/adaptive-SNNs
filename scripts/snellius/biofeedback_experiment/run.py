@@ -10,9 +10,8 @@ from jax import numpy as jnp
 from jax import random as jr
 
 from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks.eligibility_LIF import EligibilityLIFNetwork
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.simulation_configs.biofeedback_experiment import create_config
+from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
+from adaptive_SNN.simulation_configs.biofeedback_config import create_config
 from adaptive_SNN.utils.runner import run_simulation
 
 
@@ -67,9 +66,9 @@ def main():
     def save(t, x: SystemState, args):
         return (
             x.environment_state.astype(jnp.float32),
-            x.agent_state.noisy_network.network_state.W[0].astype(jnp.float32),
-            jnp.nanmean(x.agent_state.noisy_network.network_state.W),
-            jnp.nanstd(x.agent_state.noisy_network.network_state.W),
+            x.agent_state.network_state.network_state.W[0].astype(jnp.float32),
+            jnp.nanmean(x.agent_state.network_state.network_state.W),
+            jnp.nanstd(x.agent_state.network_state.network_state.W),
         )
 
     cfg.save_at = SaveAt(ts=jnp.linspace(cfg.t0, cfg.t1, 5000), fn=save)

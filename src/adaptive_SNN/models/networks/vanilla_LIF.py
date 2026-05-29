@@ -1,7 +1,8 @@
 import equinox as eqx
 from jax import numpy as jnp
+from jaxtyping import Array
 
-from adaptive_SNN.models.networks.base import AbstractLIFNetwork, LIFState
+from adaptive_SNN.models.networks import AbstractLIFNetwork, LIFState
 
 
 class NoFeatures(eqx.Module):
@@ -18,13 +19,13 @@ class LIFNetwork(AbstractLIFNetwork):
     def compute_feature_drift(self, t, state: LIFState, args) -> NoFeatures:
         return NoFeatures()
 
-    def compute_feature_update(self, t, state, args):
+    def compute_feature_update(self, t, state, args) -> NoFeatures:
         return NoFeatures()
 
-    def noise_shape_features(self):
+    def noise_shape_features(self) -> NoFeatures:
         return NoFeatures()
 
-    def compute_weight_updates(self, t, state: LIFState, args):
+    def compute_weight_updates(self, t, state: LIFState, args, RPE: Array) -> Array:
         """Compute synaptic weight changes based on noise-driven plasticity rule.
 
         The weight updates are computed based on the reward prediction error (RPE), synaptic activity, and the noise present in the excitatory conductances.
@@ -48,15 +49,14 @@ class LIFNetwork(AbstractLIFNetwork):
         """
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        RPE = args.get("RPE", jnp.array(0.0))
 
-        noise_std = args.get("noise_std", 0.0)
-        noise_conductance = args.get("excitatory_noise", jnp.zeros((self.N_neurons,)))
+        noise_std = self.compute_desired_noise_std(t, state, args)
+        perturbations = state.perturbations
 
         # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
         # In case the noise std is zero (no noise), avoid division by zero and set relative noise strength to zero
         relative_noise_strength = jnp.where(
-            noise_std != 0.0, noise_conductance / noise_std, 0.0
+            noise_std != 0.0, perturbations / noise_std, 0.0
         )
 
         # Map the relative noise strength to each excitatory synapse
