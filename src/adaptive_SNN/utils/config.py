@@ -38,12 +38,12 @@ class SimulationConfig:
     N_inputs: int = 2
     connection_prob_E: float = 0.0
     connection_prob_I: float = 0.0
-    noise_level: float = 0.0
-    lr: float = 0.0
+    noise_level: float | Array = 0.0
+    lr: float | Array = 0.0
     initial_rec_weight: float = 0.0
     rec_weight_std: float = 0.0
     balance: float = 0.0
-    min_noise_std: float = 0.0
+    min_noise_std: float | Array = 0.0
     fraction_excitatory_recurrent: float = 0.8
     fraction_excitatory_input: float = 0.8
     initial_weight_matrix: Array | None = None
