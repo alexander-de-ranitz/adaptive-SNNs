@@ -2,6 +2,7 @@ from jax import numpy as jnp
 from jaxtyping import Array
 
 from adaptive_SNN.models.networks import AbstractLIFNetwork
+from adaptive_SNN.visualization.utils.adapters import get_LIF_model, get_LIF_state
 
 
 def compute_CV_ISI(spikes: Array, ts: Array) -> Array:
@@ -107,17 +108,15 @@ def compute_charge_ratio(t, state, model) -> Array:
     Returns:
         jnp.ndarray: An array of shape (num_neurons,) containing the ratio of total inhibitory to excitatory charge.
     """
-    if isinstance(model, AbstractLIFNetwork):
-        base_network: AbstractLIFNetwork = model
-        network_state = state
-
-        noise = jnp.zeros(base_network.N_neurons)
+    model = get_LIF_model(model)
+    network_state = get_LIF_state(state)
 
     W = network_state.W
     G = network_state.G
     V = network_state.V
-    exc_mask = base_network.excitatory_mask
-    leak_conductance = base_network.leak_conductance
+    noise = network_state.perturbations
+    exc_mask = model.excitatory_mask
+    leak_conductance = model.leak_conductance
 
     dt = t[1] - t[0]
     W = jnp.where(~jnp.isnan(W), W, 0.0)
@@ -127,16 +126,11 @@ def compute_charge_ratio(t, state, model) -> Array:
     weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1) + noise
 
     total_inhibitory_charge = (
-        jnp.sum(weighed_G_inhibitory * (base_network.reversal_potential_I - V), axis=0)
-        * dt
+        jnp.sum(weighed_G_inhibitory * (model.reversal_potential_I - V), axis=0) * dt
     )
     total_excitatory_charge = (
-        jnp.sum(weighed_G_excitatory * (base_network.reversal_potential_E - V), axis=0)
-        * dt
+        jnp.sum(weighed_G_excitatory * (model.reversal_potential_E - V), axis=0) * dt
     )
-
-    # TODO: this does not account for leak conductance current
-    # Might be easier to use the voltage trace directly to compute total charge?
 
     ratio = jnp.abs(total_inhibitory_charge / (total_excitatory_charge))
     return ratio
