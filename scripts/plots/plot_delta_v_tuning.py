@@ -1,15 +1,19 @@
+import gc
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import jax
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, LogNorm
 from matplotlib.ticker import LogFormatterMathtext, LogLocator
 from matplotlib.transforms import ScaledTranslation
 
 from adaptive_SNN.models.networks import GatedLIFNetwork
+from adaptive_SNN.utils.runner import _load_existing_solution
 
 
 @dataclass
@@ -17,84 +21,103 @@ class RunFile:
     path: Path
     dv: float
     method: str
+    perturbation_size: float | None
 
 
-DATA_DIR = Path("results/delta_v_tuning_20260528_114946/results")
+DATA_DIR = Path("results/delta_v_tuning_20260529_152552/results")
 OUTPUT_PATH = Path("figures/delta_v_tuning")
 
 
 def parse_run_file(file: Path) -> RunFile:
-    parts = file.stem.split("_")
-    dv = float(parts[1])
+    dv = re.search(r"dv_(\d+\.?\d*)_", file.name).group(1)
+    dv = float(dv)
+    noise_match = re.search(r"noise_(\d+\.?\d*)_", file.name)
+    if noise_match is None:
+        noise = float("nan")
+    else:
+        noise = float(noise_match.group(1))
     method = "gated" if dv != 0.0 else "default"
-    return RunFile(path=file, dv=dv, method=method)
+    return RunFile(path=file, dv=dv, method=method, perturbation_size=noise)
 
 
 def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    with np.load(file, allow_pickle=True) as data:
-        reward, reward_noise, eligibility = (
-            data["sol"].item().ys
-        )  # Unpack the saved tuple
-        eligibility = np.asarray(jax.device_get(eligibility))[
-            :, 0, -1
-        ].squeeze()  # Remove extra dimensions if present
-        reward_noise = np.asarray(jax.device_get(reward_noise)).squeeze()
-        reward = np.asarray(jax.device_get(reward)).squeeze()
-        return eligibility, reward_noise, reward
+    sol, _ = _load_existing_solution(file)
+    return sol.ys[0][0, -1], sol.ys[1], sol.ys[2]
 
 
-def get_grouped_files() -> list[tuple[float, str, list[Path]]]:
-    grouped: dict[float, list[RunFile]] = {}
+def compute_file_stats(file: Path) -> dict[str, float]:
+    eligibility, reward_noise, rpe = load_run_arrays(file)
+    dW_task = (eligibility * rpe).ravel()
+    dW_noise = (eligibility * reward_noise).ravel()
+
+    alignment = np.sum(dW_task) / np.sum(np.abs(dW_task))
+    snr = np.sum(dW_task) / np.sum(np.abs(dW_noise))
+
+    result = {
+        "alignment": float(alignment),
+        "SNR": float(snr),
+    }
+    del eligibility, reward_noise, rpe, dW_task, dW_noise
+    jax.clear_caches()
+    gc.collect()
+    return result
+
+
+def build_dataframe() -> pd.DataFrame:
+    rows: list[dict[str, float | str | None]] = []
     for name in os.listdir(DATA_DIR):
         if not name.endswith(".npz"):
             continue
         run = parse_run_file(DATA_DIR / name)
-        if run.dv not in grouped:
-            grouped[run.dv] = []
-        grouped[run.dv].append(run)
+        stats = compute_file_stats(run.path)
+        rows.append(
+            {
+                "filename": run.path.name,
+                "dv": run.dv,
+                "method": run.method,
+                "perturbation_size": run.perturbation_size,
+                "alignment": stats["alignment"],
+                "SNR": stats["SNR"],
+            }
+        )
 
-    result: list[tuple[float, str, list[Path]]] = []
-    for dv in sorted(grouped.keys()):
-        runs = grouped[dv]
-        methods = {run.method for run in runs}
-        assert len(methods) == 1, f"Mixed methods for dv={dv}: {methods}"
-        result.append((dv, runs[0].method, [run.path for run in runs]))
-    return result
-
-
-def compute_summary_stats(files: list[Path]) -> dict[str, float]:
-    alignments = []
-    snrs = []
-    for file in files:
-        eligibility, reward_noise, rpe = load_run_arrays(file)
-        dW_task = (eligibility * rpe).ravel()
-        dW_noise = (eligibility * reward_noise).ravel()
-
-        alignment = np.sum(dW_task) / np.sum(np.abs(dW_task))
-        snr = np.sum(dW_task) / np.sum(np.abs(dW_noise))
-
-        alignments.append(alignment)
-        snrs.append(snr)
-
-    alignments = np.array(alignments)
-    snrs = np.array(snrs)
-    return {
-        "alignment": float(np.mean(alignments)),
-        "SNR": float(np.mean(snrs)),
-        "alignment_std": float(np.std(alignments)),
-        "SNR_std": float(np.std(snrs)),
-    }
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "filename",
+            "dv",
+            "method",
+            "perturbation_size",
+            "alignment",
+            "SNR",
+        ],
+    )
 
 
 def compute_exponent(dv: float) -> float:
     return int(round(-np.log2(dv)))
 
 
-def plot_figure():
-    groups = get_grouped_files()
-    groups.sort(
-        key=lambda x: (x[1] == "default", x[0])
-    )  # Sort by dv, then put gated last
+def plot_figure(
+    df: pd.DataFrame | None = None,
+    save_path: Path = OUTPUT_PATH,
+    show: bool = True,
+):
+    if df is None:
+        df = build_dataframe()
+
+    summary = df.groupby(["dv", "method"], as_index=False).agg(
+        alignment=("alignment", "mean"),
+        SNR=("SNR", "mean"),
+        alignment_std=("alignment", "std"),
+        SNR_std=("SNR", "std"),
+        run_count=("filename", "count"),
+    )
+    summary["sort_key"] = summary["method"].eq("default").astype(int)
+    summary = summary.sort_values(by=["sort_key", "dv"]).drop(columns="sort_key")
+    summary["alignment_std"] = summary["alignment_std"].fillna(0.0)
+    summary["SNR_std"] = summary["SNR_std"].fillna(0.0)
+
     fig = plt.figure(figsize=(8.0, 4.5))
 
     gs = fig.add_gridspec(2, 2)
@@ -102,9 +125,7 @@ def plot_figure():
     ax2 = fig.add_subplot(gs[0, 1])
     ax3 = fig.add_subplot(gs[1, :])
 
-    gated_dvs = np.array(
-        [dv for dv, method, _ in groups if method == "gated"], dtype=float
-    )
+    gated_dvs = summary.loc[summary["method"] == "gated", "dv"].to_numpy(dtype=float)
     dv_min = float(gated_dvs.min())
     dv_max = float(gated_dvs.max())
 
@@ -114,14 +135,14 @@ def plot_figure():
         plt.cm.Greens_r(np.linspace(0.0, 0.75, 256)),
     )
 
-    for i, (dv, method, files) in enumerate(groups):
-        print(f"Processing dv={dv}, method={method}, {len(files)} files")
-        stats = compute_summary_stats(files)
+    for _, row in summary.iterrows():
+        dv = float(row["dv"])
+        method = str(row["method"])
+        stats = row.to_dict()
+        print(f"Processing dv={dv}, method={method}, {int(stats['run_count'])} files")
         if method == "gated":
             color = dv_cmap(dv_norm(dv))
-            label = (
-                rf"$2^{{{-compute_exponent(dv)}}}$" if method == "gated" else "Default"
-            )
+            label = rf"$2^{{{-compute_exponent(dv)}}}$"
 
             # Alignment on first ax
             ax1.bar(label, stats["alignment"], color=color)
@@ -219,10 +240,22 @@ def plot_figure():
             va="top",
             ha="right",
         )
-    plt.show()
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path)
+
+    if show:
+        plt.show()
+    plt.close(fig)
 
 
 if __name__ == "__main__":
-    groups = get_grouped_files()
-    print(f"Loaded {sum(len(files) for _, _, files in groups)} runs")
-    plot_figure()
+    df = build_dataframe()
+    print(f"Loaded {len(df)} runs")
+    for ps, group_df in df.groupby(["perturbation_size"]):
+        print(f"Perturbation size: {ps}, {len(group_df)} runs")
+        plot_figure(
+            df=group_df,
+            save_path=OUTPUT_PATH.parent / f"delta_v_tuning_noise_{ps}.pdf",
+            show=False,
+        )
