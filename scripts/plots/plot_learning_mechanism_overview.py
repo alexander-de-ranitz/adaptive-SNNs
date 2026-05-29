@@ -103,7 +103,8 @@ def main():
             "noise_scale_hyperparam": 1e-6,
             "network_output_fn": lambda t,
             agent_state,
-            args: agent_state.network_state.S[0].reshape((1,)),
+            args,
+            env_state: agent_state.network_state.S[0].reshape((1,)),
             "use_noise": jnp.array([True]),
             "feature_fn": lambda t, x, args: jnp.zeros(1),
         }

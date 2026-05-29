@@ -98,3 +98,6 @@ class PendulumEnvironment(AbstractEnvironment):
 
     def update(self, t, x, args, env_input=None):
         return x
+
+    def reset(self, t, x, args):
+        return self.initial

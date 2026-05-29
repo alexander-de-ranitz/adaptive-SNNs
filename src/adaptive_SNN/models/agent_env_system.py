@@ -47,24 +47,44 @@ class AgentEnvSystem(eqx.Module):
         This is where we compute the reward signal based on the current state of the environment and agent output,
         and store it in the SystemState for use in the drift computation.
         """
-        # Compute agent output based on current agent state
-        agent_output = args["network_output_fn"](t, x.agent_state, args)
-        x_updated = eqx.tree_at(lambda s: s.agent_output, x, agent_output)
 
-        # Compute reward signal based on current environment state and new agent output
-        reward = args["reward_fn"](t, x_updated, args)
+        def _reset(t, x: SystemState, args):
+            new_env_state = self.environment.reset(t, x.environment_state, args)
+            new_agent_state = self.agent.reset(t, x.agent_state, args)
+            return SystemState(
+                agent_state=new_agent_state,
+                environment_state=new_env_state,
+                agent_output=jnp.zeros_like(x.agent_output),
+                reward_signal=jnp.zeros_like(x.reward_signal),
+            )
 
-        # Update agent and environment states
-        agent_state = self.agent.pre_step_update(t, x.agent_state, args, reward)
-        environment_state = self.environment.pre_step_update(
-            t, x.environment_state, args
-        )
+        def _regular_update(t, x: SystemState, args):
+            # Compute agent output based on current agent state
+            agent_output = args["network_output_fn"](
+                t, x.agent_state, args, env_state=x.environment_state
+            )
+            x_updated = eqx.tree_at(lambda s: s.agent_output, x, agent_output)
 
-        return SystemState(
-            agent_state=agent_state,
-            environment_state=environment_state,
-            agent_output=agent_output,
-            reward_signal=reward,
+            # Compute reward signal based on current environment state and new agent output
+            reward = args["reward_fn"](t, x_updated, args)
+
+            # Update agent and environment states
+            agent_state = self.agent.pre_step_update(t, x.agent_state, args, reward)
+            environment_state = self.environment.pre_step_update(
+                t, x.environment_state, args
+            )
+
+            return SystemState(
+                agent_state=agent_state,
+                environment_state=environment_state,
+                agent_output=agent_output,
+                reward_signal=reward,
+            )
+
+        return jax.lax.cond(
+            args.get("episode_end_fn", lambda t, x, args: False)(t, x, args),
+            lambda: _reset(t, x, args),
+            lambda: _regular_update(t, x, args),
         )
 
     def drift(self, t, x: SystemState, args: dict):
@@ -77,7 +97,7 @@ class AgentEnvSystem(eqx.Module):
             t: time
             x: (agent_state, env_state)
             args: dict containing keys required by both agent and environment models, including:
-                - network_output_fn(t, agent_state, args) -> agent output
+                - network_output_fn(t, agent_state, args, env_state) -> agent output
                 - reward_fn(t, env_state, args) -> reward scalar
         Returns:
             (d_agent_state, d_env_state, reward_signal)

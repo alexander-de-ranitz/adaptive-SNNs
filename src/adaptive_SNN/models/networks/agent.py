@@ -131,3 +131,13 @@ class Agent(eqx.Module):
         )  # reward and network_state are not needed for the current reward predictor update, but we include them here for future extensibility
 
         return AgentState(new_network_state, new_reward_predictor_state, x.RPE)
+
+    def reset(self, t, x: AgentState, args):
+        """Reset the agent by resetting the network (keeping the same weights).
+
+        Note that the reward predictor state is not reset, as we want to maintain the learned reward predictions.
+        """
+        new_network_state = self.network.reset(t, x.network_state, args)
+        return AgentState(
+            new_network_state, x.reward_predictor_state, jnp.zeros_like(x.RPE)
+        )
