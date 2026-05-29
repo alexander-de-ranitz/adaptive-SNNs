@@ -61,7 +61,14 @@ class LIFState(eqx.Module):
         S: Spike vector (N_neurons + N_inputs,)
         W: Synaptic weight matrix (N_neurons, N_neurons + N_inputs). NaN indicates no connection
         G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
-        auxiliary_info: AuxiliaryInfo object containing additional state variables
+        perturbations: Noise process state (shape defined by noise model)
+        filtered_spike_trains: Exponentially filtered version of the spike trains of the recurrent neurons (N_neurons,)
+        mean_E_conductance: Exponentially filtered mean of excitatory conductance (N_neurons,)
+        var_E_conductance: Exponentially filtered variance of excitatory conductance (N_neurons,)
+        time_since_last_spike: Time since last spike for each neuron, used for implementing refractory period (N_neurons,)
+        spike_buffer: Buffer to hold past spikes for implementing synaptic delays (buffer_size, N_neurons)
+        buffer_index: Index to keep track of current position in the spike buffer (int)
+        features: Any additional features that the model wants to keep track of, e.g. for learning rules. Can be any PyTree.
     """
 
     V: Array
@@ -69,7 +76,7 @@ class LIFState(eqx.Module):
     W: Array
     G: Array
     perturbations: Array
-    firing_rate: Array
+    filtered_spike_trains: Array
     mean_E_conductance: Array
     var_E_conductance: Array
     time_since_last_spike: Array
@@ -123,7 +130,8 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     ###########################################
     dt: float  = 1e-4  # Timestep size for simulation in seconds, used for delay buffer
     key: Array  = eqx.field(default_factory=lambda: jr.PRNGKey(0))  # Random key initialization
-    EMA_tau: float = 1  # Time constant for exponential moving average of firing rate and mean/var of conductance
+    tau_low_pass: float = 1  # Time constant for low pass-filtering the mean/std of synaptic conductance
+    tau_spike_filter: float = 50e-3 # Time constant for filtering the spike history
     buffer_size: int  = 1 # Size of spike history buffer
     noise_model: AbstractNoiseModel | None = None # Noise model to add noise to the network
     min_noise_std: float = 0.0 # Minimum std of noise to prevent it from going to zero when synaptic variance is low
@@ -263,7 +271,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             W=weights,
             G=conductance_init,
             perturbations=perturbations_init,
-            firing_rate=firing_rate,
+            filtered_spike_trains=firing_rate,
             time_since_last_spike=time_since_last_spike,
             spike_buffer=spike_buffer,
             buffer_index=buffer_index,
@@ -302,7 +310,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         d_time_since_last_spike = jnp.ones_like(state.time_since_last_spike)
 
         # Firing rate is modelled as an exponential moving average of spikes
-        d_firing_rate = -state.firing_rate / self.EMA_tau
+        d_firing_rate = -state.filtered_spike_trains / self.tau_low_pass
 
         # Compute total excitatory synaptic conductance per neuron
         W, G = state.W, state.G
@@ -314,11 +322,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         # Update mean and variance of excitatory conductance as exponential moving averages
         d_mean_E_conductance = (
             -state.mean_E_conductance + total_E_conductance_per_neuron
-        ) / self.EMA_tau
+        ) / self.tau_low_pass
         d_var_E_conductance = (
             -state.var_E_conductance
             + jnp.square(total_E_conductance_per_neuron - state.mean_E_conductance)
-        ) / self.EMA_tau
+        ) / self.tau_low_pass
 
         # Buffer fields have zero derivative (they are updated in spike_and_reset)
         d_spike_buffer = jnp.zeros_like(state.spike_buffer)
@@ -333,7 +341,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             W=dW,
             G=dG,
             perturbations=d_perturbations,
-            firing_rate=d_firing_rate,
+            filtered_spike_trains=d_firing_rate,
             mean_E_conductance=d_mean_E_conductance,
             var_E_conductance=d_var_E_conductance,
             time_since_last_spike=d_time_since_last_spike,
@@ -409,7 +417,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             W=None,
             G=None,
             perturbations=self.noise_model.noise_shape,
-            firing_rate=None,
+            filtered_spike_trains=None,
             mean_E_conductance=None,
             var_E_conductance=None,
             time_since_last_spike=None,
@@ -608,7 +616,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             recurrent_spikes > 0, 0.0, state.time_since_last_spike
         )  # Reset time since last spike to 0 for neurons that spiked
 
-        new_firing_rate = state.firing_rate + recurrent_spikes / self.EMA_tau
+        new_firing_rate = (
+            state.filtered_spike_trains + recurrent_spikes / self.tau_low_pass
+        )
 
         return LIFState(
             V=V_new,
@@ -616,7 +626,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             W=W,
             G=G_new,
             perturbations=state.perturbations,
-            firing_rate=new_firing_rate,
+            filtered_spike_trains=new_firing_rate,
             mean_E_conductance=state.mean_E_conductance,
             var_E_conductance=state.var_E_conductance,
             time_since_last_spike=time_since_last_spike,
@@ -819,3 +829,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         desired_noise_std = self.min_noise_std + desired_noise_std
         desired_noise_std = jnp.where(use_noise, desired_noise_std, 0.0)
         return desired_noise_std
+
+    def reset(self, t, state: LIFState, args):
+        """Reset the network state to the initial state."""
+        current_weights = state.W
+        reset_state = self.initial
+        # We want to keep the same weights but reset all other state variables to their initial values, so we replace the weights in the initial state with the current weights
+        reset_state = eqx.tree_at(lambda s: s.W, reset_state, current_weights)
+        return reset_state
