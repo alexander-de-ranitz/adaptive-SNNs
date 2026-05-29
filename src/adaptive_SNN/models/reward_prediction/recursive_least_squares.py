@@ -14,13 +14,13 @@ from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-class RewardPredictionRLS(RewardPrediction):
+class RLSRewardPrediction(RewardPrediction):
     value: Array  # Scalar reward prediction
     weights: Array  # (n, ) Weight matrix for the RLS predictor
     P: Array  # (n, n) Inverse covariance matrix for the RLS predictor
 
 
-class RLSRewardPrediction(AbstractRewardPredictor):
+class RLSRewardPredictor(AbstractRewardPredictor):
     """Reward prediction model that uses Recursive Least Squares (RLS) to predict the reward"""
 
     lambda_: float = 0.9999  # Forgetting factor for RLS
@@ -29,7 +29,7 @@ class RLSRewardPrediction(AbstractRewardPredictor):
 
     @property
     def initial(self):
-        return RewardPredictionRLS(
+        return RLSRewardPrediction(
             value=jnp.zeros((1,)),
             weights=jnp.zeros((self.input_dim,)),
             P=jnp.eye(self.input_dim) * self.P_init,
@@ -37,9 +37,9 @@ class RLSRewardPrediction(AbstractRewardPredictor):
 
     @property
     def noise_shape(self):
-        return RewardPredictionRLS(value=None, weights=None, P=None)
+        return RLSRewardPrediction(value=None, weights=None, P=None)
 
-    def pre_step_update(self, t, x: RewardPredictionRLS, args, reward, network_state):
+    def pre_step_update(self, t, x: RLSRewardPrediction, args, reward, network_state):
         features = args["feature_fn"](t, network_state, args)
         weights = x.weights
         predicted_reward = weights @ features
@@ -53,19 +53,19 @@ class RLSRewardPrediction(AbstractRewardPredictor):
         # Symmetrize new_P to ensure it remains positive definite, which can help with numerical stability
         new_P = (new_P + new_P.T) / 2
 
-        return RewardPredictionRLS(value=predicted_reward, weights=new_weights, P=new_P)
+        return RLSRewardPrediction(value=predicted_reward, weights=new_weights, P=new_P)
 
     def drift(
-        self, t, x: RewardPredictionRLS, args: dict, reward: Array, network_state: Array
-    ) -> RewardPredictionRLS:
+        self, t, x: RLSRewardPrediction, args: dict, reward: Array, network_state: Array
+    ) -> RLSRewardPrediction:
         """No drift in the reward prediction process."""
-        return RewardPredictionRLS(
+        return RLSRewardPrediction(
             value=jnp.zeros_like(x.value),
             weights=jnp.zeros_like(x.weights),
             P=jnp.zeros_like(x.P),
         )
 
-    def diffusion(self, t, x: RewardPredictionRLS, args: dict):
+    def diffusion(self, t, x: RLSRewardPrediction, args: dict):
         """No diffusion in the reward prediction process."""
         tree = jax.tree.map(
             lambda arr: DefaultIfNone(
@@ -76,5 +76,5 @@ class RLSRewardPrediction(AbstractRewardPredictor):
         )
         return tree
 
-    def update(self, t, x: RewardPredictionRLS, args: dict) -> RewardPredictionRLS:
+    def update(self, t, x: RLSRewardPrediction, args: dict) -> RLSRewardPrediction:
         return x
