@@ -30,6 +30,12 @@ def main():
     parser.add_argument(
         "--output_file", type=str, default=None, help="Output file name"
     )
+    parser.add_argument(
+        "--noise_level",
+        type=float,
+        default=1e-9,
+        help="Min noise std for the synaptic noise",
+    )
     parser.add_argument("--key_seed", type=int, default=0, help="Random key seed")
 
     args = parser.parse_args()
@@ -44,11 +50,12 @@ def main():
         reward_noise_jump_rate=1.0,
         key=jr.PRNGKey(args.key_seed),
     )
+    cfg.min_noise_std = args.noise_level
 
     def save_fn(t, x: SystemState, args):
         reward = x.environment_state.reward.astype(jnp.float32)
         reward_noise = x.environment_state.reward_noise.astype(jnp.float32)
-        eligibility = x.agent_state.network_state.features.eligibility.astype(
+        eligibility = x.agent_state.network_state.features.eligibility[0, -1].astype(
             jnp.float32
         )
         return (reward, reward_noise, eligibility)

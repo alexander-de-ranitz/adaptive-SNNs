@@ -38,42 +38,45 @@ def create_jobs():
     jobs = Jobs()
 
     seed = 1241
-    num_iterations = 7
+    num_iterations = 1
     for i in range(num_iterations):
         seed += 129
         # Loop over delta_V values, including 0.0 for the no-gating condition
         for delta_v in [0.0] + [0.5**k for k in range(5, 14)]:
-            id = f"dv_{delta_v:6f}_" if type(delta_v) is float else "no_gating_"
-            name = id + f"seed_{seed}"
+            for noise_level in [1e-10, 5e-10, 1e-9, 5e-9, 1e-8]:
+                id = f"dv_{delta_v:6f}_" if type(delta_v) is float else "no_gating_"
+                name = id + f"_noise_{noise_level * 1e9:.2f}_nS_" + f"seed_{seed}"
 
-            cmd_args = [
-                "--delta_V",
-                str(delta_v),
-                "--key_seed",
-                str(seed),
-                "--output_file",
-                str(results_dir / name),
-            ]
-
-            # Create a bash script to set PYTHONPATH and run the processing script
-            bash_script = "\n".join(
-                [
-                    "#!/usr/bin/env bash",
-                    "set -euo pipefail",
-                    f'export PYTHONPATH={shlex.quote(str(base_dir))}:"${{PYTHONPATH:-}}"',
-                    f"{shlex.quote(sys.executable)} -m {shlex.quote(module_path)} {' '.join(shlex.quote(arg) for arg in cmd_args)}",
+                cmd_args = [
+                    "--delta_V",
+                    str(delta_v),
+                    "--key_seed",
+                    str(seed),
+                    "--noise_level",
+                    str(noise_level),
+                    "--output_file",
+                    str(results_dir / name),
                 ]
-            )
 
-            jobs.add(
-                name=name,
-                script=bash_script,
-                stdout=str(log_dir / f"job.out.{name}"),
-                stderr=str(log_dir / f"job.err.{name}"),
-                wd=str(base_dir),
-                numCores=1,
-                iteration=1,
-            )
+                # Create a bash script to set PYTHONPATH and run the processing script
+                bash_script = "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        f'export PYTHONPATH={shlex.quote(str(base_dir))}:"${{PYTHONPATH:-}}"',
+                        f"{shlex.quote(sys.executable)} -m {shlex.quote(module_path)} {' '.join(shlex.quote(arg) for arg in cmd_args)}",
+                    ]
+                )
+
+                jobs.add(
+                    name=name,
+                    script=bash_script,
+                    stdout=str(log_dir / f"job.out.{name}"),
+                    stderr=str(log_dir / f"job.err.{name}"),
+                    wd=str(base_dir),
+                    numCores=1,
+                    iteration=1,
+                )
 
     return jobs
 
