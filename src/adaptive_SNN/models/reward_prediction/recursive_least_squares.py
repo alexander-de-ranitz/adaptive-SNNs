@@ -1,3 +1,4 @@
+import diffrax as dfx
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -75,6 +76,14 @@ class RLSRewardPredictor(AbstractRewardPredictor):
             x,
         )
         return tree
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )
 
     def update(self, t, x: RLSRewardPrediction, args: dict) -> RLSRewardPrediction:
         return x
