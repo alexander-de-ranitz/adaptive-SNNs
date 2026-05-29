@@ -6,8 +6,6 @@ import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jr
 from helpers import (
-    DeterministicLIFNetwork,
-    DeterministicOUP,
     DummyEnvironment,
     allclose_pytree,
     get_non_inf_ts_ys,
@@ -17,25 +15,23 @@ from helpers import (
 from adaptive_SNN.models import AgentEnvSystem, SystemState
 from adaptive_SNN.models.networks import LIFNetwork
 from adaptive_SNN.models.networks.agent import Agent
+from adaptive_SNN.models.noise import OUP
 from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
 from adaptive_SNN.solver import solve_ODE
 
 
 def test_solver_timesteps():
-    N_neurons = 4
-    N_inputs = 0
     t0, t1, dt0 = 0.0, 1.00, 0.1
 
-    model = DeterministicOUP(tau=1.0, noise_std=1.0, dim=N_neurons, t0=t0, t1=t1 + dt0)
+    model = OUP(tau=1.0, noise_std=1.0, dim=1)
 
     # Prepare initial state from model
     y0 = model.initial
     solver = dfx.Euler()
-    args = make_default_args(N_neurons, N_inputs)
 
     # Our method
     saveat = dfx.SaveAt(t0=True, t1=True, steps=True)
-    sol_1 = solve_ODE(model, solver, t0, t1, dt0, y0, save_at=saveat, args=args)
+    sol_1 = solve_ODE(model, solver, t0, t1, dt0, y0, save_at=saveat, args={})
     sol_1_ts = sol_1.ts
 
     # Direct diffrax call for comparison
@@ -47,7 +43,7 @@ def test_solver_timesteps():
         t1=t1,
         dt0=dt0,
         y0=y0,
-        args=args,
+        args={},
         saveat=saveat,
         adjoint=dfx.ForwardMode(),
         stepsize_controller=dfx.ConstantStepSize(),
@@ -61,21 +57,18 @@ def test_solver_timesteps():
 
 
 def test_solver_timesteps_precision():
-    N_neurons = 1
-    N_inputs = 0
     t0, t1, dt0 = 10**4, 10**4 + 1e-4, 1e-4
 
-    model = DeterministicOUP(tau=1.0, noise_std=1.0, dim=N_neurons, t0=t0, t1=t1 + dt0)
+    model = OUP(tau=1.0, noise_std=1.0, dim=1)
 
     # Prepare initial state from model
     y0 = model.initial
 
     solver = dfx.Euler()
-    args = make_default_args(N_neurons, N_inputs)
 
     # Our method
     save_at = dfx.SaveAt(subs=dfx.SubSaveAt(steps=True, t0=True, t1=True))
-    sol_1 = solve_ODE(model, solver, t0, t1, dt0, y0, save_at=save_at, args=args)
+    sol_1 = solve_ODE(model, solver, t0, t1, dt0, y0, save_at=save_at, args={})
     sol_1_ts = sol_1.ts
     # Check that time steps are consistent with dt0
     actual_dts = jnp.ediff1d(sol_1_ts)
@@ -91,20 +84,19 @@ def test_solver_output():
     t0, t1, dt0 = 0.0, 0.01, 1e-4
     key = jr.PRNGKey(0)
 
-    network = LIFNetwork(N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key)
-
-    noise_model = DeterministicOUP(
-        tau=network.tau_E, noise_std=1e-9, dim=N_neurons, t0=t0, t1=t1 + dt0
+    noise_model = OUP(tau=LIFNetwork.tau_E, noise_std=1e-9, dim=N_neurons)
+    network = LIFNetwork(
+        N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key, noise_model=noise_model
     )
 
-    network = DeterministicLIFNetwork(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        dt=dt0,
-        key=key,
-        noise_model=noise_model,
-        t0=t0,
-        t1=t1 + dt0,
+    agent = Agent(
+        neuron_model=network, reward_prediction_model=MovingAverageRewardPredictor()
+    )
+
+    model = AgentEnvSystem(
+        agent=agent,
+        environment=DummyEnvironment(),
+        agent_output_shape=(N_neurons,),
     )
 
     agent = Agent(
