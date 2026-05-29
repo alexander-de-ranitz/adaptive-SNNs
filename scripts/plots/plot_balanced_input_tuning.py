@@ -79,7 +79,7 @@ def main():
                     )
 
                 args = {
-                    "get_input_spikes": get_spikes,
+                    "input_spike_fn": get_spikes,
                     "get_desired_balance": lambda t, x, args: jnp.array([0.0]),
                     "noise_scale_hyperparam": noise_level,
                 }

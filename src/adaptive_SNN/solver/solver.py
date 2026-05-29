@@ -17,7 +17,7 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 # note that is important that these are saved outside of the function definition to avoid recompilation on each call
 DEFAULT_ARGS = {
     "get_learning_rate": lambda t, x, args: 0.0,
-    "get_input_spikes": lambda t, x, args: jnp.zeros(
+    "input_spike_fn": lambda t, x, args: jnp.zeros(
         shape=(
             x.W.shape[0],
             x.W.shape[1] - x.W.shape[0],

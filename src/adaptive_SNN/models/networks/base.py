@@ -433,6 +433,8 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             ),
         )
 
+    # TODO: input spikes is now required for the update function, but this means this class can not be simulated standalone without a wrapper that provides the input
+    # consider refactoring to make input_spikes optional or provide a default value (e.g. zeros) to allow standalone simulation
     def update(self, t, x: LIFState, args, input_spikes: Array) -> LIFState:
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         perturbations = self.noise_model.update(t, x.perturbations, args)
@@ -557,7 +559,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             t: Current time
             state: Current LIFState
             args: Dictionary of additional arguments, must contain:
-                - get_input_spikes(t, state, args) -> Array of shape (N_neurons, N_inputs) representing current input spikes
+                - input_spike_fn(t, state, args) -> Array of shape (N_neurons, N_inputs) representing current input spikes
             input_spikes: Array of shape (N_neurons, N_inputs) representing input spikes
 
         Returns:

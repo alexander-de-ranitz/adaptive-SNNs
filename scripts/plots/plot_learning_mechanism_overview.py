@@ -83,7 +83,7 @@ def main():
         solver = dfx.EulerHeun()
         init_state = model.initial
 
-        def get_input_spikes(t, x, args):
+        def input_spike_fn(t, x, args):
             # Return 1 if current time is within spike times, 0 otherwise
             return jnp.where(
                 jnp.any(jnp.isclose(t, spike_times, atol=dt / 2)),
@@ -97,7 +97,7 @@ def main():
             ).reshape((1,))
 
         args = {
-            "get_input_spikes": get_input_spikes,
+            "input_spike_fn": input_spike_fn,
             "get_learning_rate": lambda t, x, args: learning_rate,
             "reward_fn": reward_fn,
             "noise_scale_hyperparam": 1e-6,

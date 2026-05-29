@@ -95,7 +95,7 @@ def run_simulation(
         ),
         "network_output_fn": config.network_output_fn,
         "reward_fn": config.reward_fn,
-        "get_input_spikes": config.input_spike_fn,
+        "input_spike_fn": config.input_spike_fn,
         "get_desired_balance": lambda t, x, args: jnp.array([config.balance]),
         "noise_scale_hyperparam": config.noise_level,
         **config.args,
