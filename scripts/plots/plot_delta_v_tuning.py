@@ -1,10 +1,8 @@
-import gc
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import jax
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -42,11 +40,16 @@ def parse_run_file(file: Path) -> RunFile:
 
 def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     sol, _ = _load_existing_solution(file)
-    return sol.ys[0][0, -1], sol.ys[1], sol.ys[2]
+    return (
+        sol.ys[0].squeeze(),
+        sol.ys[1].squeeze(),
+        sol.ys[2][:, 0, -1].squeeze(),
+    )  # reward, reward_noise, eligibility
 
 
 def compute_file_stats(file: Path) -> dict[str, float]:
-    eligibility, reward_noise, rpe = load_run_arrays(file)
+    reward, reward_noise, eligibility = load_run_arrays(file)
+    rpe = reward + reward_noise
     dW_task = (eligibility * rpe).ravel()
     dW_noise = (eligibility * reward_noise).ravel()
 
@@ -57,9 +60,6 @@ def compute_file_stats(file: Path) -> dict[str, float]:
         "alignment": float(alignment),
         "SNR": float(snr),
     }
-    del eligibility, reward_noise, rpe, dW_task, dW_noise
-    jax.clear_caches()
-    gc.collect()
     return result
 
 
@@ -140,6 +140,8 @@ def plot_figure(
         method = str(row["method"])
         stats = row.to_dict()
         print(f"Processing dv={dv}, method={method}, {int(stats['run_count'])} files")
+        print(f"  Alignment: {stats['alignment']:.4f} ± {stats['alignment_std']:.4f}")
+        print(f"  SNR: {stats['SNR']:.4f} ± {stats['SNR_std']:.4f}")
         if method == "gated":
             color = dv_cmap(dv_norm(dv))
             label = rf"$2^{{{-compute_exponent(dv)}}}$"
@@ -252,10 +254,14 @@ def plot_figure(
 if __name__ == "__main__":
     df = build_dataframe()
     print(f"Loaded {len(df)} runs")
-    for ps, group_df in df.groupby(["perturbation_size"]):
-        print(f"Perturbation size: {ps}, {len(group_df)} runs")
-        plot_figure(
-            df=group_df,
-            save_path=OUTPUT_PATH.parent / f"delta_v_tuning_noise_{ps}.pdf",
-            show=False,
-        )
+    if df["perturbation_size"].unique().size == 1:
+        print("Only one perturbation size found, plotting single figure")
+        plot_figure(df=df, save_path=OUTPUT_PATH, show=True)
+    else:
+        for ps, group_df in df.groupby(["perturbation_size"]):
+            print(f"Perturbation size: {ps}, {len(group_df)} runs")
+            plot_figure(
+                df=group_df,
+                save_path=OUTPUT_PATH.parent / f"delta_v_tuning_noise_{ps}.pdf",
+                show=False,
+            )
