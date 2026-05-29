@@ -250,6 +250,9 @@ class DummySpikingNetwork(AbstractNeuronModel):
         spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
         return eqx.tree_at(lambda s: s.S, x, spikes)
 
+    def reset(self, t, x, args):
+        return x
+
 
 class DummyEnvironment(AbstractEnvironment):
     """A dummy environment that outputs deterministic observations and rewards."""

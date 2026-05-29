@@ -124,7 +124,7 @@ def test_solver_output():
         (1,)
     )  # Dummy reward function that depends on the environment state
     args["network_output_fn"] = (
-        lambda t, x, args: x.network_state.V
+        lambda t, x, args, env_state: x.network_state.V
     )  # Some random function of the network state as output
 
     # Save some random part of the state for comparison
