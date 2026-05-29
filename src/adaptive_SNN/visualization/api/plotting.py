@@ -838,3 +838,30 @@ def plot_weights_over_time(
         plt.close()
     else:
         plt.show()
+
+
+def plot_spike_raster(ts, spikes):
+    neuron_firing_rates = jnp.sum(spikes, axis=0) / (ts[-1] - ts[0])  # in Hz
+    mean_firing_rate = jnp.mean(neuron_firing_rates)
+    print(f"Mean firing rate: {mean_firing_rate:.2f} Hz")
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    # Build spike times per neuron (reverse order to show I neurons at bottom)
+    spike_times_per_neuron = [
+        ts[jnp.nonzero(spikes[:, i])[0]] for i in range(spikes.shape[1])
+    ][::-1]
+    if len(spike_times_per_neuron) < 10:
+        ax.set_yticks(range(len(spike_times_per_neuron)))
+    else:
+        ax.set_yticks([])
+    ax.eventplot(
+        spike_times_per_neuron,
+        colors="black",
+        linelengths=0.8,
+        linewidths=0.4,
+    )
+    ax.set_ylabel("Neuron")
+    ax.set_xlabel("Time (s)")
+    ax.set_xlim(ts[0], ts[-1])
+    ax.set_title("Spike Raster Plot")
+    plt.show()
