@@ -43,7 +43,7 @@ class RLSRewardPredictor(AbstractRewardPredictor):
     def pre_step_update(self, t, x: RLSRewardPrediction, args, reward, network_state):
         features = args["feature_fn"](t, network_state, args)
         weights = x.weights
-        predicted_reward = weights @ features
+        predicted_reward = jnp.atleast_1d(weights @ features)
 
         # Update weights using RLS update rule
         error = reward - predicted_reward
