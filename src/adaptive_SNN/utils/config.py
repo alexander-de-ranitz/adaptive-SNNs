@@ -69,6 +69,7 @@ class SimulationConfig:
     input_types: Array | None = None
     fully_connected_input: bool = True
     initial_input_weight: float = 0.0
+    input_weight_std: float = 0.0
 
     # Other
     key: int | Array = 0

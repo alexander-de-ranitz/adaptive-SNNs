@@ -116,6 +116,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     fraction_excitatory_recurrent: float = 0.8
     fraction_excitatory_input: float = 1.0
     initial_input_weight: float = 1.0  # Mean input weight
+    input_weight_std: float = 0.0 # Standard deviation of initial input weights as fraction of mean weight
     rec_weight_std: float  = 0.0 # Standard deviation of initial recurrent weights as fraction of mean weight
     initial_rec_weight: float  = 1.0 # Mean recurrent weight
     initial_weight_matrix: Array | None = None # Optional initial weight matrix of shape (N_neurons, N_neurons + N_inputs)
@@ -310,7 +311,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         d_time_since_last_spike = jnp.ones_like(state.time_since_last_spike)
 
         # Firing rate is modelled as an exponential moving average of spikes
-        d_firing_rate = -state.filtered_spike_trains / self.tau_low_pass
+        d_firing_rate = -state.filtered_spike_trains / self.tau_spike_filter
 
         # Compute total excitatory synaptic conductance per neuron
         W, G = state.W, state.G
@@ -617,7 +618,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         )  # Reset time since last spike to 0 for neurons that spiked
 
         new_firing_rate = (
-            state.filtered_spike_trains + recurrent_spikes / self.tau_low_pass
+            state.filtered_spike_trains + recurrent_spikes / self.tau_spike_filter
         )
 
         return LIFState(
@@ -803,7 +804,16 @@ class AbstractLIFNetwork(AbstractNeuronModel):
 
         input_weights = jnp.where(
             input_mask,
-            self.initial_input_weight,
+            self.initial_input_weight
+            * jnp.clip(
+                1
+                + self.input_weight_std
+                * jr.normal(
+                    subkey, (self.N_neurons, self.N_inputs), dtype=default_float
+                ),
+                min=0.5,
+                max=1.5,
+            ),
             jnp.nan,
         )
 
