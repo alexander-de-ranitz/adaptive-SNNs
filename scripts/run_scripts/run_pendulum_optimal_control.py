@@ -4,6 +4,7 @@ from jax import random as jr
 from matplotlib import pyplot as plt
 from scipy.linalg import solve_continuous_are
 
+from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import ExternalController, PendulumEnvironment
 from adaptive_SNN.solver import solve_ODE
 
@@ -27,12 +28,21 @@ def main():
     key = jr.PRNGKey(0)
     env = PendulumEnvironment(rate=1.0, key=key)
     optimal_control = compute_optimal_controller(env)
+
+    def instant_reward_fn(t, x: SystemState, args):
+        instantaneous_reward = (
+            -(x.environment_state[0] ** 2)
+            - 0.1 * x.environment_state[1] ** 2
+            - 0.01 * jnp.squeeze(x.agent_output) ** 2
+        )
+        return jnp.atleast_1d(instantaneous_reward)
+
     for i in range(10):
         model = ExternalController(
             PendulumEnvironment(
-                rate=0.5,
+                rate=1.0,
                 key=jr.fold_in(key, i),
-                min_max_angle_initial=(-jnp.pi, jnp.pi),
+                initial_angle_range=(-0.1, 0.1),
             )
         )
         print("Initial state:", model.initial)
