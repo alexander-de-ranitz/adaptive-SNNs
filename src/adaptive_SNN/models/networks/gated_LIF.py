@@ -35,18 +35,16 @@ class GatedLIFNetwork(AbstractLIFNetwork):
             noise_std != 0.0, perturbations / noise_std, 0.0
         )
 
-        # Map the relative noise strength to each excitatory synapse
-        noise_per_synapse = jnp.outer(relative_noise_strength, self.excitatory_mask)
-
         delta_V = args.get("delta_V", self.delta_V)
 
-        synaptic_traces = state.G
+        coeff = (
+            relative_noise_strength
+            / self.synaptic_increment
+            * self.gating_function(state.V, delta_V)
+        )  # (N_neurons,)
         d_eligibility = (
             -state.features.eligibility / self.tau_eligibility
-            + noise_per_synapse
-            * synaptic_traces
-            / self.synaptic_increment
-            * self.gating_function(state.V, delta_V)[:, None]
+            + coeff[:, None] * self.excitatory_mask_float[None, :] * state.G
         )
         return Eligibility(eligibility=d_eligibility)
 
