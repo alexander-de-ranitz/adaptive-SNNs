@@ -88,11 +88,9 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
 
         rates = compute_rates(env_state, N_encoding_inputs=N_inputs)
 
-        # Generate the spikes of the encoding population
+        # Generate the spikes of the encoding population — shape (N_inputs,).
+        # This is broadcast to all neurons in the recurrent population
         encoding_spikes = jr.poisson(current_key, rates * dt)
-
-        # Broadcast to all neurons- each neuron receives the same encoding input (although weights can vary)
-        encoding_spikes = jnp.tile(encoding_spikes[None, :], (N_neurons, 1))
         return encoding_spikes
 
     # Define network output function
