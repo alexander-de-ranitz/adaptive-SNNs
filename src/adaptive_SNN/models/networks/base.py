@@ -591,9 +591,14 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         G_new = G.at[:, : self.N_neurons].add(delayed_spikes * self.synaptic_increment)
 
         # Update conductances based on current input spikes
-        if input_spikes.shape != (self.N_neurons, self.N_inputs):
+        if input_spikes.ndim == 1:
+            if input_spikes.shape[0] != self.N_inputs:
+                raise ValueError(
+                    f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
+                )
+        elif input_spikes.shape != (self.N_neurons, self.N_inputs):
             raise ValueError(
-                f"Input spikes shape {input_spikes.shape} does not match expected shape {(self.N_neurons, self.N_inputs)}"
+                f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
             )
         G_new = G_new.at[:, self.N_neurons :].add(
             input_spikes * self.synaptic_increment
