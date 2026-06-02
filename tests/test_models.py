@@ -104,12 +104,13 @@ def test_recurrent_current():
         model = make_LIF_model(N_neurons=N, N_inputs=0)
         args = make_default_args(N, 0)
 
-        # Override neuron types for test
+        # Override neuron types for test (also update derived masks)
         excitatory_mask = (
             jnp.ones((N,)) if neuron_type == "excitatory" else jnp.zeros((N,))
         )
         excitatory_mask = jnp.array(excitatory_mask, dtype=bool)
         object.__setattr__(model, "excitatory_mask", excitatory_mask)
+        object.__setattr__(model, "inhibitory_mask", ~excitatory_mask)
         object.__setattr__(
             model,
             "synaptic_time_constants",
@@ -205,7 +206,8 @@ def test_OUP_shapes():
     diffusion = model.diffusion(0.0, initial_state, None)
 
     assert drift.shape == (dim,)
-    assert diffusion.shape == (dim, dim)
+    # diffusion is an ElementWiseMul operator (O(N) instead of O(N²) dense matrix)
+    assert diffusion.mv(jnp.ones(dim)).shape == (dim,)
 
 
 def test_OUP_drift():
@@ -225,9 +227,10 @@ def test_OUP_diffusion():
     initial_state = jnp.array([1.0, -1.0, 0.5])
 
     diffusion = model.diffusion(0.0, initial_state, None)
-    expected_diffusion = jnp.eye(dim) * model.noise_std * jnp.sqrt(2.0 / model.tau)
-
-    assert jnp.allclose(diffusion, expected_diffusion)
+    # Verify the operator gives the same result as the old dense diagonal-matrix multiply
+    noise = jnp.array([1.0, 2.0, 3.0])
+    expected = model.noise_std * jnp.sqrt(2.0 / model.tau) * noise
+    assert jnp.allclose(diffusion.mv(noise), expected)
 
 
 def test_OUP_convergence():
@@ -490,9 +493,12 @@ def test_spike_generation():
     N = 5
     model = make_LIF_model(N_neurons=N, N_inputs=0, key=jr.PRNGKey(6))
 
-    # Set synaptic delays to zero for test
+    # Set synaptic delays to zero for test (also update precomputed delay steps)
     object.__setattr__(
         model, "synaptic_delay_matrix", jnp.zeros_like(model.synaptic_delay_matrix)
+    )
+    object.__setattr__(
+        model, "synaptic_delay_steps", jnp.zeros_like(model.synaptic_delay_steps)
     )
 
     V = jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
@@ -533,9 +539,12 @@ def test_spike_generation_with_input():
     N_neurons, N_inputs = 4, 3
     model = make_LIF_model(N_neurons=N_neurons, N_inputs=N_inputs, key=jr.PRNGKey(7))
 
-    # Set synaptic delays to zero for test
+    # Set synaptic delays to zero for test (also update precomputed delay steps)
     object.__setattr__(
         model, "synaptic_delay_matrix", jnp.zeros_like(model.synaptic_delay_matrix)
+    )
+    object.__setattr__(
+        model, "synaptic_delay_steps", jnp.zeros_like(model.synaptic_delay_steps)
     )
 
     V = jnp.array([-70.0, -70.0, -45.0, -60.0]) * 1e-3
