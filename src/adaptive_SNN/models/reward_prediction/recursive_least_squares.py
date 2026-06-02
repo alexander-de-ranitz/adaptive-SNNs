@@ -1,3 +1,4 @@
+import diffrax as dfx
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -23,7 +24,7 @@ class RLSRewardPrediction(RewardPrediction):
 class RLSRewardPredictor(AbstractRewardPredictor):
     """Reward prediction model that uses Recursive Least Squares (RLS) to predict the reward"""
 
-    lambda_: float = 0.9999  # Forgetting factor for RLS
+    lambda_: float = 0.99999  # Forgetting factor for RLS TODO: tune this
     input_dim: int = 1  # Dimension of the input features for reward prediction
     P_init: float = 100.0  # Initial value for the inverse covariance matrix P
 
@@ -42,7 +43,7 @@ class RLSRewardPredictor(AbstractRewardPredictor):
     def pre_step_update(self, t, x: RLSRewardPrediction, args, reward, network_state):
         features = args["feature_fn"](t, network_state, args)
         weights = x.weights
-        predicted_reward = weights @ features
+        predicted_reward = jnp.atleast_1d(weights @ features)
 
         # Update weights using RLS update rule
         error = reward - predicted_reward
@@ -75,6 +76,14 @@ class RLSRewardPredictor(AbstractRewardPredictor):
             x,
         )
         return tree
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )
 
     def update(self, t, x: RLSRewardPrediction, args: dict) -> RLSRewardPrediction:
         return x

@@ -27,7 +27,9 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
 
     key, spike_key = jr.split(key, 2)
 
-    network_output_fn = lambda t, agent_state, args: agent_state.network_state.S
+    network_output_fn = (
+        lambda t, agent_state, args, env_state: agent_state.network_state.S
+    )
 
     def input_spike_fn(t, x, args):
         step_idx = jnp.asarray(jnp.rint((t - t0) / dt), dtype=jnp.int64)

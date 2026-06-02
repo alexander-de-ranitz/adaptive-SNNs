@@ -39,3 +39,7 @@ class AbstractEnvironment(ABC, eqx.Module):
     def pre_step_update(self, t, x, args):
         """Optional function to apply updates to the environment state before computing the drift/diffusion."""
         return x
+
+    def reset(self, t, x, args):
+        """Optional function to reset the environment state, used in episodic settings."""
+        return x

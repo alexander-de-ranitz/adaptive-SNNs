@@ -124,7 +124,7 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
             if hasattr(model, "noise_model") and model.noise_model is not None
             else jnp.zeros((N_neurons,))
         ),
-        firing_rate=jnp.zeros((N_neurons,)),
+        filtered_spike_trains=jnp.zeros((N_neurons,)),
         mean_E_conductance=jnp.zeros((N_neurons,)),
         var_E_conductance=jnp.zeros((N_neurons,)),
         time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
@@ -249,6 +249,9 @@ class DummySpikingNetwork(AbstractNeuronModel):
         # Generate spikes based on output rates
         spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
         return eqx.tree_at(lambda s: s.S, x, spikes)
+
+    def reset(self, t, x, args):
+        return x
 
 
 class DummyEnvironment(AbstractEnvironment):

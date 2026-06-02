@@ -30,7 +30,9 @@ class PendulumEnvironment(AbstractEnvironment):
     dim: int = 2  # State dimension: [angle, angular velocity]
     rate: float = 1.0  # Rate at which the environment responds to input
     g: float = 10.0  # Gravitational constant
-    min_max_angle_initial: tuple = (-0.1, 0.1)  # Range of initial angles (in radians)
+    initial_angle_range: tuple = (-0.1, 0.1)  # Range of initial angles (in radians)
+    max_allowed_angle: float = 0.3 # Maximum allowed angle before episode termination (in radians)
+    max_allowed_angular_velocity: float = 0.5 # Maximum allowed angular velocity before episode termination (in radians/s)
     key: Array = eqx.field(default_factory=lambda: jr.PRNGKey(0)) # Random key for initialization
     Q: Array = eqx.field(default_factory=lambda: jnp.eye(2)) # State cost matrix for LQR
     R: Array = eqx.field(default_factory=lambda: jnp.eye(1)) # Control cost matrix for LQR
@@ -55,8 +57,8 @@ class PendulumEnvironment(AbstractEnvironment):
         angle = jax.random.uniform(
             self.key,
             shape=(),
-            minval=self.min_max_angle_initial[0],
-            maxval=self.min_max_angle_initial[1],
+            minval=self.initial_angle_range[0],
+            maxval=self.initial_angle_range[1],
         )
         return jnp.array([angle, 0.0], dtype=default_float)
 
@@ -98,3 +100,6 @@ class PendulumEnvironment(AbstractEnvironment):
 
     def update(self, t, x, args, env_input=None):
         return x
+
+    def reset(self, t, x, args):
+        return self.initial

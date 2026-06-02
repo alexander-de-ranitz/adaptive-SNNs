@@ -1,3 +1,6 @@
+import jax
+
+jax.config.update("jax_enable_x64", True)
 from pathlib import Path
 
 import diffrax as dfx
@@ -10,9 +13,61 @@ from adaptive_SNN.solver import solve_ODE
 from adaptive_SNN.utils.config import SimulationConfig
 
 
+def _serialize_pytree(tree, downcast_to_float32: bool = True):
+    leaves, treedef = jax.tree.flatten(tree)
+    # Downcast float64 arrays to float32 to save space, if specified
+    leaves = [
+        (
+            lambda arr: arr.astype(np.float32)
+            if arr.dtype.kind == "f" and arr.itemsize > 4 and downcast_to_float32
+            else arr
+        )(np.asarray(jax.device_get(leaf)))
+        for leaf in leaves
+    ]
+
+    # Since our pytrees can contain arrays of different shapes and sizes, we can't stack them into a single array.
+    # instead, we store it as an object array
+    # np tries to be smart and convert it to a regular array but this fails, so we manually create an object array and fill it
+    leaves_array = np.empty(len(leaves), dtype=object)
+    leaves_array[:] = leaves
+    treedef_array = np.empty(1, dtype=object)
+    treedef_array[0] = treedef
+    return leaves_array, treedef_array
+
+
+def _deserialize_pytree(leaves_array: np.ndarray, treedef_array: np.ndarray):
+    leaves = list(leaves_array)
+    treedef = treedef_array.item()
+    return jax.tree.unflatten(treedef, leaves)
+
+
 def _load_existing_solution(save_file: str) -> tuple[dfx.Solution, AgentEnvSystem]:
     data = np.load(save_file, allow_pickle=True)
-    return data["sol"].item(), data["model"].item()
+
+    # Load data and reconstruct the solution object
+    ys = _deserialize_pytree(data["ys"], data["ys_tree_def"])
+    ts = _deserialize_pytree(data["ts"], data["ts_tree_def"])
+    sol = dfx.Solution(
+        ys=ys,
+        ts=ts,
+        t0=ts[0],
+        t1=ts[-1],
+        interpolation=None,
+        stats=None,
+        result=dfx.RESULTS.successful,
+        solver_state=None,
+        controller_state=None,
+        made_jump=False,
+        event_mask=None,
+    )
+
+    # Load the model if it was saved, otherwise return None
+    if "model" in data:
+        model = data["model"].item()
+    else:
+        model = None
+
+    return sol, model
 
 
 def run_simulation(
@@ -20,6 +75,8 @@ def run_simulation(
     save_results: bool = True,
     overwrite: bool = False,
     load_if_exists: bool = True,
+    save_model: bool = False,
+    downcast_to_float32: bool = True,
 ):
     """Run a simulation and optionally reuse or overwrite saved results.
 
@@ -67,6 +124,7 @@ def run_simulation(
         rec_weight_std=config.rec_weight_std,
         mean_synaptic_delay=config.mean_synaptic_delay,
         min_noise_std=config.min_noise_std,
+        input_weight_std=config.input_weight_std,
         key=network_key,
         **config.base_network_kwargs,
     )
@@ -114,6 +172,28 @@ def run_simulation(
     )
 
     if save_results:
-        np.savez(save_file, sol=sol, model=model)
+        ys_values, ys_tree_def = _serialize_pytree(
+            sol.ys, downcast_to_float32=downcast_to_float32
+        )
+        ts_values, ts_tree_def = _serialize_pytree(
+            sol.ts, downcast_to_float32=downcast_to_float32
+        )
+        if save_model:
+            np.savez(
+                save_file,
+                ys=ys_values,
+                ys_tree_def=ys_tree_def,
+                ts=ts_values,
+                ts_tree_def=ts_tree_def,
+                model=model,
+            )
+        else:
+            np.savez(
+                save_file,
+                ys=ys_values,
+                ys_tree_def=ys_tree_def,
+                ts=ts_values,
+                ts_tree_def=ts_tree_def,
+            )
 
     return sol, model

@@ -41,7 +41,7 @@ def create_single_synapse_learning_config(
 
     key, spike_key = jr.split(key, 2)
 
-    network_output_fn = lambda t, agent_state, args: (
+    network_output_fn = lambda t, agent_state, args, env_state: (
         agent_state.network_state.S[0] - agent_state.network_state.S[1]
     ).reshape((1,))
 

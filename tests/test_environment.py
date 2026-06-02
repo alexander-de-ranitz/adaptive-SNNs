@@ -33,7 +33,10 @@ def test_spike_rate_env():
     )
 
     args = {
-        "network_output_fn": lambda t, agent_state, args: agent_state.network_state.S,
+        "network_output_fn": lambda t,
+        agent_state,
+        args,
+        env_state: agent_state.network_state.S,
         "reward_fn": lambda t, environment_state, args: jnp.array([0.0]),
         "input_spike_fn": lambda t, x, args: None,
     }

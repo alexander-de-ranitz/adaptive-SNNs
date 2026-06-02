@@ -69,6 +69,9 @@ class DummyNetwork(AbstractNeuronModel):
     def update(self, t, x, args, input_spikes):
         return DummyNetworkState(value=x.value + args["net_update_add"])
 
+    def reset(self, t, x, args):
+        return x
+
 
 class DummyRewardPredictor(AbstractRewardPredictor):
     initial_value: Array
@@ -161,8 +164,10 @@ def build_dummy_system():
 def test_agent_env_system_pre_step_update_order():
     model = build_dummy_system()
     args = {
-        "network_output_fn": lambda t, agent_state, a: agent_state.network_state.value
-        * 2.0,
+        "network_output_fn": lambda t,
+        agent_state,
+        a,
+        env_state: agent_state.network_state.value * 2.0,
         "reward_fn": lambda t, system_state, a: system_state.environment_state.value
         + system_state.agent_output,
         "net_pre_step_add": jnp.array([0.5]),
@@ -268,8 +273,10 @@ def test_solve_ode_runs_pre_step_and_update():
     model = build_dummy_system()
 
     args = {
-        "network_output_fn": lambda t, agent_state, a: agent_state.network_state.value
-        * 2.0,
+        "network_output_fn": lambda t,
+        agent_state,
+        a,
+        env_state: agent_state.network_state.value * 2.0,
         "reward_fn": lambda t, system_state, a: system_state.environment_state.value
         + system_state.agent_output,
         "net_pre_step_add": jnp.array([0.5]),

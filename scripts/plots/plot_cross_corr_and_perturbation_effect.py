@@ -6,6 +6,7 @@ import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
+import numpy as np
 from diffrax import SaveAt
 
 from adaptive_SNN.models.agent_env_system import SystemState
@@ -172,9 +173,11 @@ def plot_cross_correlation(ax):
 
     # Remove data around spike times to avoid the influence of spiking activity on the correlation analysis
     spike_idx = jnp.where(state.agent_state.network_state.S[:, 0] == 1)[0]
-    V_0 = state.agent_state.network_state.V[:, 0]
-    V_1 = state.agent_state.network_state.V[:, 1]
-    noise = state.agent_state.network_state.perturbations[:, 0]
+
+    # Convert to np arrays for consistency, as loaded data is in np format
+    V_0 = np.asarray(state.agent_state.network_state.V[:, 0])
+    V_1 = np.asarray(state.agent_state.network_state.V[:, 1])
+    noise = np.asarray(state.agent_state.network_state.perturbations[:, 0])
 
     remove_spikes = True
     if remove_spikes:
@@ -185,9 +188,9 @@ def plot_cross_correlation(ax):
                 state.agent_state.network_state.V.shape[0],
                 spike_id + int(WINDOW_BUFFER / config.dt),
             )
-            V_0 = V_0.at[start_idx:end_idx].set(jnp.nan)
-            V_1 = V_1.at[start_idx:end_idx].set(jnp.nan)
-            noise = noise.at[start_idx:end_idx].set(jnp.nan)
+            V_0[start_idx:end_idx] = np.nan
+            V_1[start_idx:end_idx] = np.nan
+            noise[start_idx:end_idx] = np.nan
 
         if jnp.isnan(V_0).all() or jnp.isnan(V_1).all() or jnp.isnan(noise).all():
             print(
