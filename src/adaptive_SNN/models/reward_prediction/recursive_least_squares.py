@@ -45,11 +45,15 @@ class RLSRewardPredictor(AbstractRewardPredictor):
         weights = x.weights
         predicted_reward = jnp.atleast_1d(weights @ features)
 
-        # Update weights using RLS update rule
+        # Sherman-Morrison rank-1 update: compute P@features once (O(N²)),
+        # then form the outer product directly (O(N²)) instead of
+        # outer(gain, features) @ P which is O(N³).
+        Pf = x.P @ features
+        denom = self.lambda_ + features @ Pf
+        gain = Pf / denom
         error = reward - predicted_reward
-        gain = x.P @ features / (self.lambda_ + features.T @ x.P @ features)
         new_weights = weights + gain * error
-        new_P = (x.P - gain[:, None] @ features[None, :] @ x.P) / self.lambda_
+        new_P = (x.P - jnp.outer(gain, Pf)) / self.lambda_
 
         # Symmetrize new_P to ensure it remains positive definite, which can help with numerical stability
         new_P = (new_P + new_P.T) / 2
