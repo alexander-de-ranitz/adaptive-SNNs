@@ -533,24 +533,14 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         Returns:
             Array of shape (N_neurons, N_neurons) with delayed spike values
         """
-        # Cast buffer_index to int32 for indexing operations
         buffer_idx = jnp.round(state.buffer_index).astype(jnp.int32)
-
-        # For each synapse, compute which buffer index to read from
-        # Convert delays from seconds to buffer timesteps
-        delay_steps = jnp.round(self.synaptic_delay_matrix / self.dt).astype(jnp.int32)
-
-        # buffer_index points to most recent, we need to go back by delay amount
-        read_indices = ((buffer_idx - delay_steps) % self.buffer_size).astype(jnp.int32)
-
-        # Gather spikes from buffer for each synapse
-        # Use vmap to vectorize over neurons
-        def get_neuron_inputs(neuron_idx):
-            return state.spike_buffer[
-                read_indices[neuron_idx], jnp.arange(self.N_neurons)
-            ]
-
-        delayed_spikes = jax.vmap(get_neuron_inputs)(jnp.arange(self.N_neurons))
+        read_indices = (
+            (buffer_idx - self.synaptic_delay_steps) % self.buffer_size
+        ).astype(jnp.int32)
+        # read_indices[i, j] is the buffer row for neuron j's spike as seen by neuron i
+        delayed_spikes = state.spike_buffer[
+            read_indices, jnp.arange(self.N_neurons)[None, :]
+        ]
         return delayed_spikes
 
     def spike_and_reset(
