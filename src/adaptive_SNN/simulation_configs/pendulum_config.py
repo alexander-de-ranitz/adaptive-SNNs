@@ -124,7 +124,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
 
     def save(t, x: SystemState, args):
         # return (x.environment_state, x.reward_signal, x.agent_state.reward_predictor_state.value, x.agent_state.network_state.filtered_spike_trains)
-        return x.agent_state.network_state.S.astype(jnp.bool)
+        return x.agent_state.network_state.S.astype(jnp.bool_)
 
     save_at = SaveAt(steps=True, fn=save)
 
@@ -166,7 +166,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
             network_state,
             args: network_state.filtered_spike_trains,
             "episode_end_fn": lambda t, state, args: jnp.any(
-                jnp.abs(state.environment_state[0])
+                jnp.abs(state.environment_state)
                 > jnp.array([env.max_allowed_angle, env.max_allowed_angular_velocity])
             ),
         },
