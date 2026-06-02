@@ -88,11 +88,9 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
 
         rates = compute_rates(env_state, N_encoding_inputs=N_inputs)
 
-        # Generate the spikes of the encoding population
+        # Generate the spikes of the encoding population — shape (N_inputs,).
+        # This is broadcast to all neurons in the recurrent population
         encoding_spikes = jr.poisson(current_key, rates * dt)
-
-        # Broadcast to all neurons- each neuron receives the same encoding input (although weights can vary)
-        encoding_spikes = jnp.tile(encoding_spikes[None, :], (N_neurons, 1))
         return encoding_spikes
 
     # Define network output function
@@ -124,7 +122,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
 
     def save(t, x: SystemState, args):
         # return (x.environment_state, x.reward_signal, x.agent_state.reward_predictor_state.value, x.agent_state.network_state.filtered_spike_trains)
-        return x.agent_state.network_state.S.astype(jnp.bool)
+        return x.agent_state.network_state.S.astype(jnp.bool_)
 
     save_at = SaveAt(steps=True, fn=save)
 
@@ -166,7 +164,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
             network_state,
             args: network_state.filtered_spike_trains,
             "episode_end_fn": lambda t, state, args: jnp.any(
-                jnp.abs(state.environment_state[0])
+                jnp.abs(state.environment_state)
                 > jnp.array([env.max_allowed_angle, env.max_allowed_angular_velocity])
             ),
         },

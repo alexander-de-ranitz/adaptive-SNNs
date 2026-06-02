@@ -123,8 +123,10 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     fully_connected_input: bool  = False  # If True, all input neurons connect to all neurons with weight initial_input_weight
     input_types: Array | None  = None # Optional binary vector of size N_inputs with: 1 (excitatory) and 0 (inhibitory)
     excitatory_mask: Array  | None = None # Binary vector of size N_neurons + N_inputs with: 1 (excitatory) and 0 (inhibitory)
+    inhibitory_mask: Array | None = None # Precomputed ~excitatory_mask
     synaptic_time_constants: Array | None = None # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
     synaptic_delay_matrix: Array | None = None # Matrix of shape (N_neurons, N_neurons) with synaptic delays for recurrent connections
+    synaptic_delay_steps: Array | None = None # Precomputed synaptic_delay_matrix / dt, rounded to int32
 
     ###########################################
     #               Miscellaneous             # 
@@ -201,6 +203,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         self.excitatory_mask = jnp.concatenate(
             [neuron_types, input_neuron_types], dtype=bool
         )
+        self.inhibitory_mask = ~self.excitatory_mask
         self.synaptic_time_constants = jnp.where(
             self.excitatory_mask, self.tau_E, self.tau_I
         )
@@ -220,6 +223,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         self.buffer_size = int(
             jnp.ceil(jnp.max(self.synaptic_delay_matrix) / self.dt) + 1
         )
+        self.synaptic_delay_steps = jnp.round(
+            self.synaptic_delay_matrix / self.dt
+        ).astype(jnp.int32)
 
         # Store key to be used for weight initialization
         # weights are initialised in the initial property as weights are part of the state
@@ -299,7 +305,22 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         """
 
         # Compute derivatives of the state variables
-        dV = self.compute_voltage_update(t, state, args)
+        W_clean = jnp.where(~jnp.isnan(state.W), state.W, 0.0)
+        weighted_conductances = W_clean * state.G  # (N_neurons, N_neurons+N_inputs)
+        synaptic_E_conductances = (
+            weighted_conductances @ self.excitatory_mask
+        )  # (N_neurons,)
+        synaptic_I_conductances = (
+            weighted_conductances @ self.inhibitory_mask
+        )  # (N_neurons,)
+
+        dV = self.compute_voltage_update(
+            t,
+            state,
+            args,
+            synaptic_E_conductances=synaptic_E_conductances,
+            synaptic_I_conductances=synaptic_I_conductances,
+        )
         dG = -1 / self.synaptic_time_constants[None, :] * state.G
         dW = self.compute_weight_updates(t, state, args, RPE)
         dS = jnp.zeros_like(state.S)  # Spikes are handled separately, so no change here
@@ -313,12 +334,8 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         # Firing rate is modelled as an exponential moving average of spikes
         d_firing_rate = -state.filtered_spike_trains / self.tau_spike_filter
 
-        # Compute total excitatory synaptic conductance per neuron
-        W, G = state.W, state.G
-        weighted_conductances = jnp.where(~jnp.isnan(W), W, 0.0) * G
-        total_E_conductance_per_neuron = jnp.sum(
-            weighted_conductances * self.excitatory_mask[None, :], axis=1
-        )
+        # Reuse already-computed synaptic_E_conductances for conductance tracking
+        total_E_conductance_per_neuron = synaptic_E_conductances
 
         # Update mean and variance of excitatory conductance as exponential moving averages
         d_mean_E_conductance = (
@@ -453,7 +470,14 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         state = self.force_balanced_weights(t, state, args)
         return state
 
-    def compute_voltage_update(self, t, state: LIFState, args):
+    def compute_voltage_update(
+        self,
+        t,
+        state: LIFState,
+        args,
+        synaptic_E_conductances=None,
+        synaptic_I_conductances=None,
+    ):
         """Compute dV/dt for the LIF neurons, incorporating external noise if present.
 
         The change in membrane potential is computed based on leak currents and excitatory/inhibitory conductance:
@@ -467,35 +491,33 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         Args:
             t: Current time (unused)
             state: Current LIFState
-            args: Dictionary of additional arguments, may contain:
-                - excitatory_noise: Array of shape (N_neurons,) representing external excitatory conductance noise
+            args: Dictionary of additional arguments
+            synaptic_E_conductances: Optional pre-computed weighted_conductances @ excitatory_mask
+            synaptic_I_conductances: Optional pre-computed weighted_conductances @ inhibitory_mask
 
         Returns:
             dV: Array of shape (N_neurons,) representing the time derivative of membrane potentials
         """
-        V, W, G = state.V, state.W, state.G
+        V = state.V
 
         # Compute leak current
         leak_current = -self.leak_conductance * (V - self.resting_potential)
 
         # Compute E/I currents from recurrent connections
-        weighted_conductances = (
-            jnp.where(jnp.isnan(W), 0.0, W) * G
-        )  # For non-existing connections, set weighted conductance to 0
-        total_I_conductances = jnp.sum(
-            weighted_conductances * jnp.invert(self.excitatory_mask[None, :]), axis=1
-        )
-        synaptic_E_conductances = jnp.sum(
-            weighted_conductances * self.excitatory_mask[None, :], axis=1
-        )
-        E_noise = state.perturbations
+        if synaptic_E_conductances is None or synaptic_I_conductances is None:
+            weighted_conductances = (
+                jnp.where(jnp.isnan(state.W), 0.0, state.W) * state.G
+            )
+            synaptic_E_conductances = weighted_conductances @ self.excitatory_mask
+            synaptic_I_conductances = weighted_conductances @ self.inhibitory_mask
+
         total_E_conductances = (
-            synaptic_E_conductances + E_noise
-        )  # Add external excitatory noise to total excitatory conductance
+            synaptic_E_conductances + state.perturbations
+        )  # Add perturbations to total excitatory conductance
 
         # Ensure non-negative conductances
         total_E_conductances = jnp.clip(total_E_conductances, min=0.0)
-        total_I_conductances = jnp.clip(total_I_conductances, min=0.0)
+        total_I_conductances = jnp.clip(synaptic_I_conductances, min=0.0)
 
         # Compute total recurrent current
         recurrent_current = total_I_conductances * (
@@ -533,24 +555,14 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         Returns:
             Array of shape (N_neurons, N_neurons) with delayed spike values
         """
-        # Cast buffer_index to int32 for indexing operations
         buffer_idx = jnp.round(state.buffer_index).astype(jnp.int32)
-
-        # For each synapse, compute which buffer index to read from
-        # Convert delays from seconds to buffer timesteps
-        delay_steps = jnp.round(self.synaptic_delay_matrix / self.dt).astype(jnp.int32)
-
-        # buffer_index points to most recent, we need to go back by delay amount
-        read_indices = ((buffer_idx - delay_steps) % self.buffer_size).astype(jnp.int32)
-
-        # Gather spikes from buffer for each synapse
-        # Use vmap to vectorize over neurons
-        def get_neuron_inputs(neuron_idx):
-            return state.spike_buffer[
-                read_indices[neuron_idx], jnp.arange(self.N_neurons)
-            ]
-
-        delayed_spikes = jax.vmap(get_neuron_inputs)(jnp.arange(self.N_neurons))
+        read_indices = (
+            (buffer_idx - self.synaptic_delay_steps) % self.buffer_size
+        ).astype(jnp.int32)
+        # read_indices[i, j] is the buffer row for neuron j's spike as seen by neuron i
+        delayed_spikes = state.spike_buffer[
+            read_indices, jnp.arange(self.N_neurons)[None, :]
+        ]
         return delayed_spikes
 
     def spike_and_reset(
@@ -601,9 +613,14 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         G_new = G.at[:, : self.N_neurons].add(delayed_spikes * self.synaptic_increment)
 
         # Update conductances based on current input spikes
-        if input_spikes.shape != (self.N_neurons, self.N_inputs):
+        if input_spikes.ndim == 1:
+            if input_spikes.shape[0] != self.N_inputs:
+                raise ValueError(
+                    f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
+                )
+        elif input_spikes.shape != (self.N_neurons, self.N_inputs):
             raise ValueError(
-                f"Input spikes shape {input_spikes.shape} does not match expected shape {(self.N_neurons, self.N_inputs)}"
+                f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
             )
         G_new = G_new.at[:, self.N_neurons :].add(
             input_spikes * self.synaptic_increment

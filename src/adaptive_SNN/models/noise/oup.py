@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from adaptive_SNN.models.noise import AbstractNoiseModel
+from adaptive_SNN.utils.operators import ElementWiseMul
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
@@ -22,16 +23,12 @@ class OUP(AbstractNoiseModel):
         return -1.0 / self.tau * (x - self.mean)
 
     def diffusion(self, t, x, args, noise_std: float | Array = None):
-        """Compute the diffusion matrix for the OUP noise.
+        """Compute the diffusion operator for the OUP noise.
 
         Uses the noise_std argument if provided, otherwise defaults to self.noise_std"""
         noise_std = self.noise_std if noise_std is None else noise_std
-
-        # Return diagonal diffusion matrix
-        if isinstance(noise_std, Array) and noise_std.ndim == 1:
-            return jnp.diag(noise_std) * jnp.sqrt(2.0 / self.tau)
-
-        return jnp.eye(self.dim) * noise_std * jnp.sqrt(2.0 / self.tau)
+        scale = jnp.asarray(noise_std, dtype=default_float) * jnp.sqrt(2.0 / self.tau)
+        return ElementWiseMul(jnp.broadcast_to(scale, (self.dim,)))
 
     def update(self, t, x, args):
         return x
