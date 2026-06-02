@@ -46,7 +46,7 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
         coeff = relative_noise_strength / self.synaptic_increment  # (N_neurons,)
         d_eligibility = (
             -state.features.eligibility / self.tau_eligibility
-            + coeff[:, None] * self.excitatory_mask_float[None, :] * state.G
+            + coeff[:, None] * self.excitatory_mask[None, :] * state.G
         )
         return Eligibility(eligibility=d_eligibility)
 
