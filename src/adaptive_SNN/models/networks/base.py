@@ -491,10 +491,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         Args:
             t: Current time (unused)
             state: Current LIFState
-            args: Dictionary of additional arguments, may contain:
-                - excitatory_noise: Array of shape (N_neurons,) representing external excitatory conductance noise
-            synaptic_E_conductances: Optional pre-computed weighted_conductances @ excitatory_mask_float
-            synaptic_I_conductances: Optional pre-computed weighted_conductances @ inhibitory_mask_float
+            args: Dictionary of additional arguments
+            synaptic_E_conductances: Optional pre-computed weighted_conductances @ excitatory_mask
+            synaptic_I_conductances: Optional pre-computed weighted_conductances @ inhibitory_mask
 
         Returns:
             dV: Array of shape (N_neurons,) representing the time derivative of membrane potentials
