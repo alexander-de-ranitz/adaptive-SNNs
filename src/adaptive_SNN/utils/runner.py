@@ -15,10 +15,13 @@ from adaptive_SNN.utils.config import SimulationConfig
 
 def _serialize_pytree(tree, downcast_to_float32: bool = True):
     leaves, treedef = jax.tree.flatten(tree)
+    # Downcast float64 arrays to float32 to save space, if specified
     leaves = [
-        np.asarray(
-            jax.device_get(leaf), dtype=np.float32 if downcast_to_float32 else None
-        )
+        (
+            lambda arr: arr.astype(np.float32)
+            if arr.dtype.kind == "f" and arr.itemsize > 4 and downcast_to_float32
+            else arr
+        )(np.asarray(jax.device_get(leaf)))
         for leaf in leaves
     ]
 
@@ -121,6 +124,7 @@ def run_simulation(
         rec_weight_std=config.rec_weight_std,
         mean_synaptic_delay=config.mean_synaptic_delay,
         min_noise_std=config.min_noise_std,
+        input_weight_std=config.input_weight_std,
         key=network_key,
         **config.base_network_kwargs,
     )
