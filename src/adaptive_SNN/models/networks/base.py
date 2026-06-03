@@ -225,9 +225,8 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         )
 
         # Compute buffer size based on max delay
-        self.buffer_size = int(
-            jnp.ceil(jnp.max(self.synaptic_delay_matrix) / self.dt) + 1
-        )
+        self.buffer_size = int(jnp.ceil(2 * self.mean_synaptic_delay / self.dt) + 1)
+
         self.synaptic_delay_steps = jnp.round(
             self.synaptic_delay_matrix / self.dt
         ).astype(jnp.int32)
