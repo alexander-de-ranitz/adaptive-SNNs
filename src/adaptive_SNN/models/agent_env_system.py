@@ -44,8 +44,10 @@ class AgentEnvSystem(eqx.Module):
     def pre_step_update(self, t, x: SystemState, args):
         """Perform any necessary updates to the state before computing the drift/diffusion.
 
-        This is where we compute the reward signal based on the current state of the environment and agent output,
-        and store it in the SystemState for use in the drift computation.
+        1) Reset the environment and agent states if the episode end function returns True
+        2) Compute the agent output based on the current agent state and environment state
+        3) Compute the reward signal based on the current environment state and new agent output
+        4) Update the agent and environment states based on the new reward signal
         """
 
         def _reset(t, x: SystemState, args):
@@ -58,33 +60,33 @@ class AgentEnvSystem(eqx.Module):
                 reward_signal=jnp.zeros_like(x.reward_signal),
             )
 
-        def _regular_update(t, x: SystemState, args):
-            # Compute agent output based on current agent state
-            agent_output = args["network_output_fn"](
-                t, x.agent_state, args, env_state=x.environment_state
-            )
-            x_updated = eqx.tree_at(lambda s: s.agent_output, x, agent_output)
-
-            # Compute reward signal based on current environment state and new agent output
-            reward = args["reward_fn"](t, x_updated, args)
-
-            # Update agent and environment states
-            agent_state = self.agent.pre_step_update(t, x.agent_state, args, reward)
-            environment_state = self.environment.pre_step_update(
-                t, x.environment_state, args
-            )
-
-            return SystemState(
-                agent_state=agent_state,
-                environment_state=environment_state,
-                agent_output=agent_output,
-                reward_signal=reward,
-            )
-
-        return jax.lax.cond(
+        # If we have an episode end function and it returns True, reset the environment and agent states
+        x = jax.lax.cond(
             args.get("episode_end_fn", lambda t, x, args: False)(t, x, args),
             lambda: _reset(t, x, args),
-            lambda: _regular_update(t, x, args),
+            lambda: x,
+        )
+
+        # Compute agent output based on current agent state
+        agent_output = args["network_output_fn"](
+            t, x.agent_state, args, env_state=x.environment_state
+        )
+        x_updated = eqx.tree_at(lambda s: s.agent_output, x, agent_output)
+
+        # Compute reward signal based on current environment state and new agent output
+        reward = args["reward_fn"](t, x_updated, args)
+
+        # Update agent and environment states
+        agent_state = self.agent.pre_step_update(t, x.agent_state, args, reward)
+        environment_state = self.environment.pre_step_update(
+            t, x.environment_state, args
+        )
+
+        return SystemState(
+            agent_state=agent_state,
+            environment_state=environment_state,
+            agent_output=agent_output,
+            reward_signal=reward,
         )
 
     def drift(self, t, x: SystemState, args: dict):
