@@ -22,7 +22,7 @@ def make_LIF_model(
     N_neurons=10,
     N_inputs=3,
     dt=0.1e-3,
-    input_neuron_types=None,
+    input_types=None,
     fully_connected_input=True,
     min_noise_std=0.0,
     input_weight=1.0,
@@ -35,28 +35,12 @@ def make_LIF_model(
         N_inputs=N_inputs,
         dt=dt,
         fully_connected_input=fully_connected_input,
+        input_types=input_types,
         initial_input_weight=input_weight,
         noise_model=noise_model,
         min_noise_std=min_noise_std,
         key=key,
     )
-
-    # For testing purposes, allow explicitely defining the types of input neurons
-    if input_neuron_types is not None and N_inputs > 0:
-        desired_types = jnp.asarray(input_neuron_types, dtype=bool)
-        if desired_types.shape != (N_inputs,):
-            raise ValueError(
-                "input_neuron_types must have shape (N_inputs,) when provided"
-            )
-
-        updated_mask = model.excitatory_mask.at[-N_inputs:].set(desired_types)
-        object.__setattr__(model, "excitatory_mask", updated_mask)
-        object.__setattr__(
-            model,
-            "synaptic_time_constants",
-            jnp.where(updated_mask, model.tau_E, model.tau_I),
-        )
-
     return model
 
 
@@ -126,6 +110,9 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
         ),
         filtered_spike_trains=jnp.zeros((N_neurons,)),
         mean_E_conductance=jnp.zeros((N_neurons,)),
+        mean_I_conductance=jnp.zeros((N_neurons,)),
+        charge_in=jnp.zeros((N_neurons,)),
+        charge_out=jnp.zeros((N_neurons,)),
         var_E_conductance=jnp.zeros((N_neurons,)),
         time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
         spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),

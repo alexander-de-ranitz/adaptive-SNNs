@@ -586,213 +586,92 @@ def test_spike_generation_with_input():
     assert jnp.all(dG[:, jnp.array([0, 1, 3])] == 0)
 
 
-def test_force_balance_no_change():
-    N_neurons, N_inputs = 10, 3
-    input_types = jnp.array([1, 0, 1])
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
-    )
-
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([0.0]),
-    )
-
-    state = model.initial
-    balance = model.compute_balance(0, state, args)
-    assert balance.shape == (N_neurons,)
-
-    state_after = model.force_balanced_weights(0, model.initial, args=args)
-    balance_after = model.compute_balance(0, state_after, args=args)
-    assert jnp.allclose(balance_after, balance)
-    assert jnp.allclose(state_after.W, state.W, equal_nan=True)
-
-
-def test_force_balance_mini():
-    N_neurons, N_inputs = 1, 3
-    input_types = jnp.array([1, 0, 1])
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
-    )
-
-    target_balance = 2.0
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-    )
-
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.5).at[0, 3].set(1.0)
-    state = make_baseline_state(model, W=base_W)
-
-    balance = model.compute_balance(0, state, args)
-    assert balance.shape == (N_neurons,)
-
-    state = model.force_balanced_weights(0, state, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, target_balance)
-
-    # Compute approx. charge induced at rest for each synapse type (see Kumar, 2008)
-    # the ratio of these is what we define as the balance
-    charge_I = (
-        state.W[0][2]
-        * jnp.abs(model.reversal_potential_I - model.resting_potential)
-        * model.tau_I
-    )
-    charge_E = (
-        (state.W[0][1] + state.W[0][3])
-        * (model.reversal_potential_E - model.resting_potential)
-        * model.tau_E
-    )
-
-    assert jnp.allclose(charge_I / charge_E, target_balance)
-    assert jnp.isnan(state.W[0][0])  # No self connection
-    assert state.W[0][1] == 1.0 and state.W[0][1] == 1.0  # Exc weights unchanged
-
-
-def test_force_balance_random():
-    N_neurons, N_inputs = 50, 10
-    key = jr.PRNGKey(7)
-    input_types = jr.bernoulli(key, p=0.5, shape=(N_inputs,)).astype(jnp.int32)
-
-    key, subkey = jr.split(key)
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=subkey,
-    )
-
-    args = make_default_args(
-        N_neurons, N_inputs, get_desired_balance=lambda t, x, args: jnp.array([2.0])
-    )
-
-    state = model.initial
-    balance = model.compute_balance(0, state, args)
-    assert balance.shape == (N_neurons,)
-
-    state = model.force_balanced_weights(0, model.initial, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(
-        balance_after, args["get_desired_balance"](0, state, args), atol=1e-5
-    )
-
-
-def test_force_balance_zero_inhibitory_weight():
-    N_neurons, N_inputs = 1, 3
-    input_types = jnp.array([1, 0, 1])
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
-    )
-
-    target_balance = 2.0
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-    )
-
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.0).at[0, 3].set(1.0)
-    state = make_baseline_state(model, W=base_W)
-
-    initial_balance = model.compute_balance(0, state, args)
-    assert jnp.isclose(initial_balance, 0.0)
-
-    state = model.force_balanced_weights(0, state, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, target_balance)
-
-
-def test_force_balance_zero_inhibitory_weight_recurrent_only():
-    N_neurons, N_inputs = 4, 0
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        key=jr.PRNGKey(7),
-    )
-
-    target_balance = 2.0
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-    )
-
-    # Override excitatory mask for test
-    excitatory_mask = jnp.array([True, True, False, False], dtype=bool)
-    object.__setattr__(model, "excitatory_mask", excitatory_mask)
-
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 3].set(0.0)
-    base_W = base_W.at[1, 0].set(1.0).at[1, 3].set(0.0)
-    base_W = base_W.at[2, 1].set(1.0).at[2, 3].set(0.0)
-    base_W = base_W.at[3, 0:2].set(1.0).at[3, 2].set(0.0)
-    state = make_baseline_state(model, W=base_W)
-
-    initial_balance = model.compute_balance(0, state, args)
-    assert jnp.allclose(initial_balance, 0.0)
-
-    state = model.force_balanced_weights(0, state, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, target_balance)
-
-
-def test_balance_simulated_input_counts():
+def test_I_weight_drift_no_desired_balance():
     N_neurons, N_inputs = 2, 2
-    input_types = jnp.array([1, 0])
-
     model = make_LIF_model(
         N_neurons=N_neurons,
         N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
+        key=jr.PRNGKey(8),
+        input_types=jnp.array([1, 0]),
     )
-
-    target_balance = 1.0
     args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-        N_simulated_I_inputs=3,
-        N_simulated_E_inputs=5,
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 0.0
+    )
+    state = make_baseline_state(
+        model,
+        W=jnp.ones((N_neurons, N_neurons + N_inputs)),
+        mean_E_conductance=jnp.ones((N_neurons,)),
+        mean_I_conductance=jnp.arange(1, N_neurons + 1),
+        charge_in=jnp.ones((N_neurons,)),
+        charge_out=jnp.arange(1, N_neurons + 1),
     )
 
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(2.0).at[0, 3].set(3.0)
+    dW_I = model.compute_I_weight_drift(0.0, state, args)
 
-    state = make_baseline_state(model, W=base_W)
-    state = model.force_balanced_weights(0, state, args=args)
+    assert dW_I.shape == (N_neurons, N_neurons + N_inputs)
+    assert jnp.all(dW_I == 0.0)  # No update should occur when desired balance is None
 
-    total_E_weights = state.W[0, 1] + state.W[0, 2] * args["N_simulated_E_inputs"]
-    total_I_weights = state.W[0, 3] * args["N_simulated_I_inputs"]
 
-    balance = (
-        total_I_weights
-        * jnp.abs(model.reversal_potential_I - model.resting_potential)
-        * model.tau_I
-    ) / (
-        total_E_weights
-        * (model.reversal_potential_E - model.resting_potential)
-        * model.tau_E
+def test_I_weight_drift():
+    N_neurons, N_inputs = 2, 2
+    model = make_LIF_model(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        key=jr.PRNGKey(8),
+        input_types=jnp.array([1, 0]),
+    )
+    args = make_default_args(
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 1.0
+    )
+    state = make_baseline_state(
+        model,
+        W=jnp.ones((N_neurons, N_neurons + N_inputs)),
+        mean_E_conductance=jnp.ones((N_neurons,)),
+        mean_I_conductance=jnp.arange(1, N_neurons + 1),
+        charge_in=jnp.ones((N_neurons,)),
+        charge_out=jnp.arange(1, N_neurons + 1),
+    )
+    initial_balance = model.compute_balance(0.0, state, args)
+    dW_I = model.compute_I_weight_drift(0.0, state, args)
+
+    assert dW_I.shape == (N_neurons, N_neurons + N_inputs)
+    assert jnp.allclose(
+        dW_I[0], 0.0
+    )  # first neuron is already balanced with E/I ratio of 1.0
+    assert (
+        dW_I[1, -1] < 0.0
+    )  # second neuron has E/I ratio of 0.5, so I weights should be decreased to increase balance
+    assert jnp.allclose(
+        dW_I[1, -1], model.balance_rate * (initial_balance[1] - 1.0) * state.W[1, -1]
+    )  # Check that the update is in the correct direction and proportional to imbalance and current weight
+    assert jnp.all(dW_I[1, :-1] == 0.0)  # E weights should not change
+
+
+def test_I_weight_drift_is_used():
+    N_neurons, N_inputs = 2, 2
+    model = make_LIF_model(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        key=jr.PRNGKey(8),
+        input_types=jnp.array([1, 0]),
+    )
+    args = make_default_args(
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 1.0
+    )
+    state = make_baseline_state(
+        model,
+        W=jnp.ones((N_neurons, N_neurons + N_inputs)),
+        mean_E_conductance=jnp.ones((N_neurons,)),
+        mean_I_conductance=jnp.arange(1, N_neurons + 1) - model.leak_conductance,
     )
 
-    assert jnp.allclose(balance, target_balance)
+    dW_I = model.compute_I_weight_drift(0.0, state, args)
+    drift = model.drift(0.0, state, args)
+
+    dW_I_from_drift = jnp.where(model.inhibitory_mask, drift.W, 0.0)
+    assert jnp.allclose(
+        dW_I_from_drift, dW_I
+    )  # Check that the I weight drift is included in the overall weight drift
 
 
 def test_synaptic_delays():
