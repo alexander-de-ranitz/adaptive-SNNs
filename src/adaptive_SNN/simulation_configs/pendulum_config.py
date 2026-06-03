@@ -74,8 +74,11 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
     lr = 0.0
     noise_level = 0.0
     min_noise_std = 0e-9
-    balance = 0.5
+    balance = 1.02
     N_inputs = 200
+    agent_output_scaling = (
+        0.25  # Scale the output so that it doesn't produce excessively large torques
+    )
 
     env = PendulumEnvironment()
 
@@ -101,10 +104,13 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
         : output_pop.size // 2
     ]  # first half codes for left torque, second half for right torque
     right = output_pop[output_pop.size // 2 :]
-    network_output_fn = lambda t, agent_state, args, env_state: 0.0 * (
-        agent_state.network_state.filtered_spike_trains[left].mean()
-        - agent_state.network_state.filtered_spike_trains[right].mean()
-    ).reshape((1,))
+    network_output_fn = (
+        lambda t, agent_state, args, env_state: (
+            agent_state.network_state.filtered_spike_trains[left].mean()
+            - agent_state.network_state.filtered_spike_trains[right].mean()
+        ).reshape((1,))
+        * agent_output_scaling
+    )
 
     def reward_fn(t, x: SystemState, args):
         instantaneous_reward = (
@@ -146,7 +152,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
         mean_synaptic_delay=1.5e-3,
         noise_level=noise_level,
         min_noise_std=min_noise_std,
-        warmup_time=10,
+        warmup_time=100,
         key=key,
         save_at=save_at,
         save_file="results/pendulum.npz",
@@ -165,7 +171,13 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
             args: network_state.filtered_spike_trains,
             "episode_end_fn": lambda t, state, args: jnp.any(
                 jnp.abs(state.environment_state)
-                > jnp.array([env.max_allowed_angle, env.max_allowed_angular_velocity])
+                > jnp.array(
+                    [
+                        env.max_allowed_angle,
+                        env.max_allowed_angular_velocity,
+                        env.max_episode_time,
+                    ]
+                )
             ),
         },
     )
