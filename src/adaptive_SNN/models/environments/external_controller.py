@@ -1,5 +1,6 @@
 import diffrax as dfx
 import equinox as eqx
+from jax import numpy as jnp
 
 from adaptive_SNN.models.environments.base import (
     AbstractEnvironment,
@@ -22,6 +23,11 @@ class ExternalController(eqx.Module):
         return self.environment.initial
 
     def pre_step_update(self, t, x: AbstractEnvironmentState, args):
+        x = jnp.where(
+            args.get("episode_end_fn")(t, x, args),
+            self.environment.reset(t, x, args),
+            x,
+        )
         return self.environment.pre_step_update(t, x, args)
 
     def drift(self, t, x: AbstractEnvironmentState, args):
