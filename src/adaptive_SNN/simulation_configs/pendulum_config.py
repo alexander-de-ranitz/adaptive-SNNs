@@ -39,6 +39,9 @@ def compute_rates(
     Returns:
         rates: A vector of firing rates for the encoding population.
     """
+    env_state = env_state[
+        :2
+    ]  # Only encode the angle and angular velocity, not the time
     N_encoding_populations = 2
     encoding_population_size = N_encoding_inputs // N_encoding_populations
     max_state_values = max_state_values * (1 + 3 * width_factor)
@@ -87,8 +90,8 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
     def input_spike_fn(t, x: SystemState, args):
         step_idx = jnp.asarray(jnp.rint((t) / dt), dtype=jnp.int64)
         current_key = jr.fold_in(spike_key, step_idx)
-        env_state = x.environment_state
 
+        env_state = x.environment_state
         rates = compute_rates(env_state, N_encoding_inputs=N_inputs)
 
         # Generate the spikes of the encoding population — shape (N_inputs,).
@@ -120,9 +123,9 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
         )
         shaping_reward = (
             2
-            * x.environment_state.T
+            * x.environment_state[:2].T
             @ env.cost_to_go_matrix
-            @ env.drift(t, x.environment_state, args, x.agent_output)
+            @ env.drift(t, x.environment_state, args, x.agent_output)[:2]
         )
         return jnp.atleast_1d(instantaneous_reward - shaping_reward)
 
@@ -148,7 +151,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
         t0=t0,
         t1=t1,
         dt=dt,
-        lr=lr * jnp.ones((N_neurons, N_neurons + N_inputs)),
+        lr=lr,
         mean_synaptic_delay=1.5e-3,
         noise_level=noise_level,
         min_noise_std=min_noise_std,
@@ -165,7 +168,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
         reward_prediction_model=RLSRewardPredictor,
         reward_predictor_kwargs={"input_dim": N_neurons},
         args={
-            "use_noise": jnp.array([True] * N_neurons),
+            "use_noise": jnp.array([True]),
             "feature_fn": lambda t,
             network_state,
             args: network_state.filtered_spike_trains,
