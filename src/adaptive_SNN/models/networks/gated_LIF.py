@@ -56,6 +56,11 @@ class GatedLIFNetwork(AbstractLIFNetwork):
 
     def gating_function(self, voltage: Array, delta_V: float) -> Array:
         """Gating function based on membrane voltage."""
+
+        # Voltage might be temporarily above the firing threshold within a single step,
+        # we clip the voltage to ensure the gating function does not become too large in this case
+        voltage = jnp.min(voltage, self.firing_threshold)
+
         default_area = 1.0 * (
             self.firing_threshold - self.resting_potential
         )  # Area under the default gating function (which is constant at 1)
