@@ -153,7 +153,8 @@ def plot_figure(
                 stats["alignment"],
                 yerr=stats["alignment_std"],
                 color="black",
-                capsize=5,
+                capsize=0,
+                linewidth=1,
                 linestyle="None",
             )  # Add error bars for alignment
 
@@ -164,7 +165,8 @@ def plot_figure(
                 stats["SNR"],
                 yerr=stats["SNR_std"],
                 color="black",
-                capsize=5,
+                linewidth=1,
+                capsize=0,
                 linestyle="None",
             )  # Add error bars for SNR
 
