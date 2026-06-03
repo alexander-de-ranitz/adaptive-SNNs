@@ -63,7 +63,8 @@ class LIFState(eqx.Module):
         G: Synaptic conductances (N_neurons, N_neurons + N_inputs)
         perturbations: Noise process state (shape defined by noise model)
         filtered_spike_trains: Exponentially filtered version of the spike trains of the recurrent neurons (N_neurons,)
-        mean_E_conductance: Exponentially filtered mean of excitatory conductance (N_neurons,)
+        mean_E_conductance: Exponentially filtered mean of excitatory conductance (N_neurons,). Note: does not include perturbations
+        mean_I_conductance: Exponentially filtered mean of inhibitory conductance (N_neurons,)
         var_E_conductance: Exponentially filtered variance of excitatory conductance (N_neurons,)
         time_since_last_spike: Time since last spike for each neuron, used for implementing refractory period (N_neurons,)
         spike_buffer: Buffer to hold past spikes for implementing synaptic delays (buffer_size, N_neurons)
@@ -78,6 +79,9 @@ class LIFState(eqx.Module):
     perturbations: Array
     filtered_spike_trains: Array
     mean_E_conductance: Array
+    mean_I_conductance: Array
+    charge_in: Array
+    charge_out: Array
     var_E_conductance: Array
     time_since_last_spike: Array
     spike_buffer: Array
@@ -127,6 +131,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     synaptic_time_constants: Array | None = None # Vector of size N_neurons + N_inputs with synaptic time constants (tau_E or tau_I)
     synaptic_delay_matrix: Array | None = None # Matrix of shape (N_neurons, N_neurons) with synaptic delays for recurrent connections
     synaptic_delay_steps: Array | None = None # Precomputed synaptic_delay_matrix / dt, rounded to int32
+    balance_rate: float = 1.0 # Rate at which I weights are adjusted to maintain balance (if get_desired_balance returns a non-zero value)
 
     ###########################################
     #               Miscellaneous             # 
@@ -270,6 +275,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         )
         buffer_index = jnp.array(0, dtype=default_float)
         mean_E_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
+        mean_I_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
         std_E_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
 
         return LIFState(
@@ -283,6 +289,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             spike_buffer=spike_buffer,
             buffer_index=buffer_index,
             mean_E_conductance=mean_E_conductance,
+            mean_I_conductance=mean_I_conductance,
+            charge_in=jnp.zeros((self.N_neurons,), dtype=default_float),
+            charge_out=jnp.zeros((self.N_neurons,), dtype=default_float),
             var_E_conductance=std_E_conductance,
             features=self.init_features(),
         )
@@ -314,16 +323,28 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             weighted_conductances @ self.inhibitory_mask
         )  # (N_neurons,)
 
-        dV = self.compute_voltage_update(
+        charge_in, charge_out = self.compute_charge_flow(
             t,
             state,
             args,
             synaptic_E_conductances=synaptic_E_conductances,
             synaptic_I_conductances=synaptic_I_conductances,
         )
+        dV = charge_in + charge_out
+
+        d_charge_in = (charge_in - state.charge_in) / self.tau_low_pass
+        d_charge_out = (charge_out - state.charge_out) / self.tau_low_pass
+
         dG = -1 / self.synaptic_time_constants[None, :] * state.G
-        dW = self.compute_weight_updates(t, state, args, RPE)
-        dS = jnp.zeros_like(state.S)  # Spikes are handled separately, so no change here
+
+        # Compute weight updates
+        # E weights are updated with our learning rule, I weights are passively rescaled for balance
+        dW_E = self.compute_weight_updates(t, state, args, RPE)
+        dW_I = self.compute_I_weight_drift(t, state, args)
+        dW = dW_E + dW_I
+
+        # Spikes are handled separately, so no change here
+        dS = jnp.zeros_like(state.S)
 
         # Perturbations drift is defined by the noise model
         d_perturbations = self.noise_model.drift(t, state.perturbations, args)
@@ -334,16 +355,19 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         # Firing rate is modelled as an exponential moving average of spikes
         d_firing_rate = -state.filtered_spike_trains / self.tau_spike_filter
 
-        # Reuse already-computed synaptic_E_conductances for conductance tracking
-        total_E_conductance_per_neuron = synaptic_E_conductances
-
         # Update mean and variance of excitatory conductance as exponential moving averages
         d_mean_E_conductance = (
-            -state.mean_E_conductance + total_E_conductance_per_neuron
+            -state.mean_E_conductance + synaptic_E_conductances
         ) / self.tau_low_pass
+
         d_var_E_conductance = (
             -state.var_E_conductance
-            + jnp.square(total_E_conductance_per_neuron - state.mean_E_conductance)
+            + jnp.square(synaptic_E_conductances - state.mean_E_conductance)
+        ) / self.tau_low_pass
+
+        # Update mean inhibitory conductance as exponential moving averages
+        d_mean_I_conductance = (
+            -state.mean_I_conductance + synaptic_I_conductances
         ) / self.tau_low_pass
 
         # Buffer fields have zero derivative (they are updated in spike_and_reset)
@@ -361,6 +385,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             perturbations=d_perturbations,
             filtered_spike_trains=d_firing_rate,
             mean_E_conductance=d_mean_E_conductance,
+            mean_I_conductance=d_mean_I_conductance,
+            charge_in=d_charge_in,
+            charge_out=d_charge_out,
             var_E_conductance=d_var_E_conductance,
             time_since_last_spike=d_time_since_last_spike,
             spike_buffer=d_spike_buffer,
@@ -437,6 +464,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             perturbations=self.noise_model.noise_shape,
             filtered_spike_trains=None,
             mean_E_conductance=None,
+            mean_I_conductance=None,
+            charge_in=None,
+            charge_out=None,
             var_E_conductance=None,
             time_since_last_spike=None,
             spike_buffer=None,
@@ -467,10 +497,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         state = eqx.tree_at(lambda s: s.perturbations, x, perturbations)
         state = self.spike_and_reset(t, state, args, input_spikes)
         state = self.clip_weights(t, state, args)
-        state = self.force_balanced_weights(t, state, args)
         return state
 
-    def compute_voltage_update(
+    def compute_charge_flow(
         self,
         t,
         state: LIFState,
@@ -496,12 +525,10 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             synaptic_I_conductances: Optional pre-computed weighted_conductances @ inhibitory_mask
 
         Returns:
-            dV: Array of shape (N_neurons,) representing the time derivative of membrane potentials
+            Tuple of (charge_in, charge_out) where charge_in is the contribution to dV/dt from excitatory conductances and perturbations
+            and charge_out is the contribution from inhibitory conductances and leak.
         """
         V = state.V
-
-        # Compute leak current
-        leak_current = -self.leak_conductance * (V - self.resting_potential)
 
         # Compute E/I currents from recurrent connections
         if synaptic_E_conductances is None or synaptic_I_conductances is None:
@@ -519,20 +546,74 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         total_E_conductances = jnp.clip(total_E_conductances, min=0.0)
         total_I_conductances = jnp.clip(synaptic_I_conductances, min=0.0)
 
-        # Compute total recurrent current
-        recurrent_current = total_I_conductances * (
-            self.reversal_potential_I - V
-        ) + total_E_conductances * (self.reversal_potential_E - V)
+        syn_I_current = (
+            total_I_conductances
+            * (self.reversal_potential_I - V)
+            / self.membrane_capacitance
+        )
+        syn_E_current = (
+            total_E_conductances
+            * (self.reversal_potential_E - V)
+            / self.membrane_capacitance
+        )
+        leak_current = (
+            self.leak_conductance
+            * (self.resting_potential - V)
+            / self.membrane_capacitance
+        )
 
-        dV = (leak_current + recurrent_current) / self.membrane_capacitance
+        # Syn E are always depolarizing (inward) currents
+        # Leak can be depolarizing or hyperpolarizing depending on whether V is above or below resting potential
+        # Syn I are always hyperpolarizing (outward) currents
+        charge_in = syn_E_current + leak_current * (
+            leak_current > 0
+        )  # Include leak current if it is depolarizing
+        charge_out = syn_I_current + leak_current * (
+            leak_current < 0
+        )  # Include leak current if it is hyperpolarizing
 
-        # Neurons in refractory period do not change their membrane potential
-        dV = jnp.where(state.time_since_last_spike < self.refractory_period, 0.0, dV)
-        return dV
+        # During refractory period, voltage is clamped
+        charge_in = jnp.where(
+            state.time_since_last_spike < self.refractory_period, 0.0, charge_in
+        )
+        charge_out = jnp.where(
+            state.time_since_last_spike < self.refractory_period, 0.0, charge_out
+        )
+
+        return charge_in, charge_out
 
     @abstractmethod
     def compute_weight_updates(self, t, state: LIFState, args, RPE: Array) -> Array:
         raise NotImplementedError
+
+    def compute_I_weight_drift(self, t, state: LIFState, args) -> Array:
+        """Computes drift for I weights in order to maintain balance between excitation and inhibition.
+
+        For each neuron, we compute the current balance and compare it to the desired balance.
+        The I weights are then updated to minimize the difference between the current and desired balance, with a learning rate that can be tuned.
+        I weights are updated multiplicatively.
+        """
+        balance = self.compute_balance(t, state, args)
+        desired_balance = args.get("get_desired_balance")(t, state, args)
+        balance_error = balance - desired_balance
+
+        # Only update weights if:
+        # 1) balance is greater than 0 (i.e. there is some excitation to balance)
+        # 2) desired balance is greater than 0 (i.e. we want some balance, if desired_balance is 0 we do not want to update I weights)
+        # 3) the synaptic I conductance is greater than 0 (i.e. there is some inhibitory conductance to adjust)
+        # 4) there is an existing connection (weight is not NaN)
+        I_weight_drift = jnp.where(
+            (desired_balance > 0)
+            & (balance > 0)[:, None]
+            & (state.mean_I_conductance > 0)[:, None]
+            & (~jnp.isnan(state.W)),
+            self.balance_rate
+            * balance_error[:, None]
+            * state.W
+            * self.inhibitory_mask[None, :],
+            0.0,
+        )
+        return I_weight_drift
 
     def clip_weights(self, t, state, args):
         """Clip weights to be non-negative.
@@ -638,6 +719,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             state.filtered_spike_trains + recurrent_spikes / self.tau_spike_filter
         )
 
+        # # Spiking reduces the voltage and therefore models an outward current, so we can consider it as part of the charge_out term
+        # charge_out = state.charge_out + jnp.where(recurrent_spikes > 0, self.synaptic_increment * (self.V_reset - V) / self.membrane_capacitance, 0.0)
+
         return LIFState(
             V=V_new,
             S=recurrent_spikes,
@@ -646,6 +730,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             perturbations=state.perturbations,
             filtered_spike_trains=new_firing_rate,
             mean_E_conductance=state.mean_E_conductance,
+            mean_I_conductance=state.mean_I_conductance,
+            charge_in=state.charge_in,
+            charge_out=state.charge_out,
             var_E_conductance=state.var_E_conductance,
             time_since_last_spike=time_since_last_spike,
             spike_buffer=new_buffer,
@@ -657,116 +744,15 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     def compute_feature_update(self, t, state: LIFState, args):
         raise NotImplementedError
 
-    def compute_balance(self, t, state, args):
-        """Compute the ratio of total inhibitory to excitatory input weights for each neuron.
+    def compute_balance(self, t, state: LIFState, args):
+        """Compute the ratio of total inhibitory to excitatory conductance for each neuron.
 
         Balance is computed as:
-            balance = (total_I_weights * |E_I - V_rest| * tau_I) / (total_E_weights * |E_E - V_rest| * tau_E)
+            balance = total_E_conductance / total_I_conductance
 
-        Returns NaN if a neuron has no non-zero excitatory or inhibitory connections.
+        where total_E_conductance is syn. cond. plus perturbations, and total_I_conductance is syn. cond. plus leak conductance.
         """
-        weights = jnp.where(
-            jnp.isnan(state.W), 0.0, state.W
-        )  # Treat non-existing connections as weight 0 for balance computation
-
-        # Create masks for existing connections
-        existing_E = ~jnp.isnan(state.W) & self.excitatory_mask[None, :]
-        existing_I = ~jnp.isnan(state.W) & ~self.excitatory_mask[None, :]
-
-        N_E_connections = jnp.sum(existing_E, axis=1)
-        N_I_connections = jnp.sum(existing_I, axis=1)
-
-        # TODO: fix this. This is 1) a bit hacky and 2) bloated since we currently only use E external input
-        if "N_simulated_E_inputs" in args:
-            is_E_input = self.excitatory_mask[None, :] & jnp.concatenate(
-                [
-                    jnp.zeros((self.N_neurons,), dtype=bool),
-                    jnp.ones((self.N_inputs,), dtype=bool),
-                ]
-            )
-            existing_E = jnp.where(is_E_input, args["N_simulated_E_inputs"], existing_E)
-            N_E_connections += (
-                args["N_simulated_E_inputs"] - 1
-            )  # -1 since the existing connections already count as 1
-        if "N_simulated_I_inputs" in args:
-            is_I_input = ~self.excitatory_mask[None, :] & jnp.concatenate(
-                [
-                    jnp.zeros((self.N_neurons,), dtype=bool),
-                    jnp.ones((self.N_inputs,), dtype=bool),
-                ]
-            )
-            existing_I = jnp.where(is_I_input, args["N_simulated_I_inputs"], existing_I)
-            N_I_connections += args["N_simulated_I_inputs"]
-
-        total_E_weights = jnp.sum(weights * existing_E, axis=1)
-        total_I_weights = jnp.sum(weights * existing_I, axis=1)
-
-        # If a neuron has no excitatory or no inhibitory connections, we cannot compute a balance, so we set it to NaN in that case
-        balance = jnp.where(
-            (total_E_weights == 0.0),
-            jnp.nan,
-            (
-                total_I_weights
-                * jnp.abs(self.reversal_potential_I - self.resting_potential)
-                * self.tau_I
-            )
-            / (
-                total_E_weights
-                * jnp.abs(self.reversal_potential_E - self.resting_potential)
-                * self.tau_E
-            ),
-        )
-
-        return balance
-
-    def force_balanced_weights(self, t, state, args):
-        """Adjust weights to achieve a desired E/I balance for each neuron.
-
-        Balance is enforced by scaling inhibitory weights for each neuron to achieve the desired balance given the current excitatory weights.
-        If a neuron only has inhibitory connections of weight zero, all inhibitory weights are set to the same weight at which the desired balance is reached.
-        If a neuron has zero excitatory weights, the balance cannot be achieved by scaling inhibitory weights, so no changes are made.
-        To avoid changing weights, the desired balance can be set to 0.0, in which case no weights are modified.
-        """
-
-        desired_balance = args["get_desired_balance"](t, state, args)
-        total_I_weights = jnp.sum(
-            jnp.where(
-                jnp.isnan(state.W),
-                0.0,
-                state.W * jnp.invert(self.excitatory_mask[None, :]),
-            ),
-            axis=1,
-        )
-
-        # If there are no non-zero inhibitory connections, we set all inhibitory weights to 1 to allow the balance to be set to the correct value
-        state = eqx.tree_at(
-            lambda s: s.W,
-            state,
-            jnp.where(
-                (
-                    desired_balance != 0.0
-                )  # If desired balance is 0, we do not want to change the weights
-                & (total_I_weights == 0.0)[:, None]
-                & jnp.invert(self.excitatory_mask[None, :])
-                & ~jnp.isnan(state.W),
-                1.0,
-                state.W,
-            ),
-        )
-
-        current_balance = self.compute_balance(t, state, args)
-        adjust_ratio = desired_balance / current_balance
-
-        adjust_ratio = jnp.where(
-            (adjust_ratio == 0.0) | (~jnp.isfinite(adjust_ratio)), 1.0, adjust_ratio
-        )
-
-        # Scale inhibitory weights to achieve desired balance
-        balanced_weights = state.W * (
-            jnp.outer(adjust_ratio, jnp.invert(self.excitatory_mask))
-            + jnp.outer(jnp.ones(self.N_neurons), self.excitatory_mask)
-        )
-        return eqx.tree_at(lambda s: s.W, state, balanced_weights)
+        return state.charge_in / jnp.abs(state.charge_out)
 
     def initialize_weights(self, key: jr.PRNGKey):
         """Initialize synaptic weight matrix with random sparse connections.
@@ -835,6 +821,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         )
 
         weights = jnp.concatenate([rec_weights, input_weights], axis=1)
+
+        weights = jnp.where(
+            self.inhibitory_mask[None, :], weights * 5.0, weights
+        )  # TODO: temporary fix
+
         return weights
 
     def compute_desired_noise_std(self, t, state: LIFState, args):
