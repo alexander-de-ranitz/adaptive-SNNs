@@ -59,7 +59,7 @@ class GatedLIFNetwork(AbstractLIFNetwork):
 
         # Voltage might be temporarily above the firing threshold within a single step,
         # we clip the voltage to ensure the gating function does not become too large in this case
-        voltage = jnp.min(voltage, self.firing_threshold)
+        voltage = jnp.clip(voltage, min=None, max=self.firing_threshold)
 
         default_area = 1.0 * (
             self.firing_threshold - self.resting_potential
