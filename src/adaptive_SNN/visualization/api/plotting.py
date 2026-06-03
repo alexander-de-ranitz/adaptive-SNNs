@@ -10,11 +10,11 @@ from adaptive_SNN.models import (
     SystemState,
 )
 from adaptive_SNN.models.networks import GatedLIFNetwork, LIFNetwork
-from adaptive_SNN.utils.metrics import compute_CV_ISI, compute_synchrony
-from adaptive_SNN.visualization.utils.adapters import (
+from adaptive_SNN.utils.adapters import (
     get_LIF_model,
     get_LIF_state,
 )
+from adaptive_SNN.utils.metrics import compute_CV_ISI, compute_synchrony
 from adaptive_SNN.visualization.utils.components import (
     _plot_conductance_frequency_spectrum,
     _plot_conductances,
