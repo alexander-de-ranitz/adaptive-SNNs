@@ -19,20 +19,22 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 class PendulumEnvironment(AbstractEnvironment):
     """Environment model representing a pendulum balancing system.
 
-    The state of the pendulum is represented as a 2-dimensional vector:
+    The state of the pendulum is represented as a 3-dimensional vector:
         - angle: The angle of the pendulum from the vertical (0 radians means upright).
         - angular velocity: The rate of change of the pendulum's angle.
+        - time: Time since start of the episode (needed to reset the environment after certain time)
 
     The angle is measured from the vertical, where an angle of 0 indicates the pendulum is pointing straight upwards.
     """
 
     # fmt: off
-    dim: int = 2  # State dimension: [angle, angular velocity]
+    dim: int = 3  # State dimension: [angle, angular velocity, time]
     rate: float = 1.0  # Rate at which the environment responds to input
     g: float = 10.0  # Gravitational constant
     initial_angle_range: tuple = (-0.1, 0.1)  # Range of initial angles (in radians)
     max_allowed_angle: float = 0.3 # Maximum allowed angle before episode termination (in radians)
     max_allowed_angular_velocity: float = 0.5 # Maximum allowed angular velocity before episode termination (in radians/s)
+    max_episode_time: float = 5.0 # Maximum allowed time for an episode before termination (in seconds)
     key: Array = eqx.field(default_factory=lambda: jr.PRNGKey(0)) # Random key for initialization
     Q: Array = eqx.field(default_factory=lambda: jnp.eye(2)) # State cost matrix for LQR
     R: Array = eqx.field(default_factory=lambda: jnp.eye(1)) # Control cost matrix for LQR
@@ -60,7 +62,7 @@ class PendulumEnvironment(AbstractEnvironment):
             minval=self.initial_angle_range[0],
             maxval=self.initial_angle_range[1],
         )
-        return jnp.array([angle, 0.0], dtype=default_float)
+        return jnp.array([angle, 0.0, 0.0], dtype=default_float)
 
     @property
     def noise_shape(self):
@@ -80,6 +82,7 @@ class PendulumEnvironment(AbstractEnvironment):
             [
                 x[1],  # d(angle)/dt = angular velocity
                 total_torque,  # d(angular velocity)/dt = total torque
+                1.0,  # d(time)/dt = 1 (time increases at a constant rate)
             ],
             dtype=default_float,
         )
