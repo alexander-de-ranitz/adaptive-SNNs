@@ -44,6 +44,12 @@ def _deserialize_pytree(leaves_array: np.ndarray, treedef_array: np.ndarray):
 def _load_existing_solution(save_file: str) -> tuple[dfx.Solution, AgentEnvSystem]:
     data = np.load(save_file, allow_pickle=True)
 
+    # For backward compatibility
+    if "sol" in data:
+        sol = data["sol"].item()
+        model = data["model"].item() if "model" in data else None
+        return sol, model
+
     # Load data and reconstruct the solution object
     ys = _deserialize_pytree(data["ys"], data["ys_tree_def"])
     ts = _deserialize_pytree(data["ts"], data["ts_tree_def"])
