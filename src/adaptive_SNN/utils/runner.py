@@ -1,4 +1,5 @@
 import jax
+from jaxtyping import PyTree
 
 jax.config.update("jax_enable_x64", True)
 from pathlib import Path
@@ -9,7 +10,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from adaptive_SNN.models import AgentEnvSystem
-from adaptive_SNN.solver import solve_ODE
+from adaptive_SNN.solver import solve_ODE, solve_ODE_batched
 from adaptive_SNN.utils.config import SimulationConfig
 
 
@@ -76,37 +77,10 @@ def _load_existing_solution(save_file: str) -> tuple[dfx.Solution, AgentEnvSyste
     return sol, model
 
 
-def run_simulation(
+def setup_simulation(
     config: SimulationConfig,
-    save_results: bool = True,
-    overwrite: bool = False,
-    load_if_exists: bool = True,
-    save_model: bool = False,
-    downcast_to_float32: bool = True,
-):
-    """Run a simulation and optionally reuse or overwrite saved results.
-
-    Behavior when a save file exists:
-    - overwrite=False, load_if_exists=True: load and return saved solution.
-    - overwrite=False, load_if_exists=False: raise FileExistsError.
-    - overwrite=True: run simulation and replace stored result.
-    """
-    save_file = config.normalized_save_file()
-    save_path = Path(save_file)
-
-    if save_results and save_path.exists() and not overwrite:
-        if load_if_exists:
-            print(f"Loading existing result from {save_file}")
-            return _load_existing_solution(save_file)
-        raise FileExistsError(
-            f"Result file already exists at {save_file}. "
-            "Use overwrite=True to rerun or load_if_exists=True to load it."
-        )
-
-    if save_results:
-        config.ensure_output_directory()
-        config.print_to_file()
-
+) -> tuple[AgentEnvSystem, PyTree, jr.PRNGKey]:
+    """Set up the model, initial state, and key for a simulation based on the config."""
     if isinstance(config.key, int):
         key = jr.PRNGKey(config.key)
     else:
@@ -148,22 +122,58 @@ def run_simulation(
         agent_output_shape=config.network_output_shape,
     )
 
-    solver = dfx.EulerHeun()
-    init_state = model.initial
-
     args = {
         "get_learning_rate": lambda t, x, args: jnp.where(
-            t < config.warmup_time,
-            0.0,
-            config.lr,
+            t < args["warmup_time"], 0.0, args["lr"]
         ),
         "network_output_fn": config.network_output_fn,
         "reward_fn": config.reward_fn,
         "input_spike_fn": config.input_spike_fn,
-        "get_desired_balance": lambda t, x, args: jnp.array([config.balance]),
-        "noise_scale_hyperparam": config.noise_level,
+        "get_desired_balance": lambda t, x, args: jnp.array([args["balance"]]),
+        "lr": jnp.asarray(config.lr),
+        "warmup_time": jnp.asarray(config.warmup_time),
+        "balance": jnp.asarray(config.balance),
+        "noise_scale_hyperparam": jnp.asarray(config.noise_level),
         **config.args,
     }
+
+    return model, args, simulation_key
+
+
+def run_simulation(
+    config: SimulationConfig,
+    save_results: bool = True,
+    overwrite: bool = False,
+    load_if_exists: bool = True,
+    save_model: bool = False,
+    downcast_to_float32: bool = True,
+):
+    """Run a simulation and optionally reuse or overwrite saved results.
+
+    Behavior when a save file exists:
+    - overwrite=False, load_if_exists=True: load and return saved solution.
+    - overwrite=False, load_if_exists=False: raise FileExistsError.
+    - overwrite=True: run simulation and replace stored result.
+    """
+    save_file = config.normalized_save_file()
+    save_path = Path(save_file)
+
+    if save_results and save_path.exists() and not overwrite:
+        if load_if_exists:
+            print(f"Loading existing result from {save_file}")
+            return _load_existing_solution(save_file)
+        raise FileExistsError(
+            f"Result file already exists at {save_file}. "
+            "Use overwrite=True to rerun or load_if_exists=True to load it."
+        )
+
+    if save_results:
+        config.ensure_output_directory()
+        config.print_to_file()
+
+    model, args, simulation_key = setup_simulation(config)
+    init_state = model.initial
+    solver = dfx.EulerHeun()
 
     sol = solve_ODE(
         model,
@@ -203,3 +213,68 @@ def run_simulation(
             )
 
     return sol, model
+
+
+def run_batched_simulation(
+    configs: list[SimulationConfig],
+    save_results: bool = True,
+    overwrite: bool = False,
+    load_if_exists: bool = True,
+    save_model: bool = False,
+    downcast_to_float32: bool = True,
+):
+    """Run multiple simulations in parallel based on a list of configs.
+
+    All configs use the same args, taken from the first config. #TODO: Can we relax this?
+    """
+    assert all(
+        config.t0 == configs[0].t0
+        and config.t1 == configs[0].t1
+        and config.dt == configs[0].dt
+        for config in configs
+    ), "All configs must have the same time parameters for batched simulation."
+
+    models, args_list, keys = zip(*(setup_simulation(config) for config in configs))
+    y0s = [model.initial for model in models]
+
+    solver = dfx.EulerHeun()
+    sols = solve_ODE_batched(
+        models=models,
+        solver=solver,
+        t0=configs[0].t0,
+        t1=configs[0].t1,
+        dt0=configs[0].dt,
+        y0s=y0s,
+        save_at=configs[0].save_at,
+        args=args_list[0],
+        keys=keys,
+    )
+
+    if save_results:
+        for i, config in enumerate(configs):
+            ys_i = jax.tree.map(lambda arr: arr[i], sols.ys)
+            ts_i = sols.ts[i]
+            ys_values, ys_tree_def = _serialize_pytree(
+                ys_i, downcast_to_float32=downcast_to_float32
+            )
+            ts_values, ts_tree_def = _serialize_pytree(
+                ts_i, downcast_to_float32=downcast_to_float32
+            )
+            if save_model:
+                np.savez(
+                    config.save_file,
+                    ys=ys_values,
+                    ys_tree_def=ys_tree_def,
+                    ts=ts_values,
+                    ts_tree_def=ts_tree_def,
+                    model=models[i],
+                )
+            else:
+                np.savez(
+                    config.save_file,
+                    ys=ys_values,
+                    ys_tree_def=ys_tree_def,
+                    ts=ts_values,
+                    ts_tree_def=ts_tree_def,
+                )
+    return sols, models

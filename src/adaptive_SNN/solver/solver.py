@@ -84,9 +84,6 @@ def solve_ODE(
         t0, t1, n_steps, dt0, y0, ys, save_indices, save_fn, terms, args, model, solver
     )
 
-    # Wait until results are ready
-    jax.tree.map(lambda x: x.block_until_ready(), (y_final, ys))
-
     # If no states were saved, return the final state
     if ys is None:
         ys = y_final
@@ -104,6 +101,68 @@ def solve_ODE(
         made_jump=None,
         event_mask=None,
     )
+
+
+def _stack_pytree(pytrees):
+    """Stack array leaves across a sequence of pytrees with identical structure.
+
+    Non-array leaves (callables, Python ints/floats, etc.) must be identical across
+    all pytrees; the value from the first element is used for them.
+    """
+    return jax.tree.map(
+        lambda *xs: jnp.stack(xs) if eqx.is_array(xs[0]) else xs[0],
+        *pytrees,
+    )
+
+
+def solve_ODE_batched(
+    models,
+    solver: Euler,
+    t0: float,
+    t1: float,
+    dt0: float,
+    y0s: PyTree,
+    save_at: SaveAt,
+    args: PyTree = None,
+    keys: Array | PyTree = jr.PRNGKey(0),
+) -> Array:
+    """
+    Batched version of solve_ODE, which runs multiple simulations in parallel.
+
+    `args` is broadcast to every batch element (all simulations must share the same
+    args). Models, initial states, and keys are stacked along a leading batch dimension.
+
+    Args:
+        models: Sequence of models
+        solver: A diffrax solver implementing `.step(...)`.
+        t0, t1: Simulation interval.
+        dt0: step size.
+        y0s: Initial PyTree states, one per simulation.
+        save_at: SaveAt object specifying when to save states. Shared across all simulations.
+        args: Single args dict broadcast to all simulations (PyTree or None).
+        keys: Sequence of PRNG keys, one per simulation.
+    Returns:
+        diffrax.Solution with (ts, ys) carrying a leading batch dimension.
+    """
+    stacked_models = _stack_pytree(models)
+    stacked_y0s = _stack_pytree(y0s)
+    stacked_keys = jnp.stack(keys)
+
+    @eqx.filter_vmap
+    def run_in_parallel(model, y0, key):
+        return solve_ODE(
+            model=model,
+            solver=solver,
+            t0=t0,
+            t1=t1,
+            dt0=dt0,
+            y0=y0,
+            save_at=save_at,
+            args=args,
+            key=key,
+        )
+
+    return run_in_parallel(stacked_models, stacked_y0s, stacked_keys)
 
 
 @eqx.filter_jit
