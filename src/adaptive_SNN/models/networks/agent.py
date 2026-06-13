@@ -128,7 +128,7 @@ class Agent(eqx.Module):
         )
         new_reward_predictor_state = self.reward_prediction_model.update(
             t, x.reward_predictor_state, args
-        )  # reward and network_state are not needed for the current reward predictor update, but we include them here for future extensibility
+        )
 
         return AgentState(new_network_state, new_reward_predictor_state, x.RPE)
 
