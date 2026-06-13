@@ -80,6 +80,7 @@ class LIFState(eqx.Module):
     filtered_spike_trains: Array
     mean_E_conductance: Array
     mean_I_conductance: Array
+    mean_V: Array
     charge_in: Array
     charge_out: Array
     var_E_conductance: Array
@@ -275,7 +276,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         buffer_index = jnp.array(0, dtype=default_float)
         mean_E_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
         mean_I_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
-        std_E_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
+        var_E_conductance = jnp.zeros((self.N_neurons,), dtype=default_float)
 
         return LIFState(
             V=V_init,
@@ -287,11 +288,12 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             time_since_last_spike=time_since_last_spike,
             spike_buffer=spike_buffer,
             buffer_index=buffer_index,
+            mean_V=V_init,
             mean_E_conductance=mean_E_conductance,
+            var_E_conductance=var_E_conductance,
             mean_I_conductance=mean_I_conductance,
             charge_in=jnp.zeros((self.N_neurons,), dtype=default_float),
             charge_out=jnp.zeros((self.N_neurons,), dtype=default_float),
-            var_E_conductance=std_E_conductance,
             features=self.init_features(),
         )
 
@@ -354,6 +356,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         # Firing rate is modelled as an exponential moving average of spikes
         d_firing_rate = -state.filtered_spike_trains / self.tau_spike_filter
 
+        # Mean voltage drift
+        d_mean_V = (state.V - state.mean_V) / self.tau_low_pass
+
         # Update mean and variance of excitatory conductance as exponential moving averages
         d_mean_E_conductance = (
             -state.mean_E_conductance + synaptic_E_conductances
@@ -383,11 +388,12 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             G=dG,
             perturbations=d_perturbations,
             filtered_spike_trains=d_firing_rate,
+            mean_V=d_mean_V,
             mean_E_conductance=d_mean_E_conductance,
             mean_I_conductance=d_mean_I_conductance,
+            var_E_conductance=d_var_E_conductance,
             charge_in=d_charge_in,
             charge_out=d_charge_out,
-            var_E_conductance=d_var_E_conductance,
             time_since_last_spike=d_time_since_last_spike,
             spike_buffer=d_spike_buffer,
             buffer_index=d_buffer_index,
@@ -462,11 +468,12 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             G=None,
             perturbations=self.noise_model.noise_shape,
             filtered_spike_trains=None,
+            mean_V=None,
             mean_E_conductance=None,
             mean_I_conductance=None,
+            var_E_conductance=None,
             charge_in=None,
             charge_out=None,
-            var_E_conductance=None,
             time_since_last_spike=None,
             spike_buffer=None,
             buffer_index=None,
@@ -728,11 +735,12 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             G=G_new,
             perturbations=state.perturbations,
             filtered_spike_trains=new_firing_rate,
+            mean_V=state.mean_V,
             mean_E_conductance=state.mean_E_conductance,
             mean_I_conductance=state.mean_I_conductance,
+            var_E_conductance=state.var_E_conductance,
             charge_in=state.charge_in,
             charge_out=state.charge_out,
-            var_E_conductance=state.var_E_conductance,
             time_since_last_spike=time_since_last_spike,
             spike_buffer=new_buffer,
             buffer_index=new_buffer_index,
@@ -747,11 +755,20 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         """Compute the ratio of total inhibitory to excitatory conductance for each neuron.
 
         Balance is computed as:
-            balance = total_E_conductance / total_I_conductance
+            balance = charge_in / abs(charge_out)
 
-        where total_E_conductance is syn. cond. plus perturbations, and total_I_conductance is syn. cond. plus leak conductance.
+        Balance is set to 1 if either charge_in or charge_out is zero.
+        This is done because there is no way to define a meaningful balance value when there is no excitatory or inhibitory conductance,
+        and we do not want to update I weights in this case (as there is no inhibitory conductance to adjust or no excitatory conductance to balance).
+
+        Returns:
+            Array of shape (N_neurons,) with balance values for each neuron.
         """
-        return state.charge_in / jnp.abs(state.charge_out)
+        return jnp.where(
+            (jnp.abs(state.charge_out) > 0) & (jnp.abs(state.charge_in) > 0),
+            state.charge_in / jnp.abs(state.charge_out),
+            1.0,
+        )
 
     def initialize_weights(self, key: jr.PRNGKey):
         """Initialize synaptic weight matrix with random sparse connections.
@@ -849,8 +866,21 @@ class AbstractLIFNetwork(AbstractNeuronModel):
 
     def reset(self, t, state: LIFState, args):
         """Reset the network state to the initial state."""
+        current_mean_V = state.mean_V
         current_weights = state.W
+        current_charge_in = state.charge_in
+        current_charge_out = state.charge_out
+
         reset_state = self.initial
         # We want to keep the same weights but reset all other state variables to their initial values, so we replace the weights in the initial state with the current weights
         reset_state = eqx.tree_at(lambda s: s.W, reset_state, current_weights)
+
+        # We also want to keep the current mean voltage to prevent large transients after reset
+        # Otherwise, there will be a large influx in charge before the network starts spiking and producing recurrent inhibition
+        reset_state = eqx.tree_at(lambda s: s.mean_V, reset_state, current_mean_V)
+
+        reset_state = eqx.tree_at(lambda s: s.charge_in, reset_state, current_charge_in)
+        reset_state = eqx.tree_at(
+            lambda s: s.charge_out, reset_state, current_charge_out
+        )
         return reset_state
