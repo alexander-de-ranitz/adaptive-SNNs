@@ -70,14 +70,16 @@ def compute_rates(
     return rates
 
 
-def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfig:
+def create_pendulum_config(
+    N_neurons=1000, model_cls=GatedLIFNetwork, key=jr.PRNGKey(0)
+) -> SimulationConfig:
     t0 = 0
     t1 = 5
     dt = 1e-4
     lr = 0.0
     noise_level = 0.0
-    min_noise_std = 0e-9
-    balance = 1.02
+    min_noise_std = 5e-9
+    balance = 1.05
     N_inputs = 200
     agent_output_scaling = (
         0.25  # Scale the output so that it doesn't produce excessively large torques
@@ -101,8 +103,8 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
 
     # Define network output function
     output_pop = jnp.arange(
-        N_neurons // 20
-    )  # the first 20% of neurons are the output population
+        jnp.round(N_neurons * 0.1).astype(int)
+    )  # the first 10% of neurons are the output population
     left = output_pop[
         : output_pop.size // 2
     ]  # first half codes for left torque, second half for right torque
@@ -116,18 +118,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
     )
 
     def reward_fn(t, x: SystemState, args):
-        instantaneous_reward = (
-            -(x.environment_state[0] ** 2)
-            - 0.1 * x.environment_state[1] ** 2
-            - 0.01 * jnp.squeeze(x.agent_output) ** 2
-        )
-        shaping_reward = (
-            2
-            * x.environment_state[:2].T
-            @ env.cost_to_go_matrix
-            @ env.drift(t, x.environment_state, args, x.agent_output)[:2]
-        )
-        return jnp.atleast_1d(instantaneous_reward - shaping_reward)
+        return env.reward_fn(t, x.environment_state, args, x.agent_output)
 
     def save(t, x: SystemState, args):
         # return (x.environment_state, x.reward_signal, x.agent_state.reward_predictor_state.value, x.agent_state.network_state.filtered_spike_trains)
@@ -135,7 +126,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
 
     save_at = SaveAt(steps=True, fn=save)
 
-    model_cls = GatedLIFNetwork
+    model_cls = model_cls
     cfg = SimulationConfig(
         network_cls=model_cls,
         N_neurons=N_neurons,
@@ -168,6 +159,7 @@ def create_pendulum_config(N_neurons=1000, key=jr.PRNGKey(0)) -> SimulationConfi
         reward_prediction_model=RLSRewardPredictor,
         reward_predictor_kwargs={"input_dim": N_neurons},
         args={
+            "delta_V": jnp.power(jnp.float64(2), jnp.float64(-12)),
             "use_noise": jnp.array([True]),
             "feature_fn": lambda t,
             network_state,
