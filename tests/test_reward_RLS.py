@@ -21,8 +21,9 @@ def test_initial_state_shapes():
     state = predictor.initial
 
     assert state.value.shape == (1,)
-    assert state.weights.shape == (dim,)
-    assert state.P.shape == (dim, dim)
+    # Dim + 1 because of the bias term in the weights
+    assert state.weights.shape == (dim + 1,)
+    assert state.P.shape == (dim + 1, dim + 1)
 
 
 def test_initial_state_values():
@@ -33,7 +34,7 @@ def test_initial_state_values():
 
     assert jnp.all(state.value == 0.0)
     assert jnp.all(state.weights == 0.0)
-    assert jnp.allclose(state.P, jnp.eye(dim) * P_init)
+    assert jnp.allclose(state.P, jnp.eye(dim + 1) * P_init)
 
 
 def test_drift_returns_zeros():

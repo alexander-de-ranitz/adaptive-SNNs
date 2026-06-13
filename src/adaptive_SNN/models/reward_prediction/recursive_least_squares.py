@@ -32,8 +32,8 @@ class RLSRewardPredictor(AbstractRewardPredictor):
     def initial(self):
         return RLSRewardPrediction(
             value=jnp.zeros((1,)),
-            weights=jnp.zeros((self.input_dim,)),
-            P=jnp.eye(self.input_dim) * self.P_init,
+            weights=jnp.zeros((self.input_dim + 1,)),  # +1 for the bias term
+            P=jnp.eye(self.input_dim + 1) * self.P_init,
         )
 
     @property
@@ -42,6 +42,7 @@ class RLSRewardPredictor(AbstractRewardPredictor):
 
     def pre_step_update(self, t, x: RLSRewardPrediction, args, reward, network_state):
         features = args["feature_fn"](t, network_state, args)
+        features = jnp.concatenate([features, jnp.ones((1,))])  # Add bias term
         weights = x.weights
         predicted_reward = jnp.atleast_1d(weights @ features)
 
