@@ -113,6 +113,7 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
         mean_I_conductance=jnp.zeros((N_neurons,)),
         charge_in=jnp.zeros((N_neurons,)),
         charge_out=jnp.zeros((N_neurons,)),
+        mean_V=jnp.ones((N_neurons,)) * model.resting_potential,
         var_E_conductance=jnp.zeros((N_neurons,)),
         time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
         spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),
