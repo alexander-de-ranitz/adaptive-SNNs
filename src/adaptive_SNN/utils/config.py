@@ -150,6 +150,16 @@ class SimulationConfig:
         with open(info_file, "w", encoding="utf-8") as f:
             for field in fields(self):
                 if field.name == "save_at":
+                    try:
+                        f.write(f"{field.name}:\n")
+                        value = getattr(self, field.name)
+                        save_fn = value.subs[0].fn
+                        if save_fn is not None:
+                            f.write(inspect.getsource(save_fn) + "\n")
+                    except Exception as e:
+                        f.write(
+                            f"Could not retrieve save_at function source code: {e}\n"
+                        )
                     continue
                 if field.name in ["network_output_fn", "input_spike_fn", "reward_fn"]:
                     f.write(f"{field.name}:\n")
@@ -157,6 +167,8 @@ class SimulationConfig:
                     if value is not None:
                         f.write(inspect.getsource(value) + "\n")
                     else:
-                        f.write("None\n")
+                        f.write(
+                            f"Could not retrieve {field.name} function source code.\n"
+                        )
                     continue
                 f.write(f"{field.name}: {getattr(self, field.name)}\n")
