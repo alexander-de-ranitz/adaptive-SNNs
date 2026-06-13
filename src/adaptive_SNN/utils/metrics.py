@@ -2,7 +2,6 @@ from jax import numpy as jnp
 from jaxtyping import Array
 
 from adaptive_SNN.models.networks import AbstractLIFNetwork
-from adaptive_SNN.utils.adapters import get_LIF_model, get_LIF_state
 
 
 def compute_CV_ISI(spikes: Array, ts: Array) -> Array:
@@ -91,49 +90,6 @@ def compute_balance_from_V(V) -> Array:
         total_I_charge / (total_E_charge) if total_E_charge > 0 else jnp.inf
     )
     return total_charge_per_neuron
-
-
-def compute_charge_ratio(t, state, model) -> Array:
-    """Compute the ratio of total inhibitory to excitatory charge for each neuron.
-
-    Essentially computes the ratio:
-        total_inhibitory_charge / total_excitatory_charge
-    where total_inhibitory_charge = (sum_j W_ij * G_ij * (1 - exc_mask_j) + noise_I) * (E_I - V_i)
-          total_excitatory_charge = (sum_j W_ij * G_ij * exc_mask_j + noise_E) * (E_E - V_i)
-
-    Args:
-        t (jnp.ndarray): Time array of shape (num_time_steps,).
-        state: The state of the network containing synaptic conductances.
-        model: The network model containing parameters and structure.
-    Returns:
-        jnp.ndarray: An array of shape (num_neurons,) containing the ratio of total inhibitory to excitatory charge.
-    """
-    model = get_LIF_model(model)
-    network_state = get_LIF_state(state)
-
-    W = network_state.W
-    G = network_state.G
-    V = network_state.V
-    noise = network_state.perturbations
-    exc_mask = model.excitatory_mask
-    leak_conductance = model.leak_conductance
-
-    dt = t[1] - t[0]
-    W = jnp.where(~jnp.isnan(W), W, 0.0)
-    weighed_G_inhibitory = (
-        jnp.sum(W * G * jnp.invert(exc_mask[None, :]), axis=-1) + leak_conductance
-    )
-    weighed_G_excitatory = jnp.sum(W * G * exc_mask[None, :], axis=-1) + noise
-
-    total_inhibitory_charge = (
-        jnp.sum(weighed_G_inhibitory * (model.reversal_potential_I - V), axis=0) * dt
-    )
-    total_excitatory_charge = (
-        jnp.sum(weighed_G_excitatory * (model.reversal_potential_E - V), axis=0) * dt
-    )
-
-    ratio = jnp.abs(total_inhibitory_charge / (total_excitatory_charge))
-    return ratio
 
 
 def compute_synchrony(
