@@ -33,11 +33,11 @@ class PendulumEnvironment(AbstractEnvironment):
     g: float = 10.0  # Gravitational constant
     initial_angle_range: tuple = (-0.1, 0.1)  # Range of initial angles (in radians)
     max_allowed_angle: float = 0.3 # Maximum allowed angle before episode termination (in radians)
-    max_allowed_angular_velocity: float = 0.5 # Maximum allowed angular velocity before episode termination (in radians/s)
+    max_allowed_angular_velocity: float = 1.0 # Maximum allowed angular velocity before episode termination (in radians/s)
     max_episode_time: float = 5.0 # Maximum allowed time for an episode before termination (in seconds)
     key: Array = eqx.field(default_factory=lambda: jr.PRNGKey(0)) # Random key for initialization
-    Q: Array = eqx.field(default_factory=lambda: jnp.eye(2)) # State cost matrix for LQR
-    R: Array = eqx.field(default_factory=lambda: jnp.eye(1)) # Control cost matrix for LQR
+    Q: Array = eqx.field(default_factory=lambda: jnp.diag(jnp.array([1.0, 0.1]))) # State cost matrix for LQR
+    R: Array = eqx.field(default_factory=lambda: 0.001 * jnp.eye(1)) # Control cost matrix for LQR
     control_gain: Array = None  # Optimal control gain matrix, to be computed based on system dynamics
     cost_to_go_matrix: Array = None  # Cost-to-go matrix, to be computed based on system dynamics
     # fmt: on
@@ -106,3 +106,15 @@ class PendulumEnvironment(AbstractEnvironment):
 
     def reset(self, t, x, args):
         return self.initial
+
+    def reward_fn(self, t, x, args, agent_output):
+        instantaneous_cost = x[:2].T @ self.Q @ x[:2] + jnp.atleast_1d(
+            agent_output
+        ).T @ self.R @ jnp.atleast_1d(agent_output)
+        shaping = (
+            2
+            * x[:2].T
+            @ self.cost_to_go_matrix
+            @ self.drift(t, x, args, agent_output)[:2]
+        )
+        return jnp.atleast_1d(-instantaneous_cost - shaping)
