@@ -10,6 +10,7 @@ from adaptive_SNN.models.networks.eligibility_LIF import (
     EligibilityLIFNetwork,
 )
 from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
+from adaptive_SNN.models.networks.network_handler import NetworkHandler
 from adaptive_SNN.models.networks.vanilla_LIF import LIFNetwork
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "Eligibility",
     "ElibilityState",
     "GatedLIFNetwork",
+    "NetworkHandler",
 ]
