@@ -208,6 +208,9 @@ class DummySpikingNetwork(AbstractNeuronModel):
     def initial(self):
         return make_baseline_state(self)
 
+    def pre_step_update(self, t, x, args, input_spikes):
+        return x
+
     def init_features(self):
         pass
 
@@ -233,7 +236,7 @@ class DummySpikingNetwork(AbstractNeuronModel):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args, input_spikes):
+    def update(self, t, x, args):
         # Generate spikes based on output rates
         spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
         return eqx.tree_at(lambda s: s.S, x, spikes)

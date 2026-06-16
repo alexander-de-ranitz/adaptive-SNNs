@@ -301,6 +301,49 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     def init_features(self):
         raise NotImplementedError
 
+    def pre_step_update(self, t, state: LIFState, args, input_spikes):
+        """Handles spike integration and other non-differential updates to the state before computing the drift/diffusion.
+
+        Spikes are added to the buffer in update(). In the next step, they are integrated into the conductances based.
+        """
+        W, G = state.W, state.G
+        # Get delayed spikes and update conductances based on delayed activity
+        delayed_spikes = self.get_delayed_spikes(
+            state
+        )  # Only for the recurrent connections: shape = (N_neurons, N_neurons)
+
+        # Update conductances from recurrent spikes
+        G_new = G.at[:, : self.N_neurons].add(delayed_spikes * self.synaptic_increment)
+
+        # Update conductances based on current input spikes
+        if input_spikes.ndim == 1:
+            if input_spikes.shape[0] != self.N_inputs:
+                raise ValueError(
+                    f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
+                )
+        elif input_spikes.shape != (self.N_neurons, self.N_inputs):
+            raise ValueError(
+                f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
+            )
+        G_new = G_new.at[:, self.N_neurons :].add(
+            input_spikes * self.synaptic_increment
+        )
+
+        G_new = jnp.where(
+            jnp.isnan(W), 0.0, G_new
+        )  # Only update conductances for existing connections, else set to 0
+
+        # Update G
+        state = eqx.tree_at(lambda s: s.G, state, G_new)
+
+        # Move buffer index forward
+        new_buffer_index = jnp.round(
+            (state.buffer_index + 1) % self.buffer_size
+        ).astype(state.buffer_index.dtype)
+        state = eqx.tree_at(lambda s: s.buffer_index, state, new_buffer_index)
+
+        return state
+
     def drift(self, t, state: LIFState, args, RPE: Array = jnp.zeros(1)) -> LIFState:
         """Compute deterministic time derivatives for LIF state.
 
@@ -495,13 +538,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             ),
         )
 
-    # TODO: input spikes is now required for the update function, but this means this class can not be simulated standalone without a wrapper that provides the input
-    # consider refactoring to make input_spikes optional or provide a default value (e.g. zeros) to allow standalone simulation
-    def update(self, t, x: LIFState, args, input_spikes: Array) -> LIFState:
+    def update(self, t, x: LIFState, args) -> LIFState:
         """Apply non-differential updates to the state, e.g. spikes, resets, balancing, etc."""
         perturbations = self.noise_model.update(t, x.perturbations, args)
         state = eqx.tree_at(lambda s: s.perturbations, x, perturbations)
-        state = self.spike_and_reset(t, state, args, input_spikes)
+        state = self.spike_and_reset(t, state, args)
         state = self.clip_weights(t, state, args)
         return state
 
@@ -653,14 +694,15 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         return delayed_spikes
 
     def spike_and_reset(
-        self, t, state: LIFState, args, input_spikes: Array
+        self,
+        t,
+        state: LIFState,
+        args,
     ) -> LIFState:
         """Handle spiking and resetting of neurons.
 
         Neurons that cross the firing threshold emit a spike and have their membrane potential reset.
         The spike buffer is updated with the current spikes, and the buffer index is incremented.
-        Synaptic conductances are updated based on delayed spikes from the buffer for recurrent connections
-        and current input spikes for input connections.
         Auxiliary information such as firing rate and time since last spike are also updated.
 
         Args:
@@ -668,12 +710,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             state: Current LIFState
             args: Dictionary of additional arguments, must contain:
                 - input_spike_fn(t, state, args) -> Array of shape (N_neurons, N_inputs) representing current input spikes
-            input_spikes: Array of shape (N_neurons, N_inputs) representing input spikes
 
         Returns:
             Updated LIFState after spiking and updates
         """
-        V, W, G = state.V, state.W, state.G
+        V = state.V
         recurrent_spikes = (V > self.firing_threshold).astype(V.dtype)  # (N_neurons,)
         V_new = (1.0 - recurrent_spikes) * V + recurrent_spikes * self.V_reset
 
@@ -687,35 +728,6 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             state.spike_buffer.at[buffer_idx].set(recurrent_spikes),
         )
         new_buffer = state.spike_buffer
-        new_buffer_index = jnp.round(
-            (state.buffer_index + 1) % self.buffer_size
-        ).astype(state.buffer_index.dtype)
-
-        # Get delayed spikes and update conductances based on delayed activity
-        delayed_spikes = self.get_delayed_spikes(
-            state
-        )  # Only for the recurrent connections: shape = (N_neurons, N_neurons)
-
-        # Update conductances from recurrent spikes
-        G_new = G.at[:, : self.N_neurons].add(delayed_spikes * self.synaptic_increment)
-
-        # Update conductances based on current input spikes
-        if input_spikes.ndim == 1:
-            if input_spikes.shape[0] != self.N_inputs:
-                raise ValueError(
-                    f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
-                )
-        elif input_spikes.shape != (self.N_neurons, self.N_inputs):
-            raise ValueError(
-                f"Input spikes shape {input_spikes.shape} does not match expected shape ({self.N_inputs},) or {(self.N_neurons, self.N_inputs)}"
-            )
-        G_new = G_new.at[:, self.N_neurons :].add(
-            input_spikes * self.synaptic_increment
-        )
-
-        G_new = jnp.where(
-            jnp.isnan(W), 0.0, G_new
-        )  # Only update conductances for existing connections, else set to 0
 
         time_since_last_spike = jnp.where(
             recurrent_spikes > 0, 0.0, state.time_since_last_spike
@@ -725,14 +737,11 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             state.filtered_spike_trains + recurrent_spikes / self.tau_spike_filter
         )
 
-        # # Spiking reduces the voltage and therefore models an outward current, so we can consider it as part of the charge_out term
-        # charge_out = state.charge_out + jnp.where(recurrent_spikes > 0, self.synaptic_increment * (self.V_reset - V) / self.membrane_capacitance, 0.0)
-
         return LIFState(
             V=V_new,
             S=recurrent_spikes,
-            W=W,
-            G=G_new,
+            W=state.W,
+            G=state.G,
             perturbations=state.perturbations,
             filtered_spike_trains=new_firing_rate,
             mean_V=state.mean_V,
@@ -743,7 +752,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             charge_out=state.charge_out,
             time_since_last_spike=time_since_last_spike,
             spike_buffer=new_buffer,
-            buffer_index=new_buffer_index,
+            buffer_index=state.buffer_index,
             features=self.compute_feature_update(t, state, args),
         )
 

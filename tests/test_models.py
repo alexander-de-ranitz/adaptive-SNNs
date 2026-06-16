@@ -506,7 +506,7 @@ def test_spike_generation():
     state = make_baseline_state(model, V=V, W=W)
     args = make_default_args(N, 0)
 
-    new_state = model.spike_and_reset(0.0, state, args, input_spikes=jnp.zeros((N, 0)))
+    new_state = model.spike_and_reset(0.0, state, args)
 
     expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
     expected_V_new = (
@@ -518,13 +518,9 @@ def test_spike_generation():
     assert jnp.allclose(new_state.V, expected_V_new)
 
     mask = jnp.array(expected_spikes, dtype=bool)
-    assert jnp.allclose(
-        new_state.G[[0, 1, 3, 4, 0, 1, 2, 3], [2, 2, 2, 2, 4, 4, 4, 4]],
-        model.synaptic_increment,
-        atol=1e-10,
-    )  # Check synaptic increments where expected
-    assert jnp.allclose(new_state.G[:, jnp.invert(mask)], 0.0, atol=1e-10)
+
     assert jnp.all(new_state.W == state.W)
+    assert jnp.all(new_state.G == state.G)
 
     expected_time_since_last_spike = jnp.array([jnp.inf, jnp.inf, 0.0, jnp.inf, 0.0])
     assert jnp.allclose(new_state.time_since_last_spike, expected_time_since_last_spike)
@@ -535,7 +531,41 @@ def test_spike_generation():
     assert jnp.all(drift.V[jnp.invert(mask)] != 0.0)
 
 
-def test_spike_generation_with_input():
+def test_spike_handling():
+    N = 5
+    model = make_LIF_model(N_neurons=N, N_inputs=0, key=jr.PRNGKey(6))
+
+    # Set synaptic delays to zero for test (also update precomputed delay steps)
+    object.__setattr__(
+        model, "synaptic_delay_matrix", jnp.zeros_like(model.synaptic_delay_matrix)
+    )
+    object.__setattr__(
+        model, "synaptic_delay_steps", jnp.zeros_like(model.synaptic_delay_steps)
+    )
+
+    V = jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
+    W = jnp.ones((N, N))
+    state = make_baseline_state(model, V=V, W=W)
+    args = make_default_args(N, 0)
+
+    # Generate spikes and store in spike buffer
+    new_state = model.spike_and_reset(0.0, state, args)
+    assert jnp.allclose(new_state.S, V > model.firing_threshold)
+
+    new_state = model.pre_step_update(
+        0.0, new_state, args, input_spikes=jnp.zeros((N, 0))
+    )
+
+    mask = V > model.firing_threshold
+    assert jnp.allclose(
+        new_state.G[[0, 1, 3, 4, 0, 1, 2, 3], [2, 2, 2, 2, 4, 4, 4, 4]],
+        model.synaptic_increment,
+        atol=1e-10,
+    )  # Check synaptic increments where expected
+    assert jnp.allclose(new_state.G[:, jnp.invert(mask)], 0.0, atol=1e-10)
+
+
+def test_spike_handling_with_input():
     N_neurons, N_inputs = 4, 3
     model = make_LIF_model(N_neurons=N_neurons, N_inputs=N_inputs, key=jr.PRNGKey(7))
 
@@ -551,34 +581,41 @@ def test_spike_generation_with_input():
     W = jnp.ones((N_neurons, N_neurons + N_inputs))
     state = make_baseline_state(model, V=V, W=W)
 
-    input_spikes = jnp.tile(jnp.array([1, 0, 0]), (N_neurons, 1))
-
     args = make_default_args(N_neurons, N_inputs)
 
-    new_state = model.spike_and_reset(0.0, state, args=args, input_spikes=input_spikes)
-    V_new, spikes, W_new, G_new = new_state.V, new_state.S, new_state.W, new_state.G
+    new_state = model.spike_and_reset(0.0, state, args=args)
+    V_new, spikes, W_new = new_state.V, new_state.S, new_state.W
 
     expected_spikes = jnp.array([0, 0, 1, 0], dtype=bool)
     expected_V_new = new_state.V.at[2].set(model.V_reset)
 
     assert jnp.allclose(spikes, expected_spikes)
     assert jnp.allclose(V_new, expected_V_new)
-
-    recurrent_G = G_new[:, : model.N_neurons]
-    input_G = G_new[:, model.N_neurons :]
-
-    assert jnp.allclose(recurrent_G[:, 2], model.synaptic_increment, atol=1e-10)
-    assert jnp.allclose(recurrent_G[:, jnp.array([0, 1, 3])], 0.0, atol=1e-10)
-    assert jnp.allclose(input_G[:, 0], model.synaptic_increment, atol=1e-10)
-    assert jnp.allclose(input_G[:, 1:], 0.0, atol=1e-10)
+    assert jnp.allclose(new_state.G, 0.0, atol=1e-10)
     assert jnp.all(W_new == state.W)
+
+    # Now perform pre-setup update which applies the spikes to conductances and check that only the expected synapses are updated
+    input_spikes = jnp.tile(jnp.array([1, 0, 0]), (N_neurons, 1))
+    new_state = model.pre_step_update(0.0, new_state, args, input_spikes=input_spikes)
+
+    assert jnp.allclose(
+        new_state.G[[0, 1, 3, 4, 0, 1, 2, 3], [2, 2, 2, 2, 4, 4, 4, 4]],
+        model.synaptic_increment,
+        atol=1e-10,
+    )  # Check recurrent synaptic increments where expected
+    assert jnp.allclose(
+        new_state.G[:, N_neurons],
+        model.synaptic_increment,
+        atol=1e-10,
+    )  # Check input synaptic increments where expected
+    assert jnp.allclose(
+        new_state.G[:, jnp.array([0, 1, 3])], 0.0, atol=1e-10
+    )  # Check no synaptic increments where not expected
 
     # Check conductance decay
     derivs = model.drift(0.0, new_state, args)
     dS = derivs.S
     dG = derivs.G
-    print(dG)
-    print(new_state.G)
     assert jnp.all(dS == 0)
     assert jnp.all(dG[:, model.N_neurons + 0] < 0)
     assert jnp.all(dG[:, model.N_neurons + 1 :] == 0)
