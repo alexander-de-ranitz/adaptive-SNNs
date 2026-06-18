@@ -35,9 +35,9 @@ class PendulumEnvironment(AbstractEnvironment):
     max_allowed_angle: float = 0.3 # Maximum allowed angle before episode termination (in radians)
     max_allowed_angular_velocity: float = 1.0 # Maximum allowed angular velocity before episode termination (in radians/s)
     max_episode_time: float = 5.0 # Maximum allowed time for an episode before termination (in seconds)
-    key: Array = eqx.field(default_factory=lambda: jr.PRNGKey(0)) # Random key for initialization
+    key: Array = eqx.field(default_factory=lambda: jr.PRNGKey(6758493)) # Random key for initialization
     Q: Array = eqx.field(default_factory=lambda: jnp.diag(jnp.array([1.0, 0.1]))) # State cost matrix for LQR
-    R: Array = eqx.field(default_factory=lambda: 0.001 * jnp.eye(1)) # Control cost matrix for LQR
+    R: Array = eqx.field(default_factory=lambda: 0.0001 * jnp.eye(1)) # Control cost matrix for LQR
     control_gain: Array = None  # Optimal control gain matrix, to be computed based on system dynamics
     cost_to_go_matrix: Array = None  # Cost-to-go matrix, to be computed based on system dynamics
     # fmt: on
@@ -86,6 +86,10 @@ class PendulumEnvironment(AbstractEnvironment):
             ],
             dtype=default_float,
         )
+
+        # During warmup time, the environment state does not evolve (dxdt = 0) (except for time, which continues to increase)
+        in_warmup = args.get("env_warmup_fn", lambda t, x, args: False)(t, x, args)
+        dxdt = dxdt.at[:2].set(dxdt[:2] * (~in_warmup))
         return dxdt
 
     def diffusion(self, t, x, args):
@@ -105,16 +109,18 @@ class PendulumEnvironment(AbstractEnvironment):
         return x
 
     def reset(self, t, x, args):
-        return self.initial
+        step_idx = jnp.asarray(jnp.rint((t) / args.get("dt", 1e-4)), dtype=jnp.int64)
+        current_key = jr.fold_in(self.key, step_idx)
+        angle = jax.random.uniform(
+            current_key,
+            shape=(),
+            minval=self.initial_angle_range[0],
+            maxval=self.initial_angle_range[1],
+        )
+        return jnp.array([angle, 0.0, 0.0], dtype=default_float)
 
     def reward_fn(self, t, x, args, agent_output):
         instantaneous_cost = x[:2].T @ self.Q @ x[:2] + jnp.atleast_1d(
             agent_output
         ).T @ self.R @ jnp.atleast_1d(agent_output)
-        shaping = (
-            2
-            * x[:2].T
-            @ self.cost_to_go_matrix
-            @ self.drift(t, x, args, agent_output)[:2]
-        )
-        return jnp.atleast_1d(-instantaneous_cost - shaping)
+        return jnp.atleast_1d(-instantaneous_cost)

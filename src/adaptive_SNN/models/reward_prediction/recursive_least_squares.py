@@ -17,8 +17,8 @@ default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 class RLSRewardPrediction(RewardPrediction):
     value: Array  # Scalar reward prediction
-    weights: Array  # (n, ) Weight matrix for the RLS predictor
-    P: Array  # (n, n) Inverse covariance matrix for the RLS predictor
+    weights: Array  # (n + 1, ) Weight matrix for the RLS predictor
+    P: Array  # (n+1, n+1) Inverse covariance matrix for the RLS predictor
 
 
 class RLSRewardPredictor(AbstractRewardPredictor):
@@ -40,7 +40,16 @@ class RLSRewardPredictor(AbstractRewardPredictor):
     def noise_shape(self):
         return RLSRewardPrediction(value=None, weights=None, P=None)
 
-    def pre_step_update(self, t, x: RLSRewardPrediction, args, reward, network_state):
+    def pre_step_update(
+        self,
+        t,
+        x: RLSRewardPrediction,
+        args,
+        reward,
+        network_state,
+        input_spikes,
+        env_state,
+    ):
         features = args["feature_fn"](t, network_state, args)
         features = jnp.concatenate([features, jnp.ones((1,))])  # Add bias term
         weights = x.weights
@@ -62,7 +71,7 @@ class RLSRewardPredictor(AbstractRewardPredictor):
         return RLSRewardPrediction(value=predicted_reward, weights=new_weights, P=new_P)
 
     def drift(
-        self, t, x: RLSRewardPrediction, args: dict, reward: Array, network_state: Array
+        self, t, x: RLSRewardPrediction, args: dict, reward: Array, RPE: Array
     ) -> RLSRewardPrediction:
         """No drift in the reward prediction process."""
         return RLSRewardPrediction(

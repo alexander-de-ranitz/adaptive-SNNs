@@ -42,13 +42,7 @@ class AgentEnvSystem(eqx.Module):
         )
 
     def pre_step_update(self, t, x: SystemState, args):
-        """Perform any necessary updates to the state before computing the drift/diffusion.
-
-        1) Reset the environment and agent states if the episode end function returns True
-        2) Compute the agent output based on the current agent state and environment state
-        3) Compute the reward signal based on the current environment state and new agent output
-        4) Update the agent and environment states based on the new reward signal
-        """
+        """Perform any necessary updates to the state before computing the drift/diffusion."""
 
         def _reset(t, x: SystemState, args):
             new_env_state = self.environment.reset(t, x.environment_state, args)
@@ -67,17 +61,31 @@ class AgentEnvSystem(eqx.Module):
             lambda: x,
         )
 
+        # Get reward signal based on (previous step's) environment state and agent output
+        reward = args["reward_fn"](t, x, args)
+
         # Compute agent output based on current agent state
         agent_output = args["network_output_fn"](
             t, x.agent_state, args, env_state=x.environment_state
         )
-        x_updated = eqx.tree_at(lambda s: s.agent_output, x, agent_output)
 
-        # Compute reward signal based on current environment state and new agent output
-        reward = args["reward_fn"](t, x_updated, args)
+        input_spikes = args["input_spike_fn"](t, x, args)
+
+        # Check if we are still in the warmup period based on the environment's internal time state
+        env_in_warmup = args.get("env_warmup_fn", lambda t, x, args: False)(
+            t, x.environment_state, args
+        )
 
         # Update agent and environment states
-        agent_state = self.agent.pre_step_update(t, x.agent_state, args, reward)
+        agent_state = self.agent.pre_step_update(
+            t,
+            x.agent_state,
+            args,
+            reward=reward,
+            env_state=x.environment_state,
+            input_spikes=input_spikes,
+            disable_RPE=env_in_warmup,
+        )
         environment_state = self.environment.pre_step_update(
             t, x.environment_state, args
         )
@@ -157,10 +165,7 @@ class AgentEnvSystem(eqx.Module):
 
     def update(self, t, x: SystemState, args: dict):
         # Get input spikes for the agent and update
-        agent_input_spikes = args["input_spike_fn"](t, x, args)
-        new_agent_state = self.agent.update(
-            t, x.agent_state, args, input_spikes=agent_input_spikes
-        )
+        new_agent_state = self.agent.update(t, x.agent_state, args)
 
         new_env_state = self.environment.update(
             t, x.environment_state, args, env_input=x.agent_output

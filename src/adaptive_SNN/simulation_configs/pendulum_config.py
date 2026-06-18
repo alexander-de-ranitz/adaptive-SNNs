@@ -157,13 +157,14 @@ def create_pendulum_config(
         environment_model=PendulumEnvironment,
         environment_kwargs={},
         reward_prediction_model=RLSRewardPredictor,
-        reward_predictor_kwargs={"input_dim": N_neurons},
+        reward_predictor_kwargs={"input_dim": N_inputs},
         args={
             "delta_V": jnp.power(jnp.float64(2), jnp.float64(-12)),
             "use_noise": jnp.array([True]),
             "feature_fn": lambda t,
             network_state,
             args: network_state.filtered_spike_trains,
+            "env_warmup_fn": lambda t, env_state, args: jnp.asarray(env_state[2] < 0.5),
             "episode_end_fn": lambda t, state, args: jnp.any(
                 jnp.abs(state.environment_state)
                 > jnp.array(

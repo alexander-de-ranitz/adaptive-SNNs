@@ -32,7 +32,7 @@ class MovingAverageRewardPredictor(AbstractRewardPredictor):
             )
         )
 
-    def drift(self, t, x: RewardPrediction, args, reward, network_state):
+    def drift(self, t, x: RewardPrediction, args, reward, RPE):
         return RewardPrediction(value=self.rate * (reward - x.value))
 
     def terms(self, key):

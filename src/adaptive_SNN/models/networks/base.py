@@ -351,6 +351,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             t: time (unused for autonomous dynamics)
             state: LIFState current state
             args: dict of optional args
+            reward: reward signal from environment at time t
             RPE: Reward prediction error signal that can be used for learning rules
 
         Returns:
