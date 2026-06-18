@@ -14,9 +14,13 @@ from adaptive_SNN.utils.config import SimulationConfig
 
 def compute_rates(
     env_state,
-    N_encoding_inputs=200,
+    grid_shape=(16, 16),
+    copies_per_feature=1,
     width_factor=0.2,
+    pad_factor=0.2,
     target_in_rate=1500,
+    downstream_connectivity=0.1,
+    normalize=True,
     max_state_values=jnp.array(
         [
             PendulumEnvironment.max_allowed_angle,
@@ -24,50 +28,63 @@ def compute_rates(
         ]
     ),
 ):
-    """Compute the firing rates for the encoding population
+    """Compute the firing rates for the encoding population.
 
-    The population consists of N_encoding_inputs neurons, divided into 2 subpopulations that encode the angle and angular velocity respectively.
-    On average, width_factor * 100 percent of the neurons will be active for any given state. The max firing rate of the neurons is scaled to achieve an average firing rate of target_rate across the entire population.
-
+    The angle and angular velocity are jointly encoded by a population of 2D Gaussian tuning
+    curves on a grid_shape grid, so each neuron is tuned to an (angle, velocity) pair and a
+    linear critic can represent their interaction. Each tuning curve is replicated into
+    copies_per_feature independent Poisson units, and the rates are normalized so the total
+    drive stays constant across states. The amplitude is scaled such that a neuron connected to
+    a fraction downstream_connectivity of the population receives target_in_rate spikes per second.
 
     Args:
         env_state: The state of the pendulum environment.
-        N_encoding_inputs: The number of encoding neurons.
-        width_factor: The width of the Gaussian tuning curves as a fraction of the state space.
-        target_rate: The target input rate for the recurrent population
-        max_state_value: The maximum value of the state space.
+        grid_shape: The (angle, velocity) grid of tuning curves.
+        copies_per_feature: Independent Poisson replicas per tuning curve.
+        width_factor: The Gaussian width as a fraction of the padded encoding span.
+        pad_factor: How far to extend the tuning-curve centers beyond the visited region.
+        target_in_rate: The target input rate for a downstream neuron.
+        downstream_connectivity: The connection probability assumed for the rate calibration.
+        normalize: Whether to keep the total drive constant across states.
+        max_state_values: The maximum (visited) state values, i.e. the reset threshold.
     Returns:
-        rates: A vector of firing rates for the encoding population.
+        rates: A vector of firing rates of length grid_shape[0] * grid_shape[1] * copies_per_feature.
     """
     env_state = env_state[
         :2
     ]  # Only encode the angle and angular velocity, not the time
-    N_encoding_populations = 2
-    encoding_population_size = N_encoding_inputs // N_encoding_populations
-    max_state_values = max_state_values * (1 + 3 * width_factor)
-    tuning_curve_widths = width_factor * (2 * max_state_values)
+    center_range = max_state_values * (1 + pad_factor)
+    tuning_curve_widths = width_factor * (2 * center_range)
 
-    mean_expected_rate = jnp.sqrt(2 * jnp.pi) * width_factor
-    max_encoding_rate = target_in_rate / (mean_expected_rate * N_encoding_inputs * 0.1)
-
-    # Create preferred inputs for each encoding population
-    # array of (encoding_population_size, N_encoding_populations) where each column corresponds to the preferred inputs of one population
-    preferred_inputs = jnp.linspace(
-        -max_state_values, max_state_values, encoding_population_size
+    # Grid of preferred (angle, velocity) pairs
+    axes = [
+        jnp.linspace(-center_range[i], center_range[i], grid_shape[i]) for i in range(2)
+    ]
+    preferred_inputs = jnp.stack(jnp.meshgrid(*axes, indexing="ij"), axis=-1).reshape(
+        -1, 2
     )
 
-    # Encode the environment state into spikes using a population of encoding neurons
-    env_state = jnp.clip(
-        env_state, -max_state_values, max_state_values
-    )  # clip to ensure within tuning curve range
-    rates = max_encoding_rate * jnp.exp(
-        -((env_state - preferred_inputs) ** 2) / (2 * (tuning_curve_widths) ** 2)
-    )  # Gaussian tuning curves
+    # 2D Gaussian tuning curves, normalized to a constant total drive
+    env_state = jnp.clip(env_state, -center_range, center_range)
+    rates = jnp.exp(
+        -jnp.sum(
+            (env_state - preferred_inputs) ** 2 / (2 * tuning_curve_widths**2), axis=-1
+        )
+    )
+    if normalize:
+        rates = rates / jnp.sum(rates)
 
-    # Flatten in column-major order to turn into a single vector of length N_encoding_inputs
-    # The first encoding_pop_size values of the vector corresponds to the first encoding population, etc.
-    rates = rates.flatten(order="F")
-    return rates
+    # Scale so a downstream neuron sampling downstream_connectivity of the population gets target_in_rate
+    expected_total = (
+        1.0
+        if normalize
+        else grid_shape[0] * grid_shape[1] * (jnp.sqrt(2 * jnp.pi) * width_factor) ** 2
+    )
+    max_encoding_rate = target_in_rate / (
+        downstream_connectivity * copies_per_feature * expected_total
+    )
+
+    return jnp.tile(max_encoding_rate * rates, copies_per_feature)
 
 
 def create_pendulum_config(
@@ -80,7 +97,8 @@ def create_pendulum_config(
     noise_level = 0.0
     min_noise_std = 5e-9
     balance = 1.05
-    N_inputs = 200
+    encoding_grid_shape = (16, 16)
+    N_inputs = encoding_grid_shape[0] * encoding_grid_shape[1]
     agent_output_scaling = (
         0.25  # Scale the output so that it doesn't produce excessively large torques
     )
@@ -94,7 +112,7 @@ def create_pendulum_config(
         current_key = jr.fold_in(spike_key, step_idx)
 
         env_state = x.environment_state
-        rates = compute_rates(env_state, N_encoding_inputs=N_inputs)
+        rates = compute_rates(env_state, grid_shape=encoding_grid_shape)
 
         # Generate the spikes of the encoding population — shape (N_inputs,).
         # This is broadcast to all neurons in the recurrent population
