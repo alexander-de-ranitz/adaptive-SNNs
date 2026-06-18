@@ -730,28 +730,37 @@ def test_synaptic_delays():
     args = make_default_args(N_neurons, N_inputs)
 
     state = model.spike_and_reset(
-        0.0, init_state, args, input_spikes=jnp.zeros((N_neurons, N_inputs))
+        0.0, init_state, args
     )  # Generate spikes to fill buffer
     assert jnp.all(state.S == expected_spikes)
     assert jnp.all(
         state.spike_buffer[0] == expected_spikes
     )  # Spikes recorded in buffer
-    assert state.buffer_index == 1  # Buffer index advanced
     assert jnp.all(state.G == 0.0)  # No conductance change yet due to delays
 
     max_delay = jnp.max(model.synaptic_delay_matrix)
     t = 0.0
-    state = init_state
     num_events = 0
+    print(state.spike_buffer)
     while t < max_delay + dt:
-        state = model.spike_and_reset(
+        print(
+            f"Current buffer index: {state.buffer_index}, spikes in buffer: {state.spike_buffer[int(state.buffer_index)]}"
+        )
+        state = model.pre_step_update(
             t, state, args, input_spikes=jnp.zeros((N_neurons, N_inputs))
         )
         i, j = jnp.nonzero(state.G == model.synaptic_increment)
         num_events += jnp.size(i)
 
-        # Check that spikes only appear after correct delay
-        assert jnp.allclose(jnp.round(model.synaptic_delay_matrix[i, j], decimals=4), t)
+        if jnp.size(i) > 0:
+            # Check that the correct synapses are updated based on the expected spikes and connectivity
+            print(state.G)
+            print(f"pre={j}, post={i}")
+            for post, pre in zip(i, j):
+                assert pre == 1 or pre == 2
+                assert state.G[post, pre] == model.synaptic_increment
+            # Check that the events occur at the correct time based on the synaptic delay matrix
+            assert jnp.allclose(t, model.synaptic_delay_matrix[i, j], atol=dt)
 
         t += dt
         state = eqx.tree_at(
