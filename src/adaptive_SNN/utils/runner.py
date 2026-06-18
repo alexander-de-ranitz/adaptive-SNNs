@@ -1,3 +1,5 @@
+import os
+
 import jax
 from jaxtyping import PyTree
 
@@ -146,6 +148,7 @@ def run_simulation(
     overwrite: bool = False,
     load_if_exists: bool = True,
     save_model: bool = False,
+    return_final_state: bool = False,
     downcast_to_float32: bool = True,
 ):
     """Run a simulation and optionally reuse or overwrite saved results.
@@ -184,6 +187,7 @@ def run_simulation(
         init_state,
         save_at=config.save_at,
         args=args,
+        return_final_state=return_final_state,
         key=simulation_key,
     )
 
@@ -221,6 +225,7 @@ def run_batched_simulation(
     overwrite: bool = False,
     load_if_exists: bool = True,
     save_model: bool = False,
+    return_final_state: bool = False,
     downcast_to_float32: bool = True,
 ):
     """Run multiple simulations in parallel based on a list of configs.
@@ -247,11 +252,13 @@ def run_batched_simulation(
         y0s=y0s,
         save_at=configs[0].save_at,
         args=args_list[0],
+        return_final_state=return_final_state,
         keys=keys,
     )
 
     if save_results:
         for i, config in enumerate(configs):
+            os.makedirs(Path(config.save_file).parent, exist_ok=True)
             ys_i = jax.tree.map(lambda arr: arr[i], sols.ys)
             ts_i = sols.ts[i]
             ys_values, ys_tree_def = _serialize_pytree(

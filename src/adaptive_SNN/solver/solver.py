@@ -36,6 +36,7 @@ def solve_ODE(
     dt0: float,
     y0: PyTree,
     save_at: SaveAt,
+    return_final_state: bool = False,
     args: PyTree = None,
     key: jr.PRNGKey = jr.PRNGKey(0),
 ):
@@ -57,6 +58,8 @@ def solve_ODE(
         dt0: Nominal step size.
         y0: Initial PyTree state.
         save_at: SaveAt object specifying when to save states.
+        return_final_state: If True, returns the final state of the simulation in addition to the saved states.
+                sol.ys will be a tuple of (saved_states, final_state) in this case. If False, sol.ys will just be the saved states.
         args: Extra args passed to solver/model (PyTree or None).
         key: Optional PRNG key. If None, a default key is used.
 
@@ -87,12 +90,11 @@ def solve_ODE(
     # If no states were saved, return the final state
     if ys is None:
         ys = y_final
-
     return Solution(
         t0=t0,
         t1=t1,
         ts=save_times,
-        ys=ys,
+        ys=ys if not return_final_state else (ys, y_final),
         interpolation=None,
         stats=None,
         result=RESULTS.successful,
@@ -123,6 +125,7 @@ def solve_ODE_batched(
     dt0: float,
     y0s: PyTree,
     save_at: SaveAt,
+    return_final_state: bool = False,
     args: PyTree = None,
     keys: Array | PyTree = jr.PRNGKey(0),
 ) -> Array:
@@ -158,6 +161,7 @@ def solve_ODE_batched(
             dt0=dt0,
             y0=y0,
             save_at=save_at,
+            return_final_state=return_final_state,
             args=args,
             key=key,
         )
