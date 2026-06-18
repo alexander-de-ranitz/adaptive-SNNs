@@ -2,6 +2,7 @@ from adaptive_SNN.models.reward_prediction.base import (
     AbstractRewardPredictor,
     RewardPrediction,
 )
+from adaptive_SNN.models.reward_prediction.critic import LinearReadoutCritic
 from adaptive_SNN.models.reward_prediction.moving_average import (
     MovingAverageRewardPredictor,
 )
@@ -18,4 +19,5 @@ __all__ = [
     "RLSRewardPredictor",
     "AbstractRewardPredictor",
     "RewardPrediction",
+    "LinearReadoutCritic",
 ]
