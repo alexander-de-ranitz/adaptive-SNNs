@@ -22,7 +22,7 @@ class RunFile:
     perturbation_size: float | None
 
 
-DATA_DIR = Path("results/delta_v_tuning_20260529_152552/results")
+DATA_DIR = Path("results/delta_v_tuning_20260605_204715/results")
 OUTPUT_PATH = Path("figures/delta_v_tuning")
 
 
@@ -48,14 +48,21 @@ def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def compute_file_stats(file: Path) -> dict[str, float]:
+    try:
+        data = np.load(file)
+        return {"alignment": float(data["alignment"]), "SNR": float(data["snr"])}
+    except:
+        print("Precomputed stats not found, computing from raw data...")
+
     reward, reward_noise, eligibility = load_run_arrays(file)
-    rpe = reward + reward_noise
-    dW_task = (eligibility * rpe).ravel()
+
+    dW_task = (eligibility * reward).ravel()
     dW_noise = (eligibility * reward_noise).ravel()
 
     alignment = np.sum(dW_task) / np.sum(np.abs(dW_task))
     snr = np.sum(dW_task) / np.sum(np.abs(dW_noise))
 
+    print(f"SNR: {snr:.4f}, Alignment: {alignment:.4f} for file {file.name}")
     result = {
         "alignment": float(alignment),
         "SNR": float(snr),
@@ -256,14 +263,9 @@ def plot_figure(
 if __name__ == "__main__":
     df = build_dataframe()
     print(f"Loaded {len(df)} runs")
-    if df["perturbation_size"].unique().size == 1:
-        print("Only one perturbation size found, plotting single figure")
-        plot_figure(df=df, save_path=OUTPUT_PATH, show=True)
-    else:
-        for ps, group_df in df.groupby(["perturbation_size"]):
-            print(f"Perturbation size: {ps}, {len(group_df)} runs")
-            plot_figure(
-                df=group_df,
-                save_path=OUTPUT_PATH.parent / f"delta_v_tuning_noise_{ps}.pdf",
-                show=False,
-            )
+    if df["perturbation_size"].unique().size > 1:
+        print(
+            "Multiple perturbation sizes found, filtering to perturbation size of 1.0 nS for plotting"
+        )
+        df = df.loc[df["perturbation_size"] == 1.0]
+    plot_figure(df=df, save_path=OUTPUT_PATH, show=True)

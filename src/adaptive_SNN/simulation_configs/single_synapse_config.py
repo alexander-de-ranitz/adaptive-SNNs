@@ -103,6 +103,10 @@ def create_single_synapse_learning_config(
         reward_predictor_kwargs={"rate": 0.0, "dim": 1},
         args={
             "use_noise": jnp.array([True, False]),
+            "RPE_fn": lambda t,
+            x,
+            args,
+            reward: reward,  # RPE is just the reward here since we have no reward prediction. Everything is handled inside the environment.
         },
     )
     return cfg

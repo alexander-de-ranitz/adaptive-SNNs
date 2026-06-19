@@ -60,7 +60,7 @@ def main():
         )
         return (reward, reward_noise, eligibility)
 
-    cfg.t1 = 2500
+    cfg.t1 = 250
     cfg.save_at = SaveAt(
         ts=jnp.linspace(cfg.t0, cfg.t1, int(1e3 * cfg.t1)),
         fn=save_fn,
@@ -70,7 +70,24 @@ def main():
 
     cfg.args.update({"delta_V": args.delta_V})
 
-    sol, model = run_simulation(cfg, save_results=True)
+    sol, model = run_simulation(cfg, save_results=False)
+
+    reward, reward_noise, eligibility = (
+        sol.ys[0].squeeze(),
+        sol.ys[1].squeeze(),
+        sol.ys[2].squeeze(),
+    )
+    dW_task = (eligibility * reward).squeeze()
+    dW_noise = (eligibility * reward_noise).squeeze()
+
+    alignment = jnp.sum(dW_task) / jnp.sum(jnp.abs(dW_task))
+    snr = jnp.sum(dW_task) / jnp.sum(jnp.abs(dW_noise))
+
+    jnp.savez(
+        args.output_file,
+        alignment=alignment,
+        snr=snr,
+    )
 
     end = time.time()
     print(f"Simulation completed in {end - start:.2f} seconds")

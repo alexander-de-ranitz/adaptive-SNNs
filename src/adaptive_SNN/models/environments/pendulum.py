@@ -31,7 +31,8 @@ class PendulumEnvironment(AbstractEnvironment):
     dim: int = 3  # State dimension: [angle, angular velocity, time]
     rate: float = 1.0  # Rate at which the environment responds to input
     g: float = 10.0  # Gravitational constant
-    initial_angle_range: tuple = (-0.1, 0.1)  # Range of initial angles (in radians)
+    initial_angle_range: tuple = (-0.2, 0.2)  # Range of initial angles (in radians)
+    initial_angular_velocity_range: tuple = (-0.5, 0.5)  # Range of initial angular velocities (in radians/s)
     max_allowed_angle: float = 0.3 # Maximum allowed angle before episode termination (in radians)
     max_allowed_angular_velocity: float = 1.0 # Maximum allowed angular velocity before episode termination (in radians/s)
     max_episode_time: float = 5.0 # Maximum allowed time for an episode before termination (in seconds)
@@ -89,7 +90,7 @@ class PendulumEnvironment(AbstractEnvironment):
 
         # During warmup time, the environment state does not evolve (dxdt = 0) (except for time, which continues to increase)
         in_warmup = args.get("env_warmup_fn", lambda t, x, args: False)(t, x, args)
-        dxdt = dxdt.at[:2].set(dxdt[:2] * (~in_warmup))
+        dxdt = dxdt.at[:2].set(dxdt[:2] * jnp.logical_not(in_warmup))
         return dxdt
 
     def diffusion(self, t, x, args):
@@ -109,15 +110,24 @@ class PendulumEnvironment(AbstractEnvironment):
         return x
 
     def reset(self, t, x, args):
-        step_idx = jnp.asarray(jnp.rint((t) / args.get("dt", 1e-4)), dtype=jnp.int64)
+        step_idx = jnp.asarray(
+            jnp.rint((t) / args.get("dt", jnp.float64(1e-4))), dtype=jnp.int64
+        )
         current_key = jr.fold_in(self.key, step_idx)
+        ang_key, ang_vel_key = jr.split(current_key)
         angle = jax.random.uniform(
-            current_key,
+            ang_key,
             shape=(),
             minval=self.initial_angle_range[0],
             maxval=self.initial_angle_range[1],
         )
-        return jnp.array([angle, 0.0, 0.0], dtype=default_float)
+        angular_velocity = jax.random.uniform(
+            ang_vel_key,
+            shape=(),
+            minval=self.initial_angular_velocity_range[0],
+            maxval=self.initial_angular_velocity_range[1],
+        )
+        return jnp.array([angle, angular_velocity, 0.0], dtype=default_float)
 
     def reward_fn(self, t, x, args, agent_output):
         instantaneous_cost = x[:2].T @ self.Q @ x[:2] + jnp.atleast_1d(

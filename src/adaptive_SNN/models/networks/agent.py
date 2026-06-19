@@ -60,7 +60,7 @@ class Agent(eqx.Module):
         """
 
         # Update reward predictor (which ensures that the value is updated before computing the RPE)
-        reward_predictor_state = self.reward_prediction_model.pre_step_update(
+        new_reward_predictor_state = self.reward_prediction_model.pre_step_update(
             t,
             x.reward_predictor_state,
             args,
@@ -70,9 +70,13 @@ class Agent(eqx.Module):
             env_state=env_state,
         )
 
+        state_with_updated_reward_prediction = eqx.tree_at(
+            lambda s: s.reward_predictor_state, x, new_reward_predictor_state
+        )
+
         # Compute the RPE as the TD-error
-        RPE = args["RPE_fn"](t, x, args, reward) * (
-            jnp.invert(disable_RPE)
+        RPE = args["RPE_fn"](t, state_with_updated_reward_prediction, args, reward) * (
+            jnp.logical_not(disable_RPE)
         )  # Optionally disable RPE (e.g. during warmup) by setting it to zero
 
         # Apply pre-step updates to the network state if necessary (e.g. for input spikes)
@@ -82,7 +86,7 @@ class Agent(eqx.Module):
 
         return AgentState(
             network_state=network_state,
-            reward_predictor_state=reward_predictor_state,
+            reward_predictor_state=new_reward_predictor_state,
             RPE=RPE,
         )
 

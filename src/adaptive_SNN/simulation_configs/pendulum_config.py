@@ -63,7 +63,6 @@ def compute_rates(
     preferred_inputs = jnp.stack(jnp.meshgrid(*axes, indexing="ij"), axis=-1).reshape(
         -1, 2
     )
-
     # 2D Gaussian tuning curves, normalized to a constant total drive
     env_state = jnp.clip(env_state, -center_range, center_range)
     rates = jnp.exp(

@@ -11,7 +11,7 @@ from jax import random as jr
 
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
-from adaptive_SNN.simulation_configs.pendulum_config import create_pendulum_config
+from adaptive_SNN.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
 from adaptive_SNN.utils.runner import run_batched_simulation
 
 
@@ -40,49 +40,36 @@ def main():
 
     args = parser.parse_args()
     key = jr.PRNGKey(args.key_seed)
-    N_parallel = 5
+    N_parallel = 1
     model = GatedLIFNetwork if args.model == "gated" else EligibilityLIFNetwork
     configs = [
-        create_pendulum_config(N_neurons=1000, model_cls=model, key=jr.fold_in(key, i))
+        create_pendulum_AC_config(N_neurons=2, model_cls=model, key=jr.fold_in(key, i))
         for i in range(N_parallel)
     ]
-
-    def save_weights_fn(t, x: SystemState, args):
-        neuron_indices = jnp.array([0, 200])
-        weight_indices = jnp.arange(-300, 0, 3)
-        weights = x.agent_state.network_state.W[jnp.ix_(neuron_indices, weight_indices)]
-        return weights
 
     def save_fn(t, x: SystemState, args):
         return (
             x.environment_state,
             x.reward_signal,
             x.agent_state.reward_predictor_state.value,
-            x.agent_output,
-            jnp.mean(
-                x.agent_state.network_state.filtered_spike_trains[100:]
-            ),  # Mean firing rate of recurrent population
-            jnp.mean(
-                x.agent_state.network_state.filtered_spike_trains[:50]
-            ),  # Mean firing rate of left encoding population
-            jnp.mean(
-                x.agent_state.network_state.filtered_spike_trains[50:100]
-            ),  # Mean firing rate of right encoding population
-            save_weights_fn(
-                t, x, args
-            ),  # Save some weights for analysis and visualization
+            x.agent_state.RPE,
         )
 
     for i, cfg in enumerate(configs):
         cfg.save_file = args.output_file + f"_{i}"
-        cfg.t1 = 3000
-        cfg.lr = 10
+        cfg.t1 = 2000
+        cfg.lr = 0
         cfg.save_at = SaveAt(
-            ts=jnp.linspace(cfg.t0, cfg.t1, int(10 * cfg.t1)), fn=save_fn
+            ts=jnp.linspace(cfg.t0, cfg.t1, int(250 * cfg.t1)), fn=save_fn
         )
 
     start = time.time()
-    sol, models = run_batched_simulation(configs, save_results=True)
+    sol, models = run_batched_simulation(
+        configs, save_results=True, return_final_state=True
+    )
+
+    final_weights = sol.ys[1].agent_state.reward_predictor_state.weights
+    jnp.save(args.output_file + "_final_weights.npy", final_weights)
     end = time.time()
     print(f"Simulation took {end - start:.2f} seconds.")
 

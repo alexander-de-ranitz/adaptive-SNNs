@@ -21,7 +21,7 @@ def create_pendulum_AC_config(
     dt = 1e-4
     lr = 0.0
     noise_level = 0.0
-    tau_discount = 0.5
+    tau_discount = 1.0
     gamma = 1 - dt / tau_discount
     min_noise_std = 5e-9
     balance = 1.05

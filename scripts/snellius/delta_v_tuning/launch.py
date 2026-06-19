@@ -38,12 +38,12 @@ def create_jobs():
     jobs = Jobs()
 
     seed = 1241
-    num_iterations = 1
+    num_iterations = 9
     for i in range(num_iterations):
         seed += 129
         # Loop over delta_V values, including 0.0 for the no-gating condition
-        for delta_v in [0.0] + [0.5**k for k in range(5, 14)]:
-            for noise_level in [1e-10, 5e-10, 1e-9, 5e-9, 1e-8]:
+        for delta_v in [0.0] + [0.5**k for k in range(5, 16)]:
+            for noise_level in [0.25e-9, 0.5e-9, 1e-9, 2e-9, 4e-9, 8e-9, 16e-9, 32e-9]:
                 id = f"dv_{delta_v:6f}_" if type(delta_v) is float else "no_gating_"
                 name = id + f"_noise_{noise_level * 1e9:.2f}_nS_" + f"seed_{seed}"
 
