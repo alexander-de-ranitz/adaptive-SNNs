@@ -126,6 +126,7 @@ def test_solver_output():
     args["network_output_fn"] = (
         lambda t, x, args, env_state: x.network_state.V
     )  # Some random function of the network state as output
+    args["RPE_fn"] = lambda t, x, args, reward: jnp.array([0.0])
 
     # Save some random part of the state for comparison
     # imporantly, we should not compare any fields that are modified

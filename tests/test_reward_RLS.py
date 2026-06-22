@@ -21,8 +21,9 @@ def test_initial_state_shapes():
     state = predictor.initial
 
     assert state.value.shape == (1,)
-    assert state.weights.shape == (dim,)
-    assert state.P.shape == (dim, dim)
+    # Dim + 1 because of the bias term in the weights
+    assert state.weights.shape == (dim + 1,)
+    assert state.P.shape == (dim + 1, dim + 1)
 
 
 def test_initial_state_values():
@@ -33,13 +34,13 @@ def test_initial_state_values():
 
     assert jnp.all(state.value == 0.0)
     assert jnp.all(state.weights == 0.0)
-    assert jnp.allclose(state.P, jnp.eye(dim) * P_init)
+    assert jnp.allclose(state.P, jnp.eye(dim + 1) * P_init)
 
 
 def test_drift_returns_zeros():
     predictor = make_predictor(input_dim=2)
     state = predictor.initial
-    drift = predictor.drift(0.0, state, {}, reward=jnp.array(1.0), network_state=None)
+    drift = predictor.drift(0.0, state, {}, reward=jnp.array(1.0), RPE=None)
 
     assert jnp.all(drift.value == 0.0)
     assert jnp.all(drift.weights == 0.0)
@@ -63,7 +64,13 @@ def test_pre_step_update_prediction():
     args = make_args(constant_feature_fn(5.0))
 
     new_state = predictor.pre_step_update(
-        0.0, state, args, reward=jnp.array(0.0), network_state=None
+        0.0,
+        state,
+        args,
+        reward=jnp.array(0.0),
+        network_state=None,
+        input_spikes=None,
+        env_state=None,
     )
 
     assert jnp.allclose(new_state.value, 0.0)
@@ -76,7 +83,13 @@ def test_pre_step_update_weights_change():
     args = make_args(constant_feature_fn(1.0))
 
     new_state = predictor.pre_step_update(
-        0.0, state, args, reward=jnp.array(1.0), network_state=None
+        0.0,
+        state,
+        args,
+        reward=jnp.array(1.0),
+        network_state=None,
+        input_spikes=None,
+        env_state=None,
     )
 
     assert not jnp.allclose(new_state.weights, state.weights)
@@ -89,7 +102,13 @@ def test_pre_step_update_P_changes():
     args = make_args(constant_feature_fn(1.0))
 
     new_state = predictor.pre_step_update(
-        0.0, state, args, reward=jnp.array(1.0), network_state=None
+        0.0,
+        state,
+        args,
+        reward=jnp.array(1.0),
+        network_state=None,
+        input_spikes=None,
+        env_state=None,
     )
 
     assert not jnp.allclose(new_state.P, state.P)
@@ -105,7 +124,13 @@ def test_rls_converges_to_constant_reward():
 
     for _ in range(50):
         state = predictor.pre_step_update(
-            0.0, state, args, reward=jnp.array(true_reward), network_state=None
+            0.0,
+            state,
+            args,
+            reward=jnp.array(true_reward),
+            network_state=None,
+            input_spikes=None,
+            env_state=None,
         )
 
     assert jnp.isclose(state.value, true_reward, atol=1e-3)
@@ -126,7 +151,13 @@ def test_rls_multidim_converges():
 
     for _ in range(100):
         state = predictor.pre_step_update(
-            0.0, state, args, reward=true_reward, network_state=None
+            0.0,
+            state,
+            args,
+            reward=true_reward,
+            network_state=None,
+            input_spikes=None,
+            env_state=None,
         )
 
     assert jnp.isclose(state.value, true_reward, atol=1e-3)
@@ -142,7 +173,13 @@ def test_P_remains_symmetric():
 
     for _ in range(10):
         state = predictor.pre_step_update(
-            0.0, state, args, reward=jnp.array(1.0), network_state=None
+            0.0,
+            state,
+            args,
+            reward=jnp.array(1.0),
+            network_state=None,
+            input_spikes=None,
+            env_state=None,
         )
 
     assert jnp.allclose(state.P, state.P.T, atol=1e-10)
@@ -155,7 +192,13 @@ def test_zero_reward_no_weight_change():
     args = make_args(constant_feature_fn(1.0))
 
     new_state = predictor.pre_step_update(
-        0.0, state, args, reward=jnp.array(0.0), network_state=None
+        0.0,
+        state,
+        args,
+        reward=jnp.array(0.0),
+        network_state=None,
+        input_spikes=None,
+        env_state=None,
     )
 
     assert jnp.allclose(new_state.weights, state.weights)

@@ -6,13 +6,14 @@ from pathlib import Path
 import jax
 
 jax.config.update("jax_enable_x64", True)
+from jax import numpy as jnp
 from qcg.pilotjob.api.job import Jobs
 from qcg.pilotjob.api.manager import LocalManager
 
 
 def create_jobs():
     base_dir = Path(__file__).resolve().parent.parent.parent.parent
-    module_path = "scripts.snellius.delta_v_tuning.experiment_delta_v_tuning"
+    module_path = "scripts.snellius.balance_tuning.run"
 
     parser = argparse.ArgumentParser(description="Launch jobs on Snellius")
     parser.add_argument(
@@ -37,23 +38,21 @@ def create_jobs():
 
     jobs = Jobs()
 
-    seed = 1241
-    num_iterations = 9
+    seed = 9876
+    num_iterations = 1
     for i in range(num_iterations):
-        seed += 129
-        # Loop over delta_V values, including 0.0 for the no-gating condition
-        for delta_v in [0.0] + [0.5**k for k in range(5, 16)]:
-            for noise_level in [0.25e-9, 0.5e-9, 1e-9, 2e-9, 4e-9, 8e-9, 16e-9, 32e-9]:
-                id = f"dv_{delta_v:6f}_" if type(delta_v) is float else "no_gating_"
-                name = id + f"_noise_{noise_level * 1e9:.2f}_nS_" + f"seed_{seed}"
+        seed += 543
+        for w in jnp.linspace(0.0, 2, 41):
+            for b in jnp.linspace(1.0, 1.1, 41):
+                name = f"w_{w:.4f}_b_{b:.4f}_seed_{seed}_iter_{i}"
 
                 cmd_args = [
-                    "--delta_V",
-                    str(delta_v),
+                    "--initial_weight",
+                    str(w),
+                    "--balance",
+                    str(b),
                     "--key_seed",
                     str(seed),
-                    "--noise_level",
-                    str(noise_level),
                     "--output_file",
                     str(results_dir / name),
                 ]

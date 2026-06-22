@@ -30,7 +30,7 @@ def create_single_synapse_learning_config(
     N_neurons = 2
     N_inputs = 3
     min_noise_std = 1e-9
-
+    balance = 1.03
     rates = jnp.array(
         [5000, 1250, 10]
     )  # High frequency background input and one moderate frequency input
@@ -73,7 +73,7 @@ def create_single_synapse_learning_config(
         network_cls=network_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
-        balance=0.0,
+        balance=balance,
         input_types=jnp.array([1, 0, 1]),
         t0=t0,
         t1=t1,
@@ -103,6 +103,10 @@ def create_single_synapse_learning_config(
         reward_predictor_kwargs={"rate": 0.0, "dim": 1},
         args={
             "use_noise": jnp.array([True, False]),
+            "RPE_fn": lambda t,
+            x,
+            args,
+            reward: reward,  # RPE is just the reward here since we have no reward prediction. Everything is handled inside the environment.
         },
     )
     return cfg

@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH -J network_test
-#SBATCH -t 15
+#SBATCH -J delta_v_tuning
+#SBATCH -t 120
 #SBATCH -p gpu_a100
 #SBATCH -N 1
-#SBATCH --ntasks=18
+#SBATCH --ntasks=72
 #SBATCH --gpus=1
 
 # Load necessary modules
@@ -34,15 +34,14 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export JAX_ENABLE_X64=1 # Enable 64-bit precision in JAX, which is important for numerical stability in our simulations
-export JAX_PLATFORMS=cuda # Use CUDA backend for GPU acceleration
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export JAX_PLATFORMS=cpu # Use CPU backend for JAX, as we are running many low-dimensional parallel jobs (1 core per simulation)
 
 echo "Running simulations..."
-python "$REPO_DIR/scripts/snellius/network_tuning/launch.py" \
+python "$REPO_DIR/scripts/snellius/balance_tuning/launch.py" \
     --output_dir "$TMPDIR/output_dir"
 
 echo "Simulations completed, copying results back to home directory..."
 # Copy results back to home directory
-DEST_DIR="$REPO_DIR/results/network_$(date +%Y%m%d_%H%M%S)"
+DEST_DIR="$REPO_DIR/results/balance_tuning_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$DEST_DIR"
 cp -r "$TMPDIR/output_dir/." "$DEST_DIR/"

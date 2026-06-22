@@ -506,7 +506,7 @@ def test_spike_generation():
     state = make_baseline_state(model, V=V, W=W)
     args = make_default_args(N, 0)
 
-    new_state = model.spike_and_reset(0.0, state, args, input_spikes=jnp.zeros((N, 0)))
+    new_state = model.spike_and_reset(0.0, state, args)
 
     expected_spikes = jnp.array([0.0, 0.0, 1.0, 0.0, 1.0])
     expected_V_new = (
@@ -518,13 +518,9 @@ def test_spike_generation():
     assert jnp.allclose(new_state.V, expected_V_new)
 
     mask = jnp.array(expected_spikes, dtype=bool)
-    assert jnp.allclose(
-        new_state.G[[0, 1, 3, 4, 0, 1, 2, 3], [2, 2, 2, 2, 4, 4, 4, 4]],
-        model.synaptic_increment,
-        atol=1e-10,
-    )  # Check synaptic increments where expected
-    assert jnp.allclose(new_state.G[:, jnp.invert(mask)], 0.0, atol=1e-10)
+
     assert jnp.all(new_state.W == state.W)
+    assert jnp.all(new_state.G == state.G)
 
     expected_time_since_last_spike = jnp.array([jnp.inf, jnp.inf, 0.0, jnp.inf, 0.0])
     assert jnp.allclose(new_state.time_since_last_spike, expected_time_since_last_spike)
@@ -535,7 +531,41 @@ def test_spike_generation():
     assert jnp.all(drift.V[jnp.invert(mask)] != 0.0)
 
 
-def test_spike_generation_with_input():
+def test_spike_handling():
+    N = 5
+    model = make_LIF_model(N_neurons=N, N_inputs=0, key=jr.PRNGKey(6))
+
+    # Set synaptic delays to zero for test (also update precomputed delay steps)
+    object.__setattr__(
+        model, "synaptic_delay_matrix", jnp.zeros_like(model.synaptic_delay_matrix)
+    )
+    object.__setattr__(
+        model, "synaptic_delay_steps", jnp.zeros_like(model.synaptic_delay_steps)
+    )
+
+    V = jnp.array([-50.0, -55.0, -49.0, -60.0, -48.0]) * 1e-3
+    W = jnp.ones((N, N))
+    state = make_baseline_state(model, V=V, W=W)
+    args = make_default_args(N, 0)
+
+    # Generate spikes and store in spike buffer
+    new_state = model.spike_and_reset(0.0, state, args)
+    assert jnp.allclose(new_state.S, V > model.firing_threshold)
+
+    new_state = model.pre_step_update(
+        0.0, new_state, args, input_spikes=jnp.zeros((N, 0))
+    )
+
+    mask = V > model.firing_threshold
+    assert jnp.allclose(
+        new_state.G[[0, 1, 3, 4, 0, 1, 2, 3], [2, 2, 2, 2, 4, 4, 4, 4]],
+        model.synaptic_increment,
+        atol=1e-10,
+    )  # Check synaptic increments where expected
+    assert jnp.allclose(new_state.G[:, jnp.invert(mask)], 0.0, atol=1e-10)
+
+
+def test_spike_handling_with_input():
     N_neurons, N_inputs = 4, 3
     model = make_LIF_model(N_neurons=N_neurons, N_inputs=N_inputs, key=jr.PRNGKey(7))
 
@@ -551,34 +581,41 @@ def test_spike_generation_with_input():
     W = jnp.ones((N_neurons, N_neurons + N_inputs))
     state = make_baseline_state(model, V=V, W=W)
 
-    input_spikes = jnp.tile(jnp.array([1, 0, 0]), (N_neurons, 1))
-
     args = make_default_args(N_neurons, N_inputs)
 
-    new_state = model.spike_and_reset(0.0, state, args=args, input_spikes=input_spikes)
-    V_new, spikes, W_new, G_new = new_state.V, new_state.S, new_state.W, new_state.G
+    new_state = model.spike_and_reset(0.0, state, args=args)
+    V_new, spikes, W_new = new_state.V, new_state.S, new_state.W
 
     expected_spikes = jnp.array([0, 0, 1, 0], dtype=bool)
     expected_V_new = new_state.V.at[2].set(model.V_reset)
 
     assert jnp.allclose(spikes, expected_spikes)
     assert jnp.allclose(V_new, expected_V_new)
-
-    recurrent_G = G_new[:, : model.N_neurons]
-    input_G = G_new[:, model.N_neurons :]
-
-    assert jnp.allclose(recurrent_G[:, 2], model.synaptic_increment, atol=1e-10)
-    assert jnp.allclose(recurrent_G[:, jnp.array([0, 1, 3])], 0.0, atol=1e-10)
-    assert jnp.allclose(input_G[:, 0], model.synaptic_increment, atol=1e-10)
-    assert jnp.allclose(input_G[:, 1:], 0.0, atol=1e-10)
+    assert jnp.allclose(new_state.G, 0.0, atol=1e-10)
     assert jnp.all(W_new == state.W)
+
+    # Now perform pre-setup update which applies the spikes to conductances and check that only the expected synapses are updated
+    input_spikes = jnp.tile(jnp.array([1, 0, 0]), (N_neurons, 1))
+    new_state = model.pre_step_update(0.0, new_state, args, input_spikes=input_spikes)
+
+    assert jnp.allclose(
+        new_state.G[[0, 1, 3, 4, 0, 1, 2, 3], [2, 2, 2, 2, 4, 4, 4, 4]],
+        model.synaptic_increment,
+        atol=1e-10,
+    )  # Check recurrent synaptic increments where expected
+    assert jnp.allclose(
+        new_state.G[:, N_neurons],
+        model.synaptic_increment,
+        atol=1e-10,
+    )  # Check input synaptic increments where expected
+    assert jnp.allclose(
+        new_state.G[:, jnp.array([0, 1, 3])], 0.0, atol=1e-10
+    )  # Check no synaptic increments where not expected
 
     # Check conductance decay
     derivs = model.drift(0.0, new_state, args)
     dS = derivs.S
     dG = derivs.G
-    print(dG)
-    print(new_state.G)
     assert jnp.all(dS == 0)
     assert jnp.all(dG[:, model.N_neurons + 0] < 0)
     assert jnp.all(dG[:, model.N_neurons + 1 :] == 0)
@@ -586,213 +623,92 @@ def test_spike_generation_with_input():
     assert jnp.all(dG[:, jnp.array([0, 1, 3])] == 0)
 
 
-def test_force_balance_no_change():
-    N_neurons, N_inputs = 10, 3
-    input_types = jnp.array([1, 0, 1])
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
-    )
-
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([0.0]),
-    )
-
-    state = model.initial
-    balance = model.compute_balance(0, state, args)
-    assert balance.shape == (N_neurons,)
-
-    state_after = model.force_balanced_weights(0, model.initial, args=args)
-    balance_after = model.compute_balance(0, state_after, args=args)
-    assert jnp.allclose(balance_after, balance)
-    assert jnp.allclose(state_after.W, state.W, equal_nan=True)
-
-
-def test_force_balance_mini():
-    N_neurons, N_inputs = 1, 3
-    input_types = jnp.array([1, 0, 1])
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
-    )
-
-    target_balance = 2.0
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-    )
-
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.5).at[0, 3].set(1.0)
-    state = make_baseline_state(model, W=base_W)
-
-    balance = model.compute_balance(0, state, args)
-    assert balance.shape == (N_neurons,)
-
-    state = model.force_balanced_weights(0, state, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, target_balance)
-
-    # Compute approx. charge induced at rest for each synapse type (see Kumar, 2008)
-    # the ratio of these is what we define as the balance
-    charge_I = (
-        state.W[0][2]
-        * jnp.abs(model.reversal_potential_I - model.resting_potential)
-        * model.tau_I
-    )
-    charge_E = (
-        (state.W[0][1] + state.W[0][3])
-        * (model.reversal_potential_E - model.resting_potential)
-        * model.tau_E
-    )
-
-    assert jnp.allclose(charge_I / charge_E, target_balance)
-    assert jnp.isnan(state.W[0][0])  # No self connection
-    assert state.W[0][1] == 1.0 and state.W[0][1] == 1.0  # Exc weights unchanged
-
-
-def test_force_balance_random():
-    N_neurons, N_inputs = 50, 10
-    key = jr.PRNGKey(7)
-    input_types = jr.bernoulli(key, p=0.5, shape=(N_inputs,)).astype(jnp.int32)
-
-    key, subkey = jr.split(key)
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=subkey,
-    )
-
-    args = make_default_args(
-        N_neurons, N_inputs, get_desired_balance=lambda t, x, args: jnp.array([2.0])
-    )
-
-    state = model.initial
-    balance = model.compute_balance(0, state, args)
-    assert balance.shape == (N_neurons,)
-
-    state = model.force_balanced_weights(0, model.initial, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(
-        balance_after, args["get_desired_balance"](0, state, args), atol=1e-5
-    )
-
-
-def test_force_balance_zero_inhibitory_weight():
-    N_neurons, N_inputs = 1, 3
-    input_types = jnp.array([1, 0, 1])
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
-    )
-
-    target_balance = 2.0
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-    )
-
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(0.0).at[0, 3].set(1.0)
-    state = make_baseline_state(model, W=base_W)
-
-    initial_balance = model.compute_balance(0, state, args)
-    assert jnp.isclose(initial_balance, 0.0)
-
-    state = model.force_balanced_weights(0, state, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, target_balance)
-
-
-def test_force_balance_zero_inhibitory_weight_recurrent_only():
-    N_neurons, N_inputs = 4, 0
-
-    model = make_LIF_model(
-        N_neurons=N_neurons,
-        N_inputs=N_inputs,
-        key=jr.PRNGKey(7),
-    )
-
-    target_balance = 2.0
-    args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-    )
-
-    # Override excitatory mask for test
-    excitatory_mask = jnp.array([True, True, False, False], dtype=bool)
-    object.__setattr__(model, "excitatory_mask", excitatory_mask)
-
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 3].set(0.0)
-    base_W = base_W.at[1, 0].set(1.0).at[1, 3].set(0.0)
-    base_W = base_W.at[2, 1].set(1.0).at[2, 3].set(0.0)
-    base_W = base_W.at[3, 0:2].set(1.0).at[3, 2].set(0.0)
-    state = make_baseline_state(model, W=base_W)
-
-    initial_balance = model.compute_balance(0, state, args)
-    assert jnp.allclose(initial_balance, 0.0)
-
-    state = model.force_balanced_weights(0, state, args=args)
-    balance_after = model.compute_balance(0, state, args=args)
-    assert jnp.allclose(balance_after, target_balance)
-
-
-def test_balance_simulated_input_counts():
+def test_I_weight_drift_no_desired_balance():
     N_neurons, N_inputs = 2, 2
-    input_types = jnp.array([1, 0])
-
     model = make_LIF_model(
         N_neurons=N_neurons,
         N_inputs=N_inputs,
-        input_neuron_types=input_types,
-        key=jr.PRNGKey(7),
+        key=jr.PRNGKey(8),
+        input_types=jnp.array([1, 0]),
     )
-
-    target_balance = 1.0
     args = make_default_args(
-        N_neurons,
-        N_inputs,
-        get_desired_balance=lambda t, x, args: jnp.array([target_balance]),
-        N_simulated_I_inputs=3,
-        N_simulated_E_inputs=5,
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 0.0
+    )
+    state = make_baseline_state(
+        model,
+        W=jnp.ones((N_neurons, N_neurons + N_inputs)),
+        mean_E_conductance=jnp.ones((N_neurons,)),
+        mean_I_conductance=jnp.arange(1, N_neurons + 1),
+        charge_in=jnp.ones((N_neurons,)),
+        charge_out=jnp.arange(1, N_neurons + 1),
     )
 
-    base_W = jnp.full((N_neurons, N_neurons + N_inputs), jnp.nan)
-    base_W = base_W.at[0, 1].set(1.0).at[0, 2].set(2.0).at[0, 3].set(3.0)
+    dW_I = model.compute_I_weight_drift(0.0, state, args)
 
-    state = make_baseline_state(model, W=base_W)
-    state = model.force_balanced_weights(0, state, args=args)
+    assert dW_I.shape == (N_neurons, N_neurons + N_inputs)
+    assert jnp.all(dW_I == 0.0)  # No update should occur when desired balance is None
 
-    total_E_weights = state.W[0, 1] + state.W[0, 2] * args["N_simulated_E_inputs"]
-    total_I_weights = state.W[0, 3] * args["N_simulated_I_inputs"]
 
-    balance = (
-        total_I_weights
-        * jnp.abs(model.reversal_potential_I - model.resting_potential)
-        * model.tau_I
-    ) / (
-        total_E_weights
-        * (model.reversal_potential_E - model.resting_potential)
-        * model.tau_E
+def test_I_weight_drift():
+    N_neurons, N_inputs = 2, 2
+    model = make_LIF_model(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        key=jr.PRNGKey(8),
+        input_types=jnp.array([1, 0]),
+    )
+    args = make_default_args(
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 1.0
+    )
+    state = make_baseline_state(
+        model,
+        W=jnp.ones((N_neurons, N_neurons + N_inputs)),
+        mean_E_conductance=jnp.ones((N_neurons,)),
+        mean_I_conductance=jnp.arange(1, N_neurons + 1),
+        charge_in=jnp.ones((N_neurons,)),
+        charge_out=jnp.arange(1, N_neurons + 1),
+    )
+    initial_balance = model.compute_balance(0.0, state, args)
+    dW_I = model.compute_I_weight_drift(0.0, state, args)
+
+    assert dW_I.shape == (N_neurons, N_neurons + N_inputs)
+    assert jnp.allclose(
+        dW_I[0], 0.0
+    )  # first neuron is already balanced with E/I ratio of 1.0
+    assert (
+        dW_I[1, -1] < 0.0
+    )  # second neuron has E/I ratio of 0.5, so I weights should be decreased to increase balance
+    assert jnp.allclose(
+        dW_I[1, -1], model.balance_rate * (initial_balance[1] - 1.0) * state.W[1, -1]
+    )  # Check that the update is in the correct direction and proportional to imbalance and current weight
+    assert jnp.all(dW_I[1, :-1] == 0.0)  # E weights should not change
+
+
+def test_I_weight_drift_is_used():
+    N_neurons, N_inputs = 2, 2
+    model = make_LIF_model(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        key=jr.PRNGKey(8),
+        input_types=jnp.array([1, 0]),
+    )
+    args = make_default_args(
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 1.0
+    )
+    state = make_baseline_state(
+        model,
+        W=jnp.ones((N_neurons, N_neurons + N_inputs)),
+        mean_E_conductance=jnp.ones((N_neurons,)),
+        mean_I_conductance=jnp.arange(1, N_neurons + 1) - model.leak_conductance,
     )
 
-    assert jnp.allclose(balance, target_balance)
+    dW_I = model.compute_I_weight_drift(0.0, state, args)
+    drift = model.drift(0.0, state, args)
+
+    dW_I_from_drift = jnp.where(model.inhibitory_mask, drift.W, 0.0)
+    assert jnp.allclose(
+        dW_I_from_drift, dW_I
+    )  # Check that the I weight drift is included in the overall weight drift
 
 
 def test_synaptic_delays():
@@ -814,28 +730,37 @@ def test_synaptic_delays():
     args = make_default_args(N_neurons, N_inputs)
 
     state = model.spike_and_reset(
-        0.0, init_state, args, input_spikes=jnp.zeros((N_neurons, N_inputs))
+        0.0, init_state, args
     )  # Generate spikes to fill buffer
     assert jnp.all(state.S == expected_spikes)
     assert jnp.all(
         state.spike_buffer[0] == expected_spikes
     )  # Spikes recorded in buffer
-    assert state.buffer_index == 1  # Buffer index advanced
     assert jnp.all(state.G == 0.0)  # No conductance change yet due to delays
 
     max_delay = jnp.max(model.synaptic_delay_matrix)
     t = 0.0
-    state = init_state
     num_events = 0
+    print(state.spike_buffer)
     while t < max_delay + dt:
-        state = model.spike_and_reset(
+        print(
+            f"Current buffer index: {state.buffer_index}, spikes in buffer: {state.spike_buffer[int(state.buffer_index)]}"
+        )
+        state = model.pre_step_update(
             t, state, args, input_spikes=jnp.zeros((N_neurons, N_inputs))
         )
         i, j = jnp.nonzero(state.G == model.synaptic_increment)
         num_events += jnp.size(i)
 
-        # Check that spikes only appear after correct delay
-        assert jnp.allclose(jnp.round(model.synaptic_delay_matrix[i, j], decimals=4), t)
+        if jnp.size(i) > 0:
+            # Check that the correct synapses are updated based on the expected spikes and connectivity
+            print(state.G)
+            print(f"pre={j}, post={i}")
+            for post, pre in zip(i, j):
+                assert pre == 1 or pre == 2
+                assert state.G[post, pre] == model.synaptic_increment
+            # Check that the events occur at the correct time based on the synaptic delay matrix
+            assert jnp.allclose(t, model.synaptic_delay_matrix[i, j], atol=dt)
 
         t += dt
         state = eqx.tree_at(

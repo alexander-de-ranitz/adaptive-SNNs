@@ -44,26 +44,38 @@ class Agent(eqx.Module):
             jnp.zeros(1),  # RPE initial state
         )
 
-    def pre_step_update(self, t, x: AgentState, args, reward: Array = jnp.zeros(1)):
-        """Perform any necessary updates to the state before computing the drift/diffusion.
-
-        This is where we compute the reward prediction error (RPE) based on the current state of the reward predictor and the reward signal from the environment, and store it in the AgentState for use in the drift computation.
-        """
-
-        # Apply pre-step updates (currently no-op)
-        network_state = self.network.pre_step_update(t, x.network_state, args)
-
-        # Compute reward-prediction features and update reward predictor state
-        reward_predictor_state = self.reward_prediction_model.pre_step_update(
-            t, x.reward_predictor_state, args, reward, network_state
+    def pre_step_update(
+        self,
+        t,
+        x: AgentState,
+        args,
+        input_spikes: Array,
+        env_state: Array,
+        reward: Array = jnp.zeros(1),
+        disable_RPE: Array = jnp.array(False),
+    ):
+        """Perform any necessary updates to the state before computing the drift/diffusion."""
+        new_reward_predictor_state = self.reward_prediction_model.pre_step_update(
+            t,
+            x.reward_predictor_state,
+            args,
+            reward=reward,
+            network_state=x.network_state,
+            input_spikes=input_spikes,
+            env_state=env_state,
         )
-        predicted_reward = reward_predictor_state.value
-        RPE = reward - predicted_reward
+        network_state = self.network.pre_step_update(
+            t, x.network_state, args, input_spikes=input_spikes
+        )
+
+        # RPE is set to zero during warmup if disable_RPE is True
+        # otherwise, remains unchanges as computed in previous step's update
+        new_RPE = jnp.where(disable_RPE, jnp.zeros_like(x.RPE), x.RPE)
 
         return AgentState(
             network_state=network_state,
-            reward_predictor_state=reward_predictor_state,
-            RPE=RPE,
+            reward_predictor_state=new_reward_predictor_state,
+            RPE=new_RPE,
         )
 
     def drift(self, t, x: AgentState, args, reward: Array):
@@ -84,9 +96,9 @@ class Agent(eqx.Module):
             x.reward_predictor_state,
             x.RPE,
         )
-        neuron_drift = self.network.drift(t, network_state, args, RPE)
+        neuron_drift = self.network.drift(t, network_state, args, RPE=RPE)
         reward_predictor_drift = self.reward_prediction_model.drift(
-            t, predicted_reward, args, reward, network_state
+            t, predicted_reward, args, reward=reward, RPE=RPE
         )
 
         return AgentState(neuron_drift, reward_predictor_drift, jnp.zeros_like(RPE))
@@ -121,16 +133,23 @@ class Agent(eqx.Module):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x: AgentState, args, input_spikes: Array | None = None):
+    def update(self, t, x: AgentState, args, reward: Array):
         # Update components
-        new_network_state = self.network.update(
-            t, x.network_state, args, input_spikes=input_spikes
-        )
+        new_network_state = self.network.update(t, x.network_state, args)
         new_reward_predictor_state = self.reward_prediction_model.update(
             t, x.reward_predictor_state, args
-        )  # reward and network_state are not needed for the current reward predictor update, but we include them here for future extensibility
+        )
 
-        return AgentState(new_network_state, new_reward_predictor_state, x.RPE)
+        new_state = eqx.tree_at(lambda s: s.network_state, x, new_network_state)
+        new_state = eqx.tree_at(
+            lambda s: s.reward_predictor_state, new_state, new_reward_predictor_state
+        )
+
+        # Compute the RPE as the TD-error
+        RPE = args["RPE_fn"](t, new_state, args, reward)
+
+        new_state = eqx.tree_at(lambda s: s.RPE, new_state, RPE)
+        return new_state
 
     def reset(self, t, x: AgentState, args):
         """Reset the agent by resetting the network (keeping the same weights).
@@ -138,6 +157,9 @@ class Agent(eqx.Module):
         Note that the reward predictor state is not reset, as we want to maintain the learned reward predictions.
         """
         new_network_state = self.network.reset(t, x.network_state, args)
+        new_reward_predictor_state = self.reward_prediction_model.reset(
+            t, x.reward_predictor_state, args
+        )
         return AgentState(
-            new_network_state, x.reward_predictor_state, jnp.zeros_like(x.RPE)
+            new_network_state, new_reward_predictor_state, jnp.zeros_like(x.RPE)
         )

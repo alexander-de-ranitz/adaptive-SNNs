@@ -9,7 +9,11 @@ from jaxtyping import Array, PyTree
 from adaptive_SNN.models.environments import AbstractEnvironment
 from adaptive_SNN.models.networks import AbstractNeuronModel, LIFNetwork, LIFState
 from adaptive_SNN.models.noise import OUP, PoissonJumpProcess
-from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
+from adaptive_SNN.utils.operators import (
+    DefaultIfNone,
+    ElementWiseMul,
+    MixedPyTreeOperator,
+)
 
 # ============================================================================
 # Model Creation Helpers
@@ -22,7 +26,7 @@ def make_LIF_model(
     N_neurons=10,
     N_inputs=3,
     dt=0.1e-3,
-    input_neuron_types=None,
+    input_types=None,
     fully_connected_input=True,
     min_noise_std=0.0,
     input_weight=1.0,
@@ -35,28 +39,12 @@ def make_LIF_model(
         N_inputs=N_inputs,
         dt=dt,
         fully_connected_input=fully_connected_input,
+        input_types=input_types,
         initial_input_weight=input_weight,
         noise_model=noise_model,
         min_noise_std=min_noise_std,
         key=key,
     )
-
-    # For testing purposes, allow explicitely defining the types of input neurons
-    if input_neuron_types is not None and N_inputs > 0:
-        desired_types = jnp.asarray(input_neuron_types, dtype=bool)
-        if desired_types.shape != (N_inputs,):
-            raise ValueError(
-                "input_neuron_types must have shape (N_inputs,) when provided"
-            )
-
-        updated_mask = model.excitatory_mask.at[-N_inputs:].set(desired_types)
-        object.__setattr__(model, "excitatory_mask", updated_mask)
-        object.__setattr__(
-            model,
-            "synaptic_time_constants",
-            jnp.where(updated_mask, model.tau_E, model.tau_I),
-        )
-
     return model
 
 
@@ -126,6 +114,10 @@ def make_baseline_state(model: LIFNetwork, **overrides) -> LIFState:
         ),
         filtered_spike_trains=jnp.zeros((N_neurons,)),
         mean_E_conductance=jnp.zeros((N_neurons,)),
+        mean_I_conductance=jnp.zeros((N_neurons,)),
+        charge_in=jnp.zeros((N_neurons,)),
+        charge_out=jnp.zeros((N_neurons,)),
+        mean_V=jnp.ones((N_neurons,)) * model.resting_potential,
         var_E_conductance=jnp.zeros((N_neurons,)),
         time_since_last_spike=jnp.ones((N_neurons,)) * jnp.inf,
         spike_buffer=jnp.zeros((model.buffer_size, N_neurons)),
@@ -220,6 +212,9 @@ class DummySpikingNetwork(AbstractNeuronModel):
     def initial(self):
         return make_baseline_state(self)
 
+    def pre_step_update(self, t, x, args, input_spikes):
+        return x
+
     def init_features(self):
         pass
 
@@ -245,7 +240,7 @@ class DummySpikingNetwork(AbstractNeuronModel):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x, args, input_spikes):
+    def update(self, t, x, args):
         # Generate spikes based on output rates
         spikes = jnp.where(t % (1.0 / self.output_rates) < self.dt, 1.0, 0.0)
         return eqx.tree_at(lambda s: s.S, x, spikes)
@@ -278,6 +273,67 @@ class DummyEnvironment(AbstractEnvironment):
     @property
     def noise_shape(self):
         return jax.ShapeDtypeStruct(shape=self.initial.shape, dtype=default_float)
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )
+
+
+class DummyModel:
+    @property
+    def initial(self):
+        return jnp.zeros(1)
+
+    @property
+    def noise_shape(self):
+        return None
+
+    def pre_step_update(self, t, x, args, **kwargs):
+        return x
+
+    def update(self, t, x, args, **kwargs):
+        return x
+
+    def drift(self, t, x, args, **kwargs):
+        return jnp.zeros_like(x)
+
+    def diffusion(self, t, x, args):
+        return DefaultIfNone(
+            default=jnp.zeros_like(x), else_do=ElementWiseMul(jnp.zeros_like(x))
+        )
+
+    def reset(self, t, x, args):
+        return x
+
+
+class RotatingDummyEnv(AbstractEnvironment):
+    @property
+    def initial(self):
+        return jnp.array([1.0, 0.0])
+
+    @property
+    def noise_shape(self):
+        return jax.ShapeDtypeStruct(shape=self.initial.shape, dtype=default_float)
+
+    def pre_step_update(self, t, x, args):
+        return x
+
+    def drift(self, t, x, args, env_input=None):
+        theta = 0.1 * t  # rotate at 0.1 rad/s
+        rotation_matrix = jnp.array(
+            [[jnp.cos(theta), -jnp.sin(theta)], [jnp.sin(theta), jnp.cos(theta)]]
+        )
+        return rotation_matrix @ x
+
+    def diffusion(self, t, x, args):
+        return jnp.eye(x.shape[0]) * 0.0
+
+    def update(self, t, x, args, env_input=None):
+        return x / jnp.linalg.norm(x)  # keep on unit circle
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(

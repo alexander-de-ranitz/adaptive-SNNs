@@ -9,6 +9,7 @@ from adaptive_SNN.models.networks import (
     GatedLIFNetwork,
     LIFNetwork,
     LIFState,
+    NetworkHandler,
 )
 
 
@@ -27,6 +28,8 @@ def get_LIF_model(model) -> LIFNetwork:
     if isinstance(model, (LIFNetwork, GatedLIFNetwork, EligibilityLIFNetwork)):
         return model
     elif isinstance(model, Agent):
+        return model.network
+    elif isinstance(model, NetworkHandler):
         return model.network
     elif isinstance(model, AgentEnvSystem):
         return model.agent.network

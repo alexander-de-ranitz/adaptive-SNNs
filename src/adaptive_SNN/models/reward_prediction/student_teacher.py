@@ -12,10 +12,6 @@ class StudentRewardModel(AbstractRewardPredictor):
     N_neurons: int
     N_students: int
 
-    def __init__(self, N_neurons: int, N_students: int):
-        self.N_neurons = N_neurons
-        self.N_students = N_students
-
     @property
     def initial(self):
         return RewardPrediction(value=jnp.zeros((1,)))
@@ -23,6 +19,20 @@ class StudentRewardModel(AbstractRewardPredictor):
     @property
     def noise_shape(self):
         return RewardPrediction(value=None)
+
+    def pre_step_update(
+        self, t, x, args, reward, network_state, input_spikes, env_state
+    ):
+        mean_noiseless_student_output = jnp.mean(
+            env_state.at[1 + self.N_students :].get()
+        )  # Get the mean state of the reference neurons as the expected reward signal
+        teacher_signal = env_state.at[
+            0
+        ].get()  # Get the first neuron's state as the teacher signal
+        reward = -jnp.square(teacher_signal - mean_noiseless_student_output)
+        return RewardPrediction(
+            value=jnp.asarray([reward])
+        )  # Return the computed reward
 
     def diffusion(self, t, x, args):
         return RewardPrediction(
@@ -32,20 +42,11 @@ class StudentRewardModel(AbstractRewardPredictor):
             )
         )
 
-    def drift(self, t, x, args, reward, network_state):
+    def drift(self, t, x, args, reward, RPE):
         return RewardPrediction(value=jnp.zeros_like(x.value))
 
     def update(self, t, x, args):
-        mean_noiseless_student_output = jnp.mean(
-            args["env_state"].at[1 + self.N_students :].get()
-        )  # Get the mean state of the reference neurons as the expected reward signal
-        teacher_signal = (
-            args["env_state"].at[0].get()
-        )  # Get the first neuron's state as the teacher signal
-        reward = -jnp.square(teacher_signal - mean_noiseless_student_output)
-        return RewardPrediction(
-            value=jnp.asarray([reward])
-        )  # Return the computed reward
+        return x
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
@@ -57,6 +58,9 @@ class StudentRewardModel(AbstractRewardPredictor):
 
 
 class MWERewardModel(AbstractRewardPredictor):
+    N_neurons: int
+    N_students: int
+
     @property
     def initial(self):
         return RewardPrediction(value=jnp.zeros((1,)))
@@ -64,6 +68,20 @@ class MWERewardModel(AbstractRewardPredictor):
     @property
     def noise_shape(self):
         return RewardPrediction(value=None)
+
+    def pre_step_update(
+        self, t, x, args, reward, network_state, input_spikes, env_state
+    ):
+        mean_noiseless_student_output = jnp.mean(
+            env_state.at[1 + self.N_students :].get()
+        )  # Get the mean state of the reference neurons as the expected reward signal
+        teacher_signal = env_state.at[
+            0
+        ].get()  # Get the first neuron's state as the teacher signal
+        reward = -jnp.square(teacher_signal - mean_noiseless_student_output)
+        return RewardPrediction(
+            value=jnp.asarray([reward])
+        )  # Return the computed reward
 
     def diffusion(self, t, x, args):
         return RewardPrediction(
@@ -73,20 +91,11 @@ class MWERewardModel(AbstractRewardPredictor):
             )
         )
 
-    def drift(self, t, x, args):
+    def drift(self, t, x, args, reward, RPE):
         return RewardPrediction(value=jnp.zeros_like(x.value))
 
     def update(self, t, x, args):
-        mean_noiseless_student_output = jnp.mean(
-            args["env_state"].at[1 + self.N_students :].get()
-        )  # Get the mean state of the reference neurons as the expected reward signal
-        teacher_signal = (
-            args["env_state"].at[0].get()
-        )  # Get the first neuron's state as the teacher signal
-        reward = -jnp.square(teacher_signal - mean_noiseless_student_output)
-        return RewardPrediction(
-            value=jnp.asarray([reward])
-        )  # Return the computed reward
+        return x
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(

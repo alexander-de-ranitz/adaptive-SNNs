@@ -19,20 +19,25 @@ class AbstractRewardPredictor(ABC, eqx.Module):
         pass
 
     @abstractmethod
-    def drift(self, t, x, args, reward, network_state):
+    def drift(self, t, x, args, reward, RPE):
         pass
 
     @abstractmethod
     def diffusion(self, t, x, args):
         pass
 
-    @abstractmethod
     def update(self, t, x, args):
         """Apply non-differential updates"""
-        pass
+        return x
 
-    def pre_step_update(self, t, x, args, reward, network_state):
+    def pre_step_update(
+        self, t, x, args, reward, network_state, input_spikes, env_state
+    ):
         """Apply any necessary updates to the state before computing the drift/diffusion."""
+        return x
+
+    def reset(self, t, x, args):
+        """If needed, reset (part of) the state at the end of an episode."""
         return x
 
     @property

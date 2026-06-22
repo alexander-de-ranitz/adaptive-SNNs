@@ -39,6 +39,7 @@ def test_spike_rate_env():
         env_state: agent_state.network_state.S,
         "reward_fn": lambda t, environment_state, args: jnp.array([0.0]),
         "input_spike_fn": lambda t, x, args: None,
+        "RPE_fn": lambda t, x, args, reward: jnp.array([0.0]),
     }
 
     y0 = model.initial

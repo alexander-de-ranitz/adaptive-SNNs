@@ -42,11 +42,7 @@ class AgentEnvSystem(eqx.Module):
         )
 
     def pre_step_update(self, t, x: SystemState, args):
-        """Perform any necessary updates to the state before computing the drift/diffusion.
-
-        This is where we compute the reward signal based on the current state of the environment and agent output,
-        and store it in the SystemState for use in the drift computation.
-        """
+        """Perform any necessary updates to the state before computing the drift/diffusion."""
 
         def _reset(t, x: SystemState, args):
             new_env_state = self.environment.reset(t, x.environment_state, args)
@@ -58,33 +54,44 @@ class AgentEnvSystem(eqx.Module):
                 reward_signal=jnp.zeros_like(x.reward_signal),
             )
 
-        def _regular_update(t, x: SystemState, args):
-            # Compute agent output based on current agent state
-            agent_output = args["network_output_fn"](
-                t, x.agent_state, args, env_state=x.environment_state
-            )
-            x_updated = eqx.tree_at(lambda s: s.agent_output, x, agent_output)
-
-            # Compute reward signal based on current environment state and new agent output
-            reward = args["reward_fn"](t, x_updated, args)
-
-            # Update agent and environment states
-            agent_state = self.agent.pre_step_update(t, x.agent_state, args, reward)
-            environment_state = self.environment.pre_step_update(
-                t, x.environment_state, args
-            )
-
-            return SystemState(
-                agent_state=agent_state,
-                environment_state=environment_state,
-                agent_output=agent_output,
-                reward_signal=reward,
-            )
-
-        return jax.lax.cond(
+        # If we have an episode end function and it returns True, reset the environment and agent states
+        x = jax.lax.cond(
             args.get("episode_end_fn", lambda t, x, args: False)(t, x, args),
             lambda: _reset(t, x, args),
-            lambda: _regular_update(t, x, args),
+            lambda: x,
+        )
+
+        # Compute agent output based on current agent state
+        agent_output = args["network_output_fn"](
+            t, x.agent_state, args, env_state=x.environment_state
+        )
+
+        input_spikes = args["input_spike_fn"](t, x, args)
+
+        # Check if we are still in the warmup period based on the environment's internal time state
+        env_in_warmup = args.get("env_warmup_fn", lambda t, x, args: False)(
+            t, x.environment_state, args
+        )
+
+        # Update agent and environment states
+        agent_state = self.agent.pre_step_update(
+            t,
+            x.agent_state,
+            args,
+            reward=x.reward_signal,
+            env_state=x.environment_state,
+            input_spikes=input_spikes,
+            disable_RPE=env_in_warmup,
+        )
+        environment_state = self.environment.pre_step_update(
+            t, x.environment_state, args
+        )
+
+        return SystemState(
+            agent_state=agent_state,
+            environment_state=environment_state,
+            agent_output=agent_output,
+            reward_signal=x.reward_signal,
         )
 
     def drift(self, t, x: SystemState, args: dict):
@@ -154,15 +161,18 @@ class AgentEnvSystem(eqx.Module):
         )
 
     def update(self, t, x: SystemState, args: dict):
-        # Get input spikes for the agent and update
-        agent_input_spikes = args["input_spike_fn"](t, x, args)
-        new_agent_state = self.agent.update(
-            t, x.agent_state, args, input_spikes=agent_input_spikes
-        )
-
+        # Update env state
         new_env_state = self.environment.update(
             t, x.environment_state, args, env_input=x.agent_output
         )
-        return SystemState(
-            new_agent_state, new_env_state, x.agent_output, x.reward_signal
-        )
+        new_state = eqx.tree_at(lambda x: x.environment_state, x, new_env_state)
+
+        # Get reward signal
+        reward = args["reward_fn"](t, new_state, args)
+        new_state = eqx.tree_at(lambda x: x.reward_signal, new_state, reward)
+
+        # Update agent state based on new reward signal
+        new_agent_state = self.agent.update(t, x.agent_state, args, reward=reward)
+        new_state = eqx.tree_at(lambda x: x.agent_state, new_state, new_agent_state)
+
+        return new_state

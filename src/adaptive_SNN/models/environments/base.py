@@ -34,7 +34,7 @@ class AbstractEnvironment(ABC, eqx.Module):
 
     def update(self, t, x, args, env_input):
         """Optional update function for applying non-differentiable updates to the environment state."""
-        pass
+        return x
 
     def pre_step_update(self, t, x, args):
         """Optional function to apply updates to the environment state before computing the drift/diffusion."""

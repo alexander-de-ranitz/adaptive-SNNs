@@ -38,7 +38,7 @@ class DummyNetwork(AbstractNeuronModel):
     def initial(self):
         return DummyNetworkState(value=self.initial_value)
 
-    def pre_step_update(self, t, x, args):
+    def pre_step_update(self, t, x, args, input_spikes=None):
         return DummyNetworkState(value=x.value + args["net_pre_step_add"])
 
     def drift(self, t, x, args, RPE=None):
@@ -54,6 +54,12 @@ class DummyNetwork(AbstractNeuronModel):
             )
         )
 
+    def update(self, t, x, args):
+        return DummyNetworkState(value=x.value + args["net_update_add"])
+
+    def reset(self, t, x, args):
+        return x
+
     @property
     def noise_shape(self):
         return DummyNetworkState(value=None)
@@ -65,12 +71,6 @@ class DummyNetwork(AbstractNeuronModel):
         return dfx.MultiTerm(
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
-
-    def update(self, t, x, args, input_spikes):
-        return DummyNetworkState(value=x.value + args["net_update_add"])
-
-    def reset(self, t, x, args):
-        return x
 
 
 class DummyRewardPredictor(AbstractRewardPredictor):
@@ -87,11 +87,13 @@ class DummyRewardPredictor(AbstractRewardPredictor):
     def noise_shape(self):
         return RewardPrediction(value=None)
 
-    def pre_step_update(self, t, x, args, reward, network_state):
+    def pre_step_update(
+        self, t, x, args, reward, network_state, input_spikes, env_state
+    ):
         return RewardPrediction(value=args["predicted_reward_value"])
 
-    def drift(self, t, x, args, reward, network_state):
-        return RewardPrediction(value=reward + network_state.value)
+    def drift(self, t, x, args, reward, RPE):
+        return RewardPrediction(value=jnp.zeros_like(x.value))
 
     def diffusion(self, t, x, args):
         return RewardPrediction(
@@ -161,42 +163,12 @@ def build_dummy_system():
     )
 
 
-def test_agent_env_system_pre_step_update_order():
-    model = build_dummy_system()
-    args = {
-        "network_output_fn": lambda t,
-        agent_state,
-        a,
-        env_state: agent_state.network_state.value * 2.0,
-        "reward_fn": lambda t, system_state, a: system_state.environment_state.value
-        + system_state.agent_output,
-        "net_pre_step_add": jnp.array([0.5]),
-        "env_pre_step_add": jnp.array([5.0]),
-        "predicted_reward_value": jnp.array([0.25]),
-        "net_drift_rpe_scale": jnp.array([0.0]),
-        "net_update_add": jnp.array([0.0]),
-        "env_drift_scale": jnp.array([0.0]),
-        "env_update_scale": jnp.array([0.0]),
-        "env_update_bias": jnp.array([0.0]),
-        "input_spike_fn": lambda t, x, args: None,
-    }
-
-    x0 = model.initial
-    x1 = model.pre_step_update(0.0, x0, args)
-
-    assert jnp.allclose(x1.agent_output, jnp.array([2.0]))
-    assert jnp.allclose(x1.reward_signal, jnp.array([4.0]))
-    assert jnp.allclose(x1.agent_state.RPE, jnp.array([3.75]))
-    assert jnp.allclose(x1.agent_state.network_state.value, jnp.array([1.5]))
-    assert jnp.allclose(x1.environment_state.value, jnp.array([7.0]))
-    assert jnp.allclose(x1.agent_state.reward_predictor_state.value, jnp.array([0.25]))
-
-
 def test_agent_env_system_drift_uses_connections():
     model = build_dummy_system()
     args = {
         "net_drift_rpe_scale": jnp.array([5.0]),
         "env_drift_scale": jnp.array([3.0]),
+        "reward_fn": lambda t, system_state, a: jnp.zeros((1,)),
     }
 
     agent_state = AgentState(
@@ -217,7 +189,7 @@ def test_agent_env_system_drift_uses_connections():
     assert jnp.allclose(drift.environment_state.value, jnp.array([15.0]))
     assert jnp.allclose(drift.agent_state.network_state.value, jnp.array([11.0]))
     assert jnp.allclose(
-        drift.agent_state.reward_predictor_state.value, jnp.array([6.0])
+        drift.agent_state.reward_predictor_state.value, jnp.array([0.0])
     )
     assert jnp.allclose(drift.agent_state.RPE, jnp.array([0.0]))
     assert jnp.allclose(drift.agent_output, jnp.array([0.0]))
@@ -230,9 +202,8 @@ def test_agent_env_system_update_uses_agent_output():
         "net_update_add": jnp.array([0.5]),
         "env_update_scale": jnp.array([2.0]),
         "env_update_bias": jnp.array([1.0]),
-        "input_spike_fn": lambda t, x, args: jnp.zeros(
-            (model.agent.network.N_neurons, model.agent.network.N_inputs)
-        ),
+        "reward_fn": lambda t, system_state, a: jnp.zeros((1,)),
+        "RPE_fn": lambda t, x, args, reward: jnp.zeros((1,)),
     }
 
     agent_state = AgentState(
@@ -245,7 +216,7 @@ def test_agent_env_system_update_uses_agent_output():
         agent_state=agent_state,
         environment_state=env_state,
         agent_output=jnp.array([3.0]),
-        reward_signal=jnp.array([4.0]),
+        reward_signal=jnp.array([0.0]),
     )
 
     updated = model.update(0.0, x, args)
@@ -253,7 +224,7 @@ def test_agent_env_system_update_uses_agent_output():
     assert jnp.allclose(updated.environment_state.value, jnp.array([12.0]))
     assert jnp.allclose(updated.agent_state.network_state.value, jnp.array([1.5]))
     assert jnp.allclose(updated.agent_output, jnp.array([3.0]))
-    assert jnp.allclose(updated.reward_signal, jnp.array([4.0]))
+    assert jnp.allclose(updated.reward_signal, jnp.array([0.0]))
 
 
 def test_agent_env_system_noise_shape_structure():
@@ -279,6 +250,7 @@ def test_solve_ode_runs_pre_step_and_update():
         env_state: agent_state.network_state.value * 2.0,
         "reward_fn": lambda t, system_state, a: system_state.environment_state.value
         + system_state.agent_output,
+        "RPE_fn": lambda t, x, args, reward: reward - x.reward_predictor_state.value,
         "net_pre_step_add": jnp.array([0.5]),
         "env_pre_step_add": jnp.array([1.0]),
         "predicted_reward_value": jnp.array([0.0]),
@@ -314,9 +286,42 @@ def test_solve_ode_runs_pre_step_and_update():
 
     values, env_values, outputs, rewards = response.ys
 
-    # Each step: pre_step adds 0.5 to network and 1.0 to env, then Euler adds dt * state
-    # (drift is identity), then update adds 0.2 to network and 3 * agent_output + 0.1 to env.
+    # Each step: reward is computed from previous agent_output, then output is computed from
+    # current network. pre_step adds 0.5 to network and 1.0 to env. Euler adds dt * state
+    # (net/env drift = current value). update adds 0.2 to network and 3 * agent_output + 0.1 to env.
+    #
+    # Step 1: output=1*2=2, net_pre=1.5, env_pre=3, net_euler=1.65, env_euler=3.3, net_upd=1.85, env_upd=9.4, reward=9.4+2=11.4
+    # Step 2: output=1.85*2=3.7, net_pre=2.35, env_pre=10.4, net_euler=2.585, env_euler=11.44, net_upd=2.785, env_upd=22.64, reward=22.64+3.7=26.34
     assert jnp.allclose(values, jnp.array([[1.0], [1.85], [2.785]]))
     assert jnp.allclose(env_values, jnp.array([[2.0], [9.4], [22.64]]))
     assert jnp.allclose(outputs, jnp.array([[0.0], [2.0], [3.7]]))
-    assert jnp.allclose(rewards, jnp.array([[0.0], [4.0], [13.1]]))
+    assert jnp.allclose(rewards, jnp.array([[0.0], [11.4], [26.34]]))
+
+
+def test_env_warmup_disables_rpe():
+    model = build_dummy_system()
+    args = {
+        "network_output_fn": lambda t,
+        agent_state,
+        a,
+        env_state: agent_state.network_state.value * 2.0,
+        "reward_fn": lambda t, system_state, a: system_state.environment_state.value
+        + system_state.agent_output,
+        "RPE_fn": lambda t, x, args, reward: reward - x.reward_predictor_state.value,
+        "env_warmup_fn": lambda t, x, args: True,  # always in warmup
+        "net_pre_step_add": jnp.array([0.0]),
+        "env_pre_step_add": jnp.array([0.0]),
+        "predicted_reward_value": jnp.array([0.25]),
+        "net_drift_rpe_scale": jnp.array([0.0]),
+        "net_update_add": jnp.array([0.0]),
+        "env_drift_scale": jnp.array([0.0]),
+        "env_update_scale": jnp.array([0.0]),
+        "env_update_bias": jnp.array([0.0]),
+        "input_spike_fn": lambda t, x, args: None,
+    }
+
+    x0 = model.initial
+    x1 = model.pre_step_update(0.0, x0, args)
+
+    # RPE should be zero even though reward - predicted_reward would be non-zero
+    assert jnp.allclose(x1.agent_state.RPE, jnp.array([0.0]))

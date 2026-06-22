@@ -21,7 +21,7 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
     noise_level = 0.0
     N_inputs = 1
     min_noise_std = 1e-9
-    balance = 1.4285
+    balance = 1.01
 
     rate = jnp.array([1500.0])  # High frequency background input
 

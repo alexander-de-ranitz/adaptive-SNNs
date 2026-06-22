@@ -2,74 +2,68 @@ from diffrax import EulerHeun, SaveAt
 from jax import numpy as jnp
 from jax import random as jr
 from matplotlib import pyplot as plt
-from scipy.linalg import solve_continuous_are
 
-from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.environments import ExternalController, PendulumEnvironment
 from adaptive_SNN.solver import solve_ODE
 
 
-def compute_optimal_controller(env: PendulumEnvironment):
-    A = jnp.array([[0, 1], [env.g, 0]])
-    B = jnp.array([[0], [env.rate]])
-    Q = jnp.eye(2)  # State cost matrix
-    R = jnp.eye(1)  # Control cost matrix
-    S = solve_continuous_are(A, B, Q, R)
-    K = jnp.linalg.inv(R) @ B.T @ S
-
-    def optimal_control(t, x, args):
-        u = -K @ x
-        return u
-
-    return optimal_control
-
-
-def main():
-    key = jr.PRNGKey(0)
+def plot_optimal_control():
+    key = jr.PRNGKey(10)
     env = PendulumEnvironment(rate=1.0, key=key)
-    optimal_control = compute_optimal_controller(env)
+    optimal_control = lambda t, x, args: -env.control_gain @ x[:2].reshape((2, 1))
 
-    def instant_reward_fn(t, x: SystemState, args):
-        instantaneous_reward = (
-            -(x.environment_state[0] ** 2)
-            - 0.1 * x.environment_state[1] ** 2
-            - 0.01 * jnp.squeeze(x.agent_output) ** 2
-        )
-        return jnp.atleast_1d(instantaneous_reward)
-
-    for i in range(10):
+    for i in range(1):
         model = ExternalController(
             PendulumEnvironment(
                 rate=1.0,
                 key=jr.fold_in(key, i),
-                initial_angle_range=(-0.1, 0.1),
+                initial_angle_range=(-0.5, 0.5),
+                initial_angular_velocity_range=(-0.0, 0.0),
+                max_allowed_angle=0.6,
+                max_allowed_angular_velocity=100.0,
             )
         )
-        print("Initial state:", model.initial)
         save_at = SaveAt(ts=jnp.arange(0.0, 10.0, 0.01), t0=True, t1=True)
-        args = {"get_env_input": optimal_control}
-
+        args = {
+            "get_env_input": optimal_control,
+            "episode_end_fn": lambda t, x, args: jnp.any(
+                jnp.abs(x)
+                > jnp.array(
+                    [
+                        model.environment.max_allowed_angle,
+                        model.environment.max_allowed_angular_velocity,
+                        model.environment.max_episode_time,
+                    ]
+                )
+            ),
+        }
         sol = solve_ODE(
             model,
             solver=EulerHeun(),
             t0=0.0,
-            t1=10.0,
+            t1=3.0,
             dt0=1e-4,
             y0=model.initial,
             save_at=save_at,
             args=args,
         )
+        control = jnp.array(
+            [optimal_control(t, y, args) for t, y in zip(sol.ts, sol.ys)]
+        )
         angle, ang_vel = sol.ys[:, 0], sol.ys[:, 1]
-        print("Final state:", sol.ys[-1])
         ts = sol.ts
-        plt.subplot(2, 1, 1)
+        plt.subplot(3, 1, 1)
         plt.plot(ts, angle, c="darkgreen")
 
-        plt.subplot(2, 1, 2)
+        plt.subplot(3, 1, 2)
         plt.plot(ts, ang_vel, c="darkgreen")
+
+        plt.subplot(3, 1, 3)
+        plt.plot(ts, control.squeeze(), c="darkgreen")
+        plt.plot(ts, sol.ys[:, 2], c="orange")
     plt.xlabel("Time (s)")
     plt.show()
 
 
 if __name__ == "__main__":
-    main()
+    plot_optimal_control()

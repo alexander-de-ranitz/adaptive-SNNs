@@ -7,11 +7,11 @@ from scipy.signal import welch
 from scipy.stats import norm
 
 from adaptive_SNN.models.networks import LIFNetwork
-from adaptive_SNN.utils.metrics import compute_network_firing_rate
-from adaptive_SNN.visualization.utils.adapters import (
+from adaptive_SNN.utils.adapters import (
     get_LIF_model,
     get_LIF_state,
 )
+from adaptive_SNN.utils.metrics import compute_network_firing_rate
 
 
 def _plot_membrane_potential(

@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH -J pendulum_sim
-#SBATCH -t 10
+#SBATCH -t 900
 #SBATCH -p gpu_a100
 #SBATCH -N 1
-#SBATCH --ntasks=18
+#SBATCH --ntasks=36
 #SBATCH --cpus-per-task=1
-#SBATCH --gpus=1
+#SBATCH --gpus=2
 #SBATCH --mail-user=alexanderderanitz@gmail.com
 #SBATCH --mail-type=START,END,FAIL
 
@@ -38,7 +38,7 @@ cleanup() {
     echo "Contents of $TMPDIR/output_dir:"
     find "$TMPDIR/output_dir" -type f 2>/dev/null | head -20
 
-    DEST_DIR="$REPO_DIR/results/pendulum_spikes_$(date +%Y%m%d_%H%M%S)"
+    DEST_DIR="$REPO_DIR/results/pendulum_run_$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$DEST_DIR"
     cp -rv "$TMPDIR/output_dir/." "$DEST_DIR/" || echo "Copy failed with exit code $?"
     exit "$exit_code"

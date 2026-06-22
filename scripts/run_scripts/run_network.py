@@ -16,11 +16,11 @@ from adaptive_SNN.utils.runner import run_simulation
 
 def main():
     cfg = create_network_config(N_neurons=1000, key=jr.PRNGKey(98765))
-    cfg.t1 = 0.25
+    cfg.t1 = 15
     cfg.initial_rec_weight = jnp.ones(cfg.N_neurons)
-    # cfg.initial_rec_weight = cfg.initial_rec_weight.at[0].set(10.0)
     cfg.initial_input_weight = 1.0
-    cfg.balance = 0.5
+    cfg.balance = 1.02
+    cfg.base_network_kwargs["balance_rate"] = 10.0
 
     N_E_in = 150
     N_I_in = 0  # N_E_in // 4
@@ -31,11 +31,14 @@ def main():
     def save(t, x: SystemState, args):
         # return x.environment_state.astype(jnp.float32)
         return (
-            x.agent_state.network_state.W[:10].astype(jnp.float32),
-            x.agent_state.network_state.G[:10].astype(jnp.float32),
+            x.agent_state.network_state.W[:10],
+            x.agent_state.network_state.G[:10],
+            x.agent_state.network_state.charge_in[:10],
+            x.agent_state.network_state.charge_out[:10],
+            x.environment_state,
         )
 
-    cfg.save_at = SaveAt(ts=jnp.linspace(0.0, cfg.t1, 200), fn=save)
+    cfg.save_at = SaveAt(ts=jnp.linspace(0.0, cfg.t1, cfg.t1 * 100), fn=save)
 
     rate = jnp.array([N_E_in * 10])  # High frequency background input
 
