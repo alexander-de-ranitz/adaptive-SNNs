@@ -61,9 +61,6 @@ class AgentEnvSystem(eqx.Module):
             lambda: x,
         )
 
-        # Get reward signal based on (previous step's) environment state and agent output
-        reward = args["reward_fn"](t, x, args)
-
         # Compute agent output based on current agent state
         agent_output = args["network_output_fn"](
             t, x.agent_state, args, env_state=x.environment_state
@@ -81,7 +78,7 @@ class AgentEnvSystem(eqx.Module):
             t,
             x.agent_state,
             args,
-            reward=reward,
+            reward=x.reward_signal,
             env_state=x.environment_state,
             input_spikes=input_spikes,
             disable_RPE=env_in_warmup,
@@ -94,7 +91,7 @@ class AgentEnvSystem(eqx.Module):
             agent_state=agent_state,
             environment_state=environment_state,
             agent_output=agent_output,
-            reward_signal=reward,
+            reward_signal=x.reward_signal,
         )
 
     def drift(self, t, x: SystemState, args: dict):
@@ -164,12 +161,18 @@ class AgentEnvSystem(eqx.Module):
         )
 
     def update(self, t, x: SystemState, args: dict):
-        # Get input spikes for the agent and update
-        new_agent_state = self.agent.update(t, x.agent_state, args)
-
+        # Update env state
         new_env_state = self.environment.update(
             t, x.environment_state, args, env_input=x.agent_output
         )
-        return SystemState(
-            new_agent_state, new_env_state, x.agent_output, x.reward_signal
-        )
+        new_state = eqx.tree_at(lambda x: x.environment_state, x, new_env_state)
+
+        # Get reward signal
+        reward = args["reward_fn"](t, new_state, args)
+        new_state = eqx.tree_at(lambda x: x.reward_signal, new_state, reward)
+
+        # Update agent state based on new reward signal
+        new_agent_state = self.agent.update(t, x.agent_state, args, reward=reward)
+        new_state = eqx.tree_at(lambda x: x.agent_state, new_state, new_agent_state)
+
+        return new_state

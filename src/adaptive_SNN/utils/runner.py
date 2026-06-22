@@ -82,7 +82,12 @@ def _load_existing_solution(save_file: str) -> tuple[dfx.Solution, AgentEnvSyste
 def setup_simulation(
     config: SimulationConfig,
 ) -> tuple[AgentEnvSystem, PyTree, jr.PRNGKey]:
-    """Set up the model, initial state, and key for a simulation based on the config."""
+    """Set up the model, initial state, and key for a simulation based on the config.
+
+    returns:
+        model: The AgentEnvSystem model to be simulated.
+        args: A dictionary of arguments to be passed to the model during simulation.
+        simulation_key: A JAX PRNGKey for random number generation during the simulation."""
     if isinstance(config.key, int):
         key = jr.PRNGKey(config.key)
     else:

@@ -57,15 +57,12 @@ class LinearReadoutCritic(AbstractRewardPredictor):
         input_spikes,
         env_state,
     ):
-        new_value = jnp.atleast_1d(
-            state.weights @ jnp.concatenate([state.input_features, jnp.array([1.0])])
-        )
         new_features = state.input_features + input_spikes
         return CriticPrediction(
-            value=new_value,
-            previous_value=state.value,
+            value=state.value,
+            previous_value=state.value,  # Store current value as previous value for the next step
             input_features=new_features,
-            input_features_prev=state.input_features,
+            input_features_prev=state.input_features,  # Store current features as previous for the next step
             weights=state.weights,
         )
 
@@ -95,7 +92,10 @@ class LinearReadoutCritic(AbstractRewardPredictor):
         )
 
     def update(self, t, state: CriticPrediction, args) -> CriticPrediction:
-        return state
+        new_value = state.weights @ jnp.concatenate(
+            [state.input_features_prev, jnp.array([1.0])]
+        )
+        return eqx.tree_at(lambda s: s.value, state, jnp.atleast_1d(new_value))
 
     def reset(self, t, state: CriticPrediction, args) -> CriticPrediction:
         """Reset everything but the weights at the end of an episode."""

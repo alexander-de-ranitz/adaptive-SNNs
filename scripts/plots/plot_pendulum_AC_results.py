@@ -6,7 +6,7 @@ from jax import numpy as jnp
 
 from adaptive_SNN.utils.runner import _load_existing_solution
 
-RESULTS_DIR = "results/pendulum_AC_20260618_154401/results/"
+RESULTS_DIR = "results/pendulum_AC_20260619_130838/results/"
 
 
 def load_pendulum_results(file_path):

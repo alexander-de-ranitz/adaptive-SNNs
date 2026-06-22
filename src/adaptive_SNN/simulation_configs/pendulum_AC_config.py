@@ -109,9 +109,10 @@ def create_pendulum_AC_config(
         reward_predictor_kwargs={"input_dim": N_inputs},
         args={
             "delta_V": jnp.power(jnp.float64(2), jnp.float64(-12)),
+            "gamma": gamma,
             "use_noise": jnp.array([True]),
-            "get_critic_lr": lambda t, x, args: 0.0000005,
-            "env_warmup_fn": lambda t, env_state, args: jnp.asarray(env_state[2] < 0.2),
+            "get_critic_lr": lambda t, x, args: 0.000001,
+            "env_warmup_fn": lambda t, env_state, args: jnp.asarray(env_state[2] < 0.3),
             "RPE_fn": lambda t, x, args, reward: reward
             - 1 / dt * x.reward_predictor_state.previous_value
             + 1 / dt * gamma * x.reward_predictor_state.value,

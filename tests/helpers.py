@@ -9,7 +9,11 @@ from jaxtyping import Array, PyTree
 from adaptive_SNN.models.environments import AbstractEnvironment
 from adaptive_SNN.models.networks import AbstractNeuronModel, LIFNetwork, LIFState
 from adaptive_SNN.models.noise import OUP, PoissonJumpProcess
-from adaptive_SNN.utils import ElementWiseMul, MixedPyTreeOperator
+from adaptive_SNN.utils.operators import (
+    DefaultIfNone,
+    ElementWiseMul,
+    MixedPyTreeOperator,
+)
 
 # ============================================================================
 # Model Creation Helpers
@@ -269,6 +273,67 @@ class DummyEnvironment(AbstractEnvironment):
     @property
     def noise_shape(self):
         return jax.ShapeDtypeStruct(shape=self.initial.shape, dtype=default_float)
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )
+
+
+class DummyModel:
+    @property
+    def initial(self):
+        return jnp.zeros(1)
+
+    @property
+    def noise_shape(self):
+        return None
+
+    def pre_step_update(self, t, x, args, **kwargs):
+        return x
+
+    def update(self, t, x, args, **kwargs):
+        return x
+
+    def drift(self, t, x, args, **kwargs):
+        return jnp.zeros_like(x)
+
+    def diffusion(self, t, x, args):
+        return DefaultIfNone(
+            default=jnp.zeros_like(x), else_do=ElementWiseMul(jnp.zeros_like(x))
+        )
+
+    def reset(self, t, x, args):
+        return x
+
+
+class RotatingDummyEnv(AbstractEnvironment):
+    @property
+    def initial(self):
+        return jnp.array([1.0, 0.0])
+
+    @property
+    def noise_shape(self):
+        return jax.ShapeDtypeStruct(shape=self.initial.shape, dtype=default_float)
+
+    def pre_step_update(self, t, x, args):
+        return x
+
+    def drift(self, t, x, args, env_input=None):
+        theta = 0.1 * t  # rotate at 0.1 rad/s
+        rotation_matrix = jnp.array(
+            [[jnp.cos(theta), -jnp.sin(theta)], [jnp.sin(theta), jnp.cos(theta)]]
+        )
+        return rotation_matrix @ x
+
+    def diffusion(self, t, x, args):
+        return jnp.eye(x.shape[0]) * 0.0
+
+    def update(self, t, x, args, env_input=None):
+        return x / jnp.linalg.norm(x)  # keep on unit circle
 
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
