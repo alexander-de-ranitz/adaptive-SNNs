@@ -126,7 +126,7 @@ def solve_ODE_batched(
     y0s: PyTree,
     save_at: SaveAt,
     return_final_state: bool = False,
-    args: PyTree = None,
+    args: list[PyTree] = None,
     keys: Array | PyTree = jr.PRNGKey(0),
 ) -> Array:
     """
@@ -142,7 +142,7 @@ def solve_ODE_batched(
         dt0: step size.
         y0s: Initial PyTree states, one per simulation.
         save_at: SaveAt object specifying when to save states. Shared across all simulations.
-        args: Single args dict broadcast to all simulations (PyTree or None).
+        args: List of args dicts, one per simulation (PyTree or None).
         keys: Sequence of PRNG keys, one per simulation.
     Returns:
         diffrax.Solution with (ts, ys) carrying a leading batch dimension.
@@ -150,9 +150,10 @@ def solve_ODE_batched(
     stacked_models = _stack_pytree(models)
     stacked_y0s = _stack_pytree(y0s)
     stacked_keys = jnp.stack(keys)
+    stacked_args = _stack_pytree(args) if args is not None else None
 
     @eqx.filter_vmap
-    def run_in_parallel(model, y0, key):
+    def run_in_parallel(model, y0, key, args):
         return solve_ODE(
             model=model,
             solver=solver,
@@ -166,7 +167,7 @@ def solve_ODE_batched(
             key=key,
         )
 
-    return run_in_parallel(stacked_models, stacked_y0s, stacked_keys)
+    return run_in_parallel(stacked_models, stacked_y0s, stacked_keys, stacked_args)
 
 
 @eqx.filter_jit

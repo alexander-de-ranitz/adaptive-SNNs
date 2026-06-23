@@ -95,7 +95,8 @@ def create_pendulum_AC_config(
         mean_synaptic_delay=1.5e-3,
         noise_level=noise_level,
         min_noise_std=min_noise_std,
-        warmup_time=100,
+        actor_warmup_time=100,
+        critic_warmup_time=0,
         key=key,
         save_at=save_at,
         save_file="results/pendulum.npz",
@@ -111,7 +112,6 @@ def create_pendulum_AC_config(
             "delta_V": jnp.power(jnp.float64(2), jnp.float64(-12)),
             "gamma": gamma,
             "use_noise": jnp.array([True]),
-            "get_critic_lr": lambda t, x, args: 0.000001,
             "env_warmup_fn": lambda t, env_state, args: jnp.asarray(env_state[2] < 0.3),
             "RPE_fn": lambda t, x, args, reward: reward
             - 1 / dt * x.reward_predictor_state.previous_value
