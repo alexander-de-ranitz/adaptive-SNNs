@@ -632,7 +632,7 @@ def test_I_weight_drift_no_desired_balance():
         input_types=jnp.array([1, 0]),
     )
     args = make_default_args(
-        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 0.0
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: jnp.nan
     )
     state = make_baseline_state(
         model,
@@ -658,7 +658,7 @@ def test_I_weight_drift():
         input_types=jnp.array([1, 0]),
     )
     args = make_default_args(
-        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 1.0
+        N_neurons, N_inputs, get_desired_balance=lambda t, x, a: 0.0
     )
     state = make_baseline_state(
         model,
@@ -666,7 +666,7 @@ def test_I_weight_drift():
         mean_E_conductance=jnp.ones((N_neurons,)),
         mean_I_conductance=jnp.arange(1, N_neurons + 1),
         charge_in=jnp.ones((N_neurons,)),
-        charge_out=jnp.arange(1, N_neurons + 1),
+        charge_out=-jnp.arange(1, N_neurons + 1),
     )
     initial_balance = model.compute_balance(0.0, state, args)
     dW_I = model.compute_I_weight_drift(0.0, state, args)
@@ -674,12 +674,12 @@ def test_I_weight_drift():
     assert dW_I.shape == (N_neurons, N_neurons + N_inputs)
     assert jnp.allclose(
         dW_I[0], 0.0
-    )  # first neuron is already balanced with E/I ratio of 1.0
+    )  # first neuron is already balanced with equal charge_in and charge_out, so no update should occur
     assert (
         dW_I[1, -1] < 0.0
-    )  # second neuron has E/I ratio of 0.5, so I weights should be decreased to increase balance
+    )  # second neuron has balance of (1 - 2)/3 = -1/3, so the inhibitory weight should decrease to reduce imbalance
     assert jnp.allclose(
-        dW_I[1, -1], model.balance_rate * (initial_balance[1] - 1.0) * state.W[1, -1]
+        dW_I[1, -1], model.balance_rate * (initial_balance[1] - 0.0) * state.W[1, -1]
     )  # Check that the update is in the correct direction and proportional to imbalance and current weight
     assert jnp.all(dW_I[1, :-1] == 0.0)  # E weights should not change
 
