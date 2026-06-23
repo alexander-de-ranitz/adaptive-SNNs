@@ -646,14 +646,12 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         balance_error = balance - desired_balance
 
         # Only update weights if:
-        # 1) balance is greater than 0 (i.e. there is some excitation to balance)
-        # 2) desired balance is greater than 0 (i.e. we want some balance, if desired_balance is 0 we do not want to update I weights)
-        # 3) the synaptic I conductance is greater than 0 (i.e. there is some inhibitory conductance to adjust)
-        # 4) there is an existing connection (weight is not NaN)
+        # 1) desired balance is not nan (i.e. we have a target balance to achieve)
+        # 2) current balance is not nan (i.e. we have received some input and can compute a meaningful balance)
+        # 3) there is an existing connection (weight is not NaN)
         I_weight_drift = jnp.where(
-            (desired_balance > 0)
-            & (balance > 0)[:, None]
-            & (state.mean_I_conductance > 0)[:, None]
+            (~jnp.isnan(desired_balance))
+            & (~jnp.isnan(balance))[:, None]
             & (~jnp.isnan(state.W)),
             self.balance_rate
             * balance_error[:, None]
@@ -762,22 +760,20 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         raise NotImplementedError
 
     def compute_balance(self, t, state: LIFState, args):
-        """Compute the ratio of total inhibitory to excitatory conductance for each neuron.
+        """Compute the difference between excitatory and inhibitory charge flows.
 
         Balance is computed as:
-            balance = charge_in / abs(charge_out)
+            balance = charge_in + charge_out / (|charge_in| + |charge_out|)
 
-        Balance is set to 1 if either charge_in or charge_out is zero.
-        This is done because there is no way to define a meaningful balance value when there is no excitatory or inhibitory conductance,
-        and we do not want to update I weights in this case (as there is no inhibitory conductance to adjust or no excitatory conductance to balance).
 
         Returns:
             Array of shape (N_neurons,) with balance values for each neuron.
         """
+        total_charge = jnp.abs(state.charge_in) + jnp.abs(state.charge_out)
         return jnp.where(
-            (jnp.abs(state.charge_out) > 0) & (jnp.abs(state.charge_in) > 0),
-            state.charge_in / jnp.abs(state.charge_out),
-            1.0,
+            (state.charge_in != 0.0) & (state.charge_out != 0.0),
+            (state.charge_in + state.charge_out) / total_charge,
+            jnp.nan,
         )
 
     def initialize_weights(self, key: jr.PRNGKey):
