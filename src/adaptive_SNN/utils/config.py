@@ -25,7 +25,8 @@ class SimulationConfig:
     t0: float = 0.0
     t1: float = 100.0
     dt: float = 1e-4
-    warmup_time: float = 10.0
+    actor_warmup_time: float = 10.0
+    critic_warmup_time: float = 0.0
     save_at: SaveAt = dfx.SaveAt()
 
     # Model classes
@@ -40,6 +41,7 @@ class SimulationConfig:
     connection_prob_I: float = 0.0
     noise_level: float | Array = 0.0
     lr: float | Array = 0.0
+    critic_lr: float | Array = 0.0
     initial_rec_weight: float = 0.0
     rec_weight_std: float = 0.0
     balance: float = 0.0
@@ -86,8 +88,10 @@ class SimulationConfig:
             raise ValueError(f"Expected t1 > t0, got t0={self.t0}, t1={self.t1}")
         if self.dt <= 0.0:
             raise ValueError(f"Expected dt > 0, got dt={self.dt}")
-        if self.warmup_time < 0.0:
-            raise ValueError(f"Expected warmup_time >= 0, got {self.warmup_time}")
+        if self.actor_warmup_time < 0.0:
+            raise ValueError(
+                f"Expected actor_warmup_time >= 0, got {self.actor_warmup_time}"
+            )
         if self.N_neurons <= 0:
             raise ValueError(f"Expected N_neurons > 0, got {self.N_neurons}")
         if self.N_inputs < 0:

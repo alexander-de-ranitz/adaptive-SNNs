@@ -131,14 +131,19 @@ def setup_simulation(
 
     args = {
         "get_learning_rate": lambda t, x, args: jnp.where(
-            t < args["warmup_time"], 0.0, args["lr"]
+            t < args["actor_warmup_time"], 0.0, args["lr"]
+        ),
+        "get_critic_lr": lambda t, x, args: jnp.where(
+            t < args["critic_warmup_time"], 0.0, args["critic_lr"]
         ),
         "network_output_fn": config.network_output_fn,
         "reward_fn": config.reward_fn,
         "input_spike_fn": config.input_spike_fn,
         "get_desired_balance": lambda t, x, args: jnp.array([args["balance"]]),
         "lr": jnp.asarray(config.lr),
-        "warmup_time": jnp.asarray(config.warmup_time),
+        "critic_lr": jnp.asarray(config.critic_lr),
+        "actor_warmup_time": jnp.asarray(config.actor_warmup_time),
+        "critic_warmup_time": jnp.asarray(config.critic_warmup_time),
         "balance": jnp.asarray(config.balance),
         "noise_scale_hyperparam": jnp.asarray(config.noise_level),
         **config.args,
@@ -256,7 +261,7 @@ def run_batched_simulation(
         dt0=configs[0].dt,
         y0s=y0s,
         save_at=configs[0].save_at,
-        args=args_list[0],
+        args=args_list,
         return_final_state=return_final_state,
         keys=keys,
     )
