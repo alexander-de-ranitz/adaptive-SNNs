@@ -4,7 +4,7 @@ from jaxtyping import Array
 from matplotlib.pyplot import Axes
 from scipy.optimize import curve_fit
 from scipy.signal import welch
-from scipy.stats import norm
+from scipy.stats import gaussian_kde, norm
 
 from adaptive_SNN.models.networks import LIFNetwork
 from adaptive_SNN.utils.adapters import (
@@ -475,51 +475,23 @@ def _plot_noise_distribution_STA(
         noise_at_spike_time.append(noise_values_at_spikes)
         noise_all_time.append(neuron_noise)
 
-    x_lim = 3 * noise_std
+    STA_noise = jnp.concatenate(noise_at_spike_time) * 1e9  # Convert to nS
+    all_noise = jnp.concatenate(noise_all_time) * 1e9  # Convert to nS
+    kde_STA = gaussian_kde(STA_noise)
+    x_range = jnp.linspace(jnp.min(all_noise), jnp.max(all_noise), 100)
+    density = kde_STA(x_range)
 
-    STA_noise = jnp.concatenate(noise_at_spike_time)
-    STA_noise = STA_noise[
-        jnp.abs(STA_noise) < x_lim
-    ]  # Limit to x_lim for better visualization
-    all_noise = jnp.concatenate(noise_all_time)
-    all_noise = all_noise[jnp.abs(all_noise) < x_lim]  # Limit
-    ax.hist(
-        STA_noise,
-        bins=41,
-        density=True,
-        histtype="stepfilled",
-        label="Noise distribution at spike times",
-        alpha=0.6,
-        color="darkgreen",
-    )
+    ax.plot(x_range, density, c="darkgreen")
+    ax.fill_between(x_range, density, alpha=0.3, color="darkgreen")
+    ax.set_xlabel("Perturbation (nS)")
+    ax.set_ylabel("Probability Density (a.u.)")
+    ax.set_yticks([])
+    # ax.spines["right"].set_visible(False)
+    # ax.spines["top"].set_visible(False)
+    ax.set_title(rf"$\sigma_\xi = {noise_std * 1e9:.2f} \text{{nS}}$")
 
-    ax.hist(
-        all_noise,
-        bins=41,
-        density=True,
-        histtype="step",
-        label="Noise distribution at all times",
-        alpha=0.7,
-        color="k",
-    )
-
-    ax.set_xlim(-x_lim, x_lim)
-
-    # # Plot the analytical noise distribution for comparison
-    # # note that this assumes constant noise std over time
-    # if noise_std is not None:
-    #     if isinstance(noise_std, jnp.ndarray):
-    #         noise_std = noise_std.at[0].get()
-    #     x = jnp.linspace(-4 * noise_std, 4 * noise_std, 100)
-    #     lim = (-4 * noise_std, 4 * noise_std)
-    #     ax.set_xlim(lim)
-    #     pdf = (1 / (noise_std * jnp.sqrt(2 * jnp.pi))) * jnp.exp(
-    #         -0.5 * (x / noise_std) ** 2
-    #     )
-    #     ax.plot(
-    #         x, pdf, color="k", linestyle="--", label="Noise Distribution"
-    #     )
-    ax.legend(loc="upper left")
-    ax.set_title("Distribution of Noise Values at Spike Times")
-    ax.set_xlabel("Noise Value")
-    ax.set_ylabel("Density")
+    kde_all = gaussian_kde(all_noise)
+    density_all = kde_all(x_range)
+    ax.plot(x_range, density_all, linestyle="--", color="k")
+    # ax.fill_between(x_range, density_all, alpha=0.3, color="k")
+    ax.set_xlim(x_range[0], x_range[-1])

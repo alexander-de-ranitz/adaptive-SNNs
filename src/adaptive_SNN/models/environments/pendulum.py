@@ -31,14 +31,14 @@ class PendulumEnvironment(AbstractEnvironment):
     dim: int = 3  # State dimension: [angle, angular velocity, time]
     rate: float = 1.0  # Rate at which the environment responds to input
     g: float = 10.0  # Gravitational constant
-    initial_angle_range: tuple = (-0.2, 0.2)  # Range of initial angles (in radians)
-    initial_angular_velocity_range: tuple = (-0.5, 0.5)  # Range of initial angular velocities (in radians/s)
-    max_allowed_angle: float = 0.3 # Maximum allowed angle before episode termination (in radians)
-    max_allowed_angular_velocity: float = 1.0 # Maximum allowed angular velocity before episode termination (in radians/s)
+    initial_angle_range: tuple = (-0.1, 0.1)  # Range of initial angles (in radians)
+    initial_angular_velocity_range: tuple = (-0.0, 0.0)  # Range of initial angular velocities (in radians/s)
+    max_allowed_angle: float = 0.5 # Maximum allowed angle before episode termination (in radians)
+    max_allowed_angular_velocity: float = 1.5 # Maximum allowed angular velocity before episode termination (in radians/s)
     max_episode_time: float = 5.0 # Maximum allowed time for an episode before termination (in seconds)
     key: Array = eqx.field(default_factory=lambda: jr.PRNGKey(6758493)) # Random key for initialization
     Q: Array = eqx.field(default_factory=lambda: jnp.diag(jnp.array([1.0, 0.1]))) # State cost matrix for LQR
-    R: Array = eqx.field(default_factory=lambda: 0.0001 * jnp.eye(1)) # Control cost matrix for LQR
+    R: Array = eqx.field(default_factory=lambda: 0.001 * jnp.eye(1)) # Control cost matrix for LQR
     control_gain: Array = None  # Optimal control gain matrix, to be computed based on system dynamics
     cost_to_go_matrix: Array = None  # Cost-to-go matrix, to be computed based on system dynamics
     # fmt: on

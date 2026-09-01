@@ -8,7 +8,7 @@ from qcg.pilotjob.api.manager import LocalManager
 
 def create_jobs():
     base_dir = Path(__file__).resolve().parent.parent.parent.parent
-    module_path = "scripts.snellius.biofeedback_experiment.run"
+    module_path = "scripts.snellius.pendulum_AC_detailed.run"
 
     parser = argparse.ArgumentParser(description="Launch jobs on Snellius")
     parser.add_argument(
@@ -36,18 +36,17 @@ def create_jobs():
     jobs = Jobs()
 
     seed = 0
-    for lr in [20.0]:
-        for model in ["gated", "eligibility"]:
-            id = f"{model}_lr_{lr}"
-            name = id + f"_seed_{seed}"
 
+    for b in [0.01]:
+        for model in ["default"]:
+            name = f"{model}_pendulum_AC_b_{b:.3f}_seed_{seed}"
             cmd_args = [
-                "--key_seed",
-                str(seed),
                 "--model",
                 model,
-                "--lr",
-                str(lr),
+                "--balance",
+                str(b),
+                "--key_seed",
+                str(seed),
                 "--output_file",
                 str(results_dir / name),
             ]

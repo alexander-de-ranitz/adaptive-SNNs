@@ -64,7 +64,7 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
         mean_synaptic_delay=1.5e-3,
         noise_level=jnp.array([noise_level] * N_neurons),
         min_noise_std=min_noise_std,
-        warmup_time=10,
+        actor_warmup_time=10,
         key=key,
         save_at=save_at,
         save_file=f"results/network_b_{balance}_.npz",

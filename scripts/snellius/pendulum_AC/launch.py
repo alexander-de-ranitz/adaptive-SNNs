@@ -37,40 +37,43 @@ def create_jobs():
 
     seed = 0
 
-    for model in ["default"]:
-        name = f"{model}_pendulum_AC_seed_{seed}"
-        cmd_args = [
-            "--model",
-            model,
-            "--key_seed",
-            str(seed),
-            "--output_file",
-            str(results_dir / name),
-        ]
-
-        # Create a bash script to set PYTHONPATH and run the processing script
-        bash_script = "\n".join(
-            [
-                "#!/usr/bin/env bash",
-                f'export PYTHONPATH={shlex.quote(str(base_dir))}:"${{PYTHONPATH:-}}"',
-                f"python -u -m {shlex.quote(module_path)} {' '.join(shlex.quote(arg) for arg in cmd_args)}",
+    for model in ["gated", "default"]:
+        for N_parallel in [9]:
+            name = f"{model}_pendulum_AC_seed_{seed}_Nparallel_{N_parallel}"
+            cmd_args = [
+                "--model",
+                model,
+                "--N_parallel",
+                str(N_parallel),
+                "--key_seed",
+                str(seed),
+                "--output_file",
+                str(results_dir / name),
             ]
-        )
 
-        jobs.add_std(
-            name=name,
-            execution={
-                "script": bash_script,
-                "stdout": str(log_dir / f"job.out.{name}"),
-                "stderr": str(log_dir / f"job.err.{name}"),
-                "wd": str(base_dir),
-            },
-            resources={
-                "numNodes": 1,
-                "numCores": {"exact": 18},
-                "nodeCrs": {"gpu": 1},
-            },
-        )
+            # Create a bash script to set PYTHONPATH and run the processing script
+            bash_script = "\n".join(
+                [
+                    "#!/usr/bin/env bash",
+                    f'export PYTHONPATH={shlex.quote(str(base_dir))}:"${{PYTHONPATH:-}}"',
+                    f"python -u -m {shlex.quote(module_path)} {' '.join(shlex.quote(arg) for arg in cmd_args)}",
+                ]
+            )
+
+            jobs.add_std(
+                name=name,
+                execution={
+                    "script": bash_script,
+                    "stdout": str(log_dir / f"job.out.{name}"),
+                    "stderr": str(log_dir / f"job.err.{name}"),
+                    "wd": str(base_dir),
+                },
+                resources={
+                    "numNodes": 1,
+                    "numCores": {"exact": 18},
+                    "nodeCrs": {"gpu": 1},
+                },
+            )
     return jobs
 
 

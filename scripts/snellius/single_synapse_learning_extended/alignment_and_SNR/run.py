@@ -13,7 +13,7 @@ from diffrax import SaveAt
 
 from adaptive_SNN.models import SystemState
 from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
-from adaptive_SNN.simulation_configs.single_synapse_config import (
+from adaptive_SNN.simulation_configs.single_synapse_learning_AC import (
     create_single_synapse_learning_config,
 )
 from adaptive_SNN.utils.runner import run_simulation
@@ -36,6 +36,18 @@ def main():
         default=1e-9,
         help="Min noise std for the synaptic noise",
     )
+    parser.add_argument(
+        "--balance",
+        type=float,
+        default=jnp.nan,
+        help="Balance parameter for the network",
+    )
+    parser.add_argument(
+        "--initial_weight",
+        type=float,
+        default=0.0,
+        help="Initial weight for the background E synapse",
+    )
     parser.add_argument("--key_seed", type=int, default=0, help="Random key seed")
 
     args = parser.parse_args()
@@ -51,18 +63,28 @@ def main():
         key=jr.PRNGKey(args.key_seed),
     )
     cfg.min_noise_std = args.noise_level
+    cfg.noise_level = 0.0
+    cfg.balance = args.balance
+    cfg.initial_weight_matrix = jnp.tile(
+        jnp.array(
+            [jnp.nan] * cfg.N_neurons
+            + [args.initial_weight, args.initial_weight * 8, args.initial_weight]
+        ),
+        (cfg.N_neurons, 1),
+    )
 
     def save_fn(t, x: SystemState, args):
-        reward = x.environment_state.reward.astype(jnp.float32)
+        RPE = x.agent_state.RPE.astype(jnp.float32)
         reward_noise = x.environment_state.reward_noise.astype(jnp.float32)
         eligibility = x.agent_state.network_state.features.eligibility[0, -1].astype(
             jnp.float32
         )
-        return (reward, reward_noise, eligibility)
+        return (RPE, reward_noise, eligibility)
 
-    cfg.t1 = 250
+    cfg.t1 = 10100
+    start_save = 100
     cfg.save_at = SaveAt(
-        ts=jnp.linspace(cfg.t0, cfg.t1, int(1e3 * cfg.t1)),
+        ts=jnp.linspace(start_save, cfg.t1, int(1e3 * (cfg.t1 - start_save))),
         fn=save_fn,
     )
 
@@ -72,16 +94,16 @@ def main():
 
     sol, model = run_simulation(cfg, save_results=False)
 
-    reward, reward_noise, eligibility = (
+    RPE, reward_noise, eligibility = (
         sol.ys[0].squeeze(),
         sol.ys[1].squeeze(),
         sol.ys[2].squeeze(),
     )
-    dW_task = (eligibility * reward).squeeze()
+    dW_task = (eligibility * RPE).squeeze()
     dW_noise = (eligibility * reward_noise).squeeze()
 
     alignment = jnp.sum(dW_task) / jnp.sum(jnp.abs(dW_task))
-    snr = jnp.sum(dW_task) / jnp.sum(jnp.abs(dW_noise))
+    snr = jnp.sum(jnp.abs(dW_task)) / jnp.sum(jnp.abs(dW_noise))
 
     jnp.savez(
         args.output_file,

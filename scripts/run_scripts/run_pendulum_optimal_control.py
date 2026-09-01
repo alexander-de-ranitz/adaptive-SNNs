@@ -12,7 +12,7 @@ def plot_optimal_control():
     env = PendulumEnvironment(rate=1.0, key=key)
     optimal_control = lambda t, x, args: -env.control_gain @ x[:2].reshape((2, 1))
 
-    for i in range(1):
+    for i in range(10):
         model = ExternalController(
             PendulumEnvironment(
                 rate=1.0,

@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -J biofeedback
-#SBATCH -t 53
+#SBATCH -J pendulum_sim
+#SBATCH -t 30
 #SBATCH -p gpu_a100
 #SBATCH -N 1
-#SBATCH --ntasks=36
+#SBATCH --ntasks=18
 #SBATCH --cpus-per-task=1
-#SBATCH --gpus=2
+#SBATCH --gpus=1
 #SBATCH --mail-user=alexanderderanitz@gmail.com
 #SBATCH --mail-type=START,END,FAIL
 
@@ -38,7 +38,7 @@ cleanup() {
     echo "Contents of $TMPDIR/output_dir:"
     find "$TMPDIR/output_dir" -type f 2>/dev/null | head -20
 
-    DEST_DIR="$REPO_DIR/results/biofeedback_$(date +%Y%m%d_%H%M%S)"
+    DEST_DIR="$REPO_DIR/results/pendulum_AC_no_network_reset_spikes_$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$DEST_DIR"
     cp -rv "$TMPDIR/output_dir/." "$DEST_DIR/" || echo "Copy failed with exit code $?"
     exit "$exit_code"
@@ -53,11 +53,11 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export JAX_ENABLE_X64=1 # Enable 64-bit precision in JAX, which is important for numerical stability in our simulations
 export JAX_PLATFORMS=cuda # Use CUDA backend for GPU acceleration
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 
 echo "Running simulations at $(date)..."
 set -x
-python -u "$REPO_DIR/scripts/snellius/biofeedback_experiment/launch.py" \
+python "$REPO_DIR/scripts/snellius/pendulum_AC_detailed/launch.py" \
     --output_dir "$TMPDIR/output_dir"
 
 echo "Simulations completed, copying results back to home directory..."

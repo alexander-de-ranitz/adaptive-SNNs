@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, LogNorm
 
 from adaptive_SNN.utils.runner import _load_existing_solution
 
@@ -16,10 +15,12 @@ class RunFile:
     path: Path
     dv: float
     method: str
-    perturbation_size: float | None
+    perturbation_size: float
+    balance: float
+    weight: float
 
 
-DATA_DIR = Path("results/delta_v_tuning_20260605_204715/results")
+DATA_DIR = Path("results/delta_v_tuning_20260714_164259/results")
 OUTPUT_PATH = Path("../figures/single_synapse_learning/")
 
 
@@ -31,8 +32,25 @@ def parse_run_file(file: Path) -> RunFile:
         noise = float("nan")
     else:
         noise = float(noise_match.group(1))
+    balance_match = re.search(r"b_(\d+\.?\d*)_", file.name)
+    if balance_match is None:
+        balance = float("nan")
+    else:
+        balance = float(balance_match.group(1))
+    w_match = re.search(r"w_(\d+\.?\d*)_", file.name)
+    if w_match is None:
+        w = float("nan")
+    else:
+        w = float(w_match.group(1))
     method = "gated" if dv != 0.0 else "default"
-    return RunFile(path=file, dv=dv, method=method, perturbation_size=noise)
+    return RunFile(
+        path=file,
+        dv=dv,
+        method=method,
+        perturbation_size=noise,
+        balance=balance,
+        weight=w,
+    )
 
 
 def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -81,6 +99,8 @@ def build_dataframe() -> pd.DataFrame:
                 "dv": run.dv,
                 "method": run.method,
                 "perturbation_size": run.perturbation_size,
+                "balance": run.balance,
+                "weight": run.weight,
                 "alignment": stats["alignment"],
                 "SNR": stats["SNR"],
             }
@@ -93,6 +113,8 @@ def build_dataframe() -> pd.DataFrame:
             "dv",
             "method",
             "perturbation_size",
+            "balance",
+            "weight",
             "alignment",
             "SNR",
         ],
@@ -103,7 +125,7 @@ def compute_exponent(dv: float) -> float:
     return int(round(-np.log2(dv)))
 
 
-def plot_figure(
+def heatmap_figure(
     df: pd.DataFrame | None = None,
     save_path: Path = OUTPUT_PATH,
     show: bool = True,
@@ -111,47 +133,81 @@ def plot_figure(
     if df is None:
         df = build_dataframe()
 
-    baseline = df[df["dv"] == 0.0].sort_values("perturbation_size")
-    gated = df[df["dv"] != 0.0]
+    # We are varying over
+    # 1. delta_v (4)
+    # 2. perturbation_size (3)
+    # 3. balance (5)
+    # 4. initial E weight (4)
+    # We make one heatmap of balance vs weight for each combination of delta_v and perturbation_size
+    fig, axs = plt.subplots(
+        nrows=len(df["dv"].unique()),
+        ncols=len(df["perturbation_size"].unique()),
+        figsize=(12, 8),
+        sharex=True,
+        sharey=True,
+    )
+    axs = axs.flatten()
 
-    gated_dvs = gated["dv"].unique()
-    p_norm = LogNorm(
-        vmin=float(gated["perturbation_size"].min()),
-        vmax=float(gated["perturbation_size"].max()),
-    )
-    p_cmap = LinearSegmentedColormap.from_list(
-        "p_cmap",
-        plt.cm.summer(np.linspace(0.0, 1.0, 256)),
-    )
-    for perturbation_size, subset in gated.groupby("perturbation_size"):
-        results = subset.groupby("dv").agg(
-            alignment=("alignment", "mean"), snr=("SNR", "mean")
+    df_agg = (
+        df.groupby(["dv", "perturbation_size", "balance", "weight"])
+        .agg(
+            alignment=("alignment", "mean"),
+            snr=("SNR", "mean"),
+            alignment_std=("alignment", "std"),
+            snr_std=("SNR", "std"),
         )
-        baseline_alignment = baseline[
-            baseline["perturbation_size"] == perturbation_size
-        ]["alignment"].mean()
-        plt.plot(
-            results.index,
-            results["alignment"] / baseline_alignment,
-            label=rf"$\sigma_\xi={perturbation_size:.2f} \text{{nS}}$",
-            marker="o",
-            markersize=5,
-            c=p_cmap(p_norm(perturbation_size)),
+        .reset_index()
+    )
+    # Sort such that dv=0.0 (no gating) is first, then decreasing dv
+    df_agg = df_agg.sort_values(
+        by=["dv", "perturbation_size"],
+        key=lambda x: x.where(x != 0.0, np.inf),
+        ascending=[False, True],
+    ).reset_index()
+
+    print(df_agg.head())
+
+    vmax = df_agg["snr"].max()
+    vmin = df_agg["snr"].min()
+    for i, ((dv, perturbation_size), subset) in enumerate(
+        df_agg.groupby(["dv", "perturbation_size"], sort=False)
+    ):
+        print(f"Plotting heatmap for dv={dv}, perturbation_size={perturbation_size}")
+        ax = axs[i]
+        pivot_table = subset.pivot(index="balance", columns="weight", values="snr")
+
+        im = ax.imshow(
+            pivot_table.values,
+            cmap="viridis",
+            aspect="auto",
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
         )
-    plt.xscale("log")
-    plt.xlabel("Delta V (log scale)")
-    plt.ylabel("Relative Improvement in Alignment")
-    plt.xticks(gated_dvs, [rf"$2^{{{-compute_exponent(dv)}}}$" for dv in gated_dvs])
-    plt.xticks([], minor=True)
-    xmin, xmax = plt.xlim()
-    plt.hlines(1.0, xmin=xmin, xmax=xmax, color="k", linestyle="--")
-    plt.xlim(xmin, xmax)
-    plt.legend()
-    plt.title("Effect of Delta V and Noise on Alignment")
-    plt.show()
+        dv_label = (
+            rf"$\Delta V=2^{{{-compute_exponent(dv)}}}$" if dv != 0.0 else r"No Gating"
+        )
+        ax.set_title(dv_label + rf", $\sigma_\xi={perturbation_size:.2f} nS$")
+        ax.set_xlabel("Initial E Weight")
+        ax.set_ylabel("Balance")
+        ax.set_xticks(
+            np.arange(len(pivot_table.columns)),
+            labels=[f"{x:.2f}" for x in pivot_table.columns],
+        )
+        ax.set_yticks(
+            np.arange(len(pivot_table.index)),
+            labels=[f"{x:.5f}" for x in pivot_table.index],
+        )
+        ax.label_outer()
+    fig.colorbar(im, ax=axs, orientation="vertical", label="SNR")
+    if save_path is not None:
+        save_path.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path / "delta_v_tuning_heatmap_SNR.png", dpi=300)
+    if show:
+        plt.show()
 
 
 if __name__ == "__main__":
     df = build_dataframe()
     df.to_csv(DATA_DIR / "delta_v_tuning_results.csv", index=False)
-    plot_figure(df=df, save_path=OUTPUT_PATH, show=True)
+    heatmap_figure(df=df, save_path=None, show=True)

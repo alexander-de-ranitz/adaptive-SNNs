@@ -22,6 +22,8 @@ class AgentState(eqx.Module):
     network_state: LIFState
     reward_predictor_state: RewardPrediction
     RPE: Array  # Not part of the state that evolves according to the SDE, but we include it here for convenience in accessing/storing it
+    mean_RPE: Array  # For analysis
+    var_RPE: Array  # For analysis
 
 
 class Agent(eqx.Module):
@@ -42,6 +44,8 @@ class Agent(eqx.Module):
             self.network.initial,
             self.reward_prediction_model.initial,
             jnp.zeros(1),  # RPE initial state
+            jnp.zeros(1),  # mean_RPE initial state
+            jnp.zeros(1),  # var_RPE initial state
         )
 
     def pre_step_update(
@@ -76,6 +80,8 @@ class Agent(eqx.Module):
             network_state=network_state,
             reward_predictor_state=new_reward_predictor_state,
             RPE=new_RPE,
+            mean_RPE=x.mean_RPE,
+            var_RPE=x.var_RPE,
         )
 
     def drift(self, t, x: AgentState, args, reward: Array):
@@ -101,7 +107,17 @@ class Agent(eqx.Module):
             t, predicted_reward, args, reward=reward, RPE=RPE
         )
 
-        return AgentState(neuron_drift, reward_predictor_drift, jnp.zeros_like(RPE))
+        tau_statistics = 1.0
+        mean_RPE_drift = (RPE - x.mean_RPE) / tau_statistics
+        var_RPE_drift = ((RPE - x.mean_RPE) ** 2 - x.var_RPE) / tau_statistics
+
+        return AgentState(
+            neuron_drift,
+            reward_predictor_drift,
+            jnp.zeros_like(RPE),
+            mean_RPE_drift,
+            var_RPE_drift,
+        )
 
     def diffusion(self, t, x: AgentState, args):
         neuron_diffusion = self.network.diffusion(t, x.network_state, args)
@@ -111,18 +127,32 @@ class Agent(eqx.Module):
         RPE_diffusion = DefaultIfNone(
             default=jnp.zeros_like(x.RPE), else_do=ElementWiseMul(jnp.zeros_like(x.RPE))
         )
+        mean_RPE_diffusion = DefaultIfNone(
+            default=jnp.zeros_like(x.mean_RPE),
+            else_do=ElementWiseMul(jnp.zeros_like(x.mean_RPE)),
+        )
+        var_RPE_diffusion = DefaultIfNone(
+            default=jnp.zeros_like(x.var_RPE),
+            else_do=ElementWiseMul(jnp.zeros_like(x.var_RPE)),
+        )
         return MixedPyTreeOperator(
             AgentState(
                 neuron_diffusion,
                 reward_predictor_diffusion,
                 RPE_diffusion,
+                mean_RPE_diffusion,
+                var_RPE_diffusion,
             )
         )
 
     @property
     def noise_shape(self):
         return AgentState(
-            self.network.noise_shape, self.reward_prediction_model.noise_shape, None
+            self.network.noise_shape,
+            self.reward_prediction_model.noise_shape,
+            None,
+            None,
+            None,
         )
 
     def terms(self, key):
@@ -133,7 +163,14 @@ class Agent(eqx.Module):
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
 
-    def update(self, t, x: AgentState, args, reward: Array):
+    def update(
+        self,
+        t,
+        x: AgentState,
+        args,
+        reward: Array,
+        disable_RPE: Array = jnp.array(False),
+    ):
         # Update components
         new_network_state = self.network.update(t, x.network_state, args)
         new_reward_predictor_state = self.reward_prediction_model.update(
@@ -146,7 +183,12 @@ class Agent(eqx.Module):
         )
 
         # Compute the RPE as the TD-error
-        RPE = args["RPE_fn"](t, new_state, args, reward)
+        # RPE is clamped to zero  if disable_RPE is True (e.g. during warmup), otherwise computed normally
+        RPE = jnp.where(
+            disable_RPE,
+            jnp.zeros_like(x.RPE),
+            args["RPE_fn"](t, new_state, args, reward),
+        )
 
         new_state = eqx.tree_at(lambda s: s.RPE, new_state, RPE)
         return new_state
@@ -161,5 +203,9 @@ class Agent(eqx.Module):
             t, x.reward_predictor_state, args
         )
         return AgentState(
-            new_network_state, new_reward_predictor_state, jnp.zeros_like(x.RPE)
+            new_network_state,
+            new_reward_predictor_state,
+            jnp.zeros_like(x.RPE),
+            x.mean_RPE,
+            x.var_RPE,
         )

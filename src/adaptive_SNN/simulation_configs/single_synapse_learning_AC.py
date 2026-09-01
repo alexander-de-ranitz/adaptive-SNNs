@@ -11,7 +11,7 @@ from jax import numpy as jnp
 from adaptive_SNN.models.environments import SingleSynapseLearningEnv
 from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
 from adaptive_SNN.models.noise import PoissonJumpProcess
-from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
+from adaptive_SNN.models.reward_prediction import LinearReadoutCritic
 from adaptive_SNN.utils.config import SimulationConfig
 from adaptive_SNN.utils.save_helper import save_part_of_state
 
@@ -27,13 +27,13 @@ def create_single_synapse_learning_config(
     t0 = 0
     t1 = 100
     dt = 1e-4
-    N_neurons = 2
+    tau_discount = 1.0
+    gamma = 1 - dt / tau_discount
+    N_neurons = 1
     N_inputs = 3
     min_noise_std = 1e-9
     balance = jnp.nan
-    rates = jnp.array(
-        [5000, 1250, 10]
-    )  # High frequency background input and one moderate frequency input
+    rates = jnp.array([4990, 1250, 10])
     initial_weights = jnp.tile(
         jnp.array([jnp.nan] * N_neurons + [1.0, 8.0, initial_synapse_weight]),
         (N_neurons, 1),
@@ -41,9 +41,9 @@ def create_single_synapse_learning_config(
 
     key, spike_key = jr.split(key, 2)
 
-    network_output_fn = lambda t, agent_state, args, env_state: (
-        agent_state.network_state.S[0] - agent_state.network_state.S[1]
-    ).reshape((1,))
+    network_output_fn = lambda t, agent_state, args, env_state: jnp.atleast_1d(
+        agent_state.network_state.S[0]
+    )
 
     def input_spike_fn(t, x, args):
         step_idx = jnp.asarray(jnp.rint((t - t0) / dt), dtype=jnp.int64)
@@ -81,6 +81,8 @@ def create_single_synapse_learning_config(
         initial_weight_matrix=initial_weights,
         mean_synaptic_delay=0.0,
         lr=jnp.zeros_like(initial_weights),
+        critic_lr=1e3,
+        critic_warmup_time=0.0,
         noise_level=jnp.array([noise_level] * N_neurons),
         min_noise_std=min_noise_std,
         actor_warmup_time=0,
@@ -89,24 +91,27 @@ def create_single_synapse_learning_config(
         save_file=f"results/ssl_{network_cls.__name__}_lr{lr:.2f}_nl{noise_level:.2f}_rnl{reward_noise_jump_rate:.2f}.npz",
         network_output_fn=network_output_fn,
         input_spike_fn=input_spike_fn,
-        reward_fn=lambda t, x, args: x.environment_state.reward
-        + x.environment_state.reward_noise,  # The reward is determined by the environment, so we just return it here.
+        reward_fn=lambda t, x, args: x.environment_state.reward,
         environment_model=SingleSynapseLearningEnv,
         environment_kwargs={
             "tau_reward": 0.1,
             "reward_dim": 1,
             "reward_noise_process": PoissonJumpProcess(
-                jump_rate=reward_noise_jump_rate, jump_std=1.0, jump_mean=0.0
+                jump_rate=reward_noise_jump_rate, jump_std=1.0, jump_mean=0.0, tau=0.1
             ),
         },
-        reward_prediction_model=MovingAverageRewardPredictor,  # Not used here, but required by the runner. Rate = 0 -> always predicts 0 reward.
-        reward_predictor_kwargs={"rate": 0.0, "dim": 1},
+        reward_prediction_model=LinearReadoutCritic,
+        reward_predictor_kwargs={"input_dim": 0},
         args={
-            "use_noise": jnp.array([True, False]),  # Only the first neuron has noise
-            "RPE_fn": lambda t,
-            x,
-            args,
-            reward: reward,  # RPE is just the reward here since we have no reward prediction. Everything is handled inside the environment.
+            "critic_input_fn": lambda t, x, args, input_spikes, env_state: jnp.zeros(
+                (0,)
+            ),  # No input to the critic
+            "use_noise": jnp.array([True]),
+            "RPE_fn": lambda t, x, args, reward: (
+                reward
+                - x.reward_predictor_state.previous_value
+                + gamma * x.reward_predictor_state.value
+            ),
         },
     )
     return cfg

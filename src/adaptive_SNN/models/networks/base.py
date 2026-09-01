@@ -344,7 +344,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
 
         return state
 
-    def drift(self, t, state: LIFState, args, RPE: Array = jnp.zeros(1)) -> LIFState:
+    def drift(
+        self, t, state: LIFState, args: dict, RPE: Array = jnp.zeros(1)
+    ) -> LIFState:
         """Compute deterministic time derivatives for LIF state.
 
         Args:
@@ -377,8 +379,9 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         )
         dV = charge_in + charge_out
 
-        d_charge_in = (charge_in - state.charge_in) / self.tau_low_pass
-        d_charge_out = (charge_out - state.charge_out) / self.tau_low_pass
+        tau_charge = args.get("tau_charge", self.tau_low_pass)
+        d_charge_in = (charge_in - state.charge_in) / tau_charge
+        d_charge_out = (charge_out - state.charge_out) / tau_charge
 
         dG = -1 / self.synaptic_time_constants[None, :] * state.G
 
@@ -557,7 +560,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     ):
         """Compute dV/dt for the LIF neurons, incorporating external noise if present.
 
-        The change in membrane potential is computed based on leak currents and excitatory/inhibitory conductance:
+        The change in membrane potential is computed based on leak currents, perturbations, and excitatory/inhibitory conductance:
 
         C_m * dV/dt = -g_L*(V - E_L) + g_E*(V - E_E) + g_I(V - E_I)
 
@@ -649,11 +652,14 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         # 1) desired balance is not nan (i.e. we have a target balance to achieve)
         # 2) current balance is not nan (i.e. we have received some input and can compute a meaningful balance)
         # 3) there is an existing connection (weight is not NaN)
+        balance_rate = args.get(
+            "get_balance_rate", lambda t, state, args: self.balance_rate
+        )(t, state, args)
         I_weight_drift = jnp.where(
             (~jnp.isnan(desired_balance))
             & (~jnp.isnan(balance))[:, None]
             & (~jnp.isnan(state.W)),
-            self.balance_rate
+            balance_rate
             * balance_error[:, None]
             * state.W
             * self.inhibitory_mask[None, :],
@@ -872,21 +878,22 @@ class AbstractLIFNetwork(AbstractNeuronModel):
 
     def reset(self, t, state: LIFState, args):
         """Reset the network state to the initial state."""
-        current_mean_V = state.mean_V
-        current_weights = state.W
-        current_charge_in = state.charge_in
-        current_charge_out = state.charge_out
+        return state
+        # current_mean_V = state.mean_V
+        # current_weights = state.W
+        # current_charge_in = state.charge_in
+        # current_charge_out = state.charge_out
 
-        reset_state = self.initial
-        # We want to keep the same weights but reset all other state variables to their initial values, so we replace the weights in the initial state with the current weights
-        reset_state = eqx.tree_at(lambda s: s.W, reset_state, current_weights)
+        # reset_state = self.initial
+        # # We want to keep the same weights but reset all other state variables to their initial values, so we replace the weights in the initial state with the current weights
+        # reset_state = eqx.tree_at(lambda s: s.W, reset_state, current_weights)
 
-        # We also want to keep the current mean voltage to prevent large transients after reset
-        # Otherwise, there will be a large influx in charge before the network starts spiking and producing recurrent inhibition
-        reset_state = eqx.tree_at(lambda s: s.mean_V, reset_state, current_mean_V)
+        # # We also want to keep the current mean voltage to prevent large transients after reset
+        # # Otherwise, there will be a large influx in charge before the network starts spiking and producing recurrent inhibition
+        # reset_state = eqx.tree_at(lambda s: s.mean_V, reset_state, current_mean_V)
 
-        reset_state = eqx.tree_at(lambda s: s.charge_in, reset_state, current_charge_in)
-        reset_state = eqx.tree_at(
-            lambda s: s.charge_out, reset_state, current_charge_out
-        )
-        return reset_state
+        # reset_state = eqx.tree_at(lambda s: s.charge_in, reset_state, current_charge_in)
+        # reset_state = eqx.tree_at(
+        #     lambda s: s.charge_out, reset_state, current_charge_out
+        # )
+        # return reset_state

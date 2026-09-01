@@ -1,3 +1,5 @@
+import re
+
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -5,14 +7,39 @@ jax.config.update("jax_enable_x64", True)
 import argparse
 import time
 
+import equinox as eqx
 from diffrax import SaveAt
 from jax import numpy as jnp
 from jax import random as jr
+from jaxtyping import Array
 
 from adaptive_SNN.models.agent_env_system import SystemState
 from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
 from adaptive_SNN.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
 from adaptive_SNN.utils.runner import run_batched_simulation
+
+
+class SavedState(eqx.Module):
+    mean_V: Array
+    mean_RPE: Array
+    var_RPE: Array
+    mean_reward: Array
+    mean_balance: Array
+    var_balance: Array
+    agent_output: Array
+    mean_filtered_spikes_L: Array
+    mean_filtered_spikes_R: Array
+    mean_filtered_spikes_H: Array
+    var_filtered_spikes_L: Array
+    var_filtered_spikes_R: Array
+    var_filtered_spikes_H: Array
+    mean_W_actor_input: Array
+    mean_W_actor_recurrent: Array
+    var_W_actor_input: Array
+    var_W_actor_recurrent: Array
+    mean_W_critic: Array
+    var_W_critic: Array
+    fraction_clipped_dW: Array
 
 
 def main():
@@ -38,40 +65,155 @@ def main():
         "--key_seed", type=int, default=0, help="Seed for random number generation"
     )
 
+    parser.add_argument(
+        "--N_parallel",
+        type=int,
+        default=1,
+        help="Number of parallel simulations to run",
+    )
+
     args = parser.parse_args()
     key = jr.PRNGKey(args.key_seed)
-    N_parallel = 1
+    N_parallel = args.N_parallel
+    N_neurons = 1000
     model = GatedLIFNetwork if args.model == "gated" else EligibilityLIFNetwork
     configs = [
-        create_pendulum_AC_config(N_neurons=2, model_cls=model, key=jr.fold_in(key, i))
+        create_pendulum_AC_config(
+            N_neurons=N_neurons, model_cls=model, key=jr.fold_in(key, i)
+        )
         for i in range(N_parallel)
     ]
 
     def save_fn(t, x: SystemState, args):
-        return (
-            x.environment_state,
-            x.reward_signal,
-            x.agent_state.reward_predictor_state.value,
-            x.agent_state.RPE,
+        total_charge = jnp.abs(x.agent_state.network_state.charge_in) + jnp.abs(
+            x.agent_state.network_state.charge_out
+        )
+        balance = jnp.where(
+            (x.agent_state.network_state.charge_in != 0.0)
+            & (x.agent_state.network_state.charge_out != 0.0),
+            (
+                x.agent_state.network_state.charge_in
+                + x.agent_state.network_state.charge_out
+            )
+            / total_charge,
+            jnp.nan,
+        )
+        mean_balance = jnp.nanmean(balance)
+        var_balance = jnp.nanvar(balance)
+        fraction_clipped_dW = jnp.mean(
+            jnp.abs(
+                x.agent_state.network_state.features.eligibility * x.agent_state.RPE
+            )
+            > args["gradient_clip"]
         )
 
+        return SavedState(
+            mean_RPE=x.agent_state.mean_RPE,
+            var_RPE=x.agent_state.var_RPE,
+            mean_reward=x.mean_reward,
+            mean_balance=mean_balance,
+            var_balance=var_balance,
+            agent_output=x.agent_output,
+            mean_V=jnp.mean(x.agent_state.network_state.V),
+            mean_filtered_spikes_L=jnp.mean(
+                x.agent_state.network_state.filtered_spike_trains[
+                    0 : int(N_neurons / 10)
+                ]
+            ),
+            mean_filtered_spikes_R=jnp.mean(
+                x.agent_state.network_state.filtered_spike_trains[
+                    int(N_neurons / 10) : int(N_neurons / 5)
+                ]
+            ),
+            mean_filtered_spikes_H=jnp.mean(
+                x.agent_state.network_state.filtered_spike_trains[int(N_neurons / 5) :]
+            ),
+            var_filtered_spikes_L=jnp.var(
+                x.agent_state.network_state.filtered_spike_trains[
+                    0 : int(N_neurons / 10)
+                ]
+            ),
+            var_filtered_spikes_R=jnp.var(
+                x.agent_state.network_state.filtered_spike_trains[
+                    int(N_neurons / 10) : int(N_neurons / 5)
+                ]
+            ),
+            var_filtered_spikes_H=jnp.var(
+                x.agent_state.network_state.filtered_spike_trains[int(N_neurons / 5) :]
+            ),
+            mean_W_actor_input=jnp.nanmean(
+                x.agent_state.network_state.W[:, N_neurons:]
+            ),
+            mean_W_actor_recurrent=jnp.nanmean(
+                x.agent_state.network_state.W[:, :N_neurons]
+            ),
+            var_W_actor_input=jnp.nanvar(x.agent_state.network_state.W[:, N_neurons:]),
+            var_W_actor_recurrent=jnp.nanvar(
+                x.agent_state.network_state.W[:, :N_neurons]
+            ),
+            mean_W_critic=jnp.nanmean(x.agent_state.reward_predictor_state.weights),
+            var_W_critic=jnp.nanvar(x.agent_state.reward_predictor_state.weights),
+            fraction_clipped_dW=fraction_clipped_dW,
+        )
+
+    lrs = [1e3, 1e3, 1e3, 5e2, 5e2, 5e2, 250, 250, 250]
+    gradient_clips = [jnp.inf] * N_parallel
+    balance_rates = [0.1, 1.0, 10.0] * 3
+    tau_charge = 1.0
     for i, cfg in enumerate(configs):
-        cfg.save_file = args.output_file + f"_{i}"
+        lr = jnp.concat(
+            [
+                jnp.ones((cfg.N_neurons, cfg.N_neurons)) * lrs[i],
+                jnp.ones((cfg.N_neurons, cfg.N_inputs)) * lrs[i],
+            ],
+            axis=1,
+        )
+        cfg.lr = lr
+        clip = gradient_clips[i % len(gradient_clips)]
+        cfg.args["final_balance_rate"] = jnp.asarray(balance_rates[i])
+        cfg.args["get_balance_rate"] = lambda t, state, args: args["final_balance_rate"]
+        cfg.args["gradient_clip"] = jnp.asarray(clip)
+        cfg.args["tau_charge"] = jnp.asarray(tau_charge)
+        cfg.save_file = (
+            args.output_file
+            + f"_lr_{lrs[i]}_{i}_clip_{clip}_tau_charge_{tau_charge}_balance_rate_{balance_rates[i]}"
+        )
         cfg.t1 = 2000
-        cfg.lr = 0
-        cfg.save_at = SaveAt(
-            ts=jnp.linspace(cfg.t0, cfg.t1, int(250 * cfg.t1)), fn=save_fn
+
+    start_time = time.time()
+    N_chunks = 1
+    t_prev = configs[0].t0
+    full_t1 = configs[0].t1
+    y0s = None
+    print(f"Starting simulation with {N_parallel} parallel runs in {N_chunks} chunks.")
+    for chunk in range(N_chunks):
+        chunk_t0 = t_prev
+        chunk_t1 = (chunk + 1) * (full_t1) / N_chunks
+        for cfg in configs:
+            cfg.t0 = chunk_t0
+            cfg.t1 = chunk_t1
+            cfg.save_at = SaveAt(
+                ts=jnp.linspace(cfg.t0, cfg.t1, int(2 * (cfg.t1 - cfg.t0))), fn=save_fn
+            )
+            if re.search(r"_chunk_\d+$", cfg.save_file):
+                cfg.save_file = re.sub(r"_chunk_\d+$", f"_chunk_{chunk}", cfg.save_file)
+            else:
+                cfg.save_file = cfg.save_file + f"_chunk_{chunk}"
+        t_prev = chunk_t1
+        start_chunk = time.time()
+        sol, models = run_batched_simulation(
+            configs, save_results=True, return_final_state=True, y0s=y0s
+        )
+        end_chunk = time.time()
+        print(
+            f"Simulation ({chunk + 1}/{N_chunks}) took {end_chunk - start_chunk:.2f} seconds."
         )
 
-    start = time.time()
-    sol, models = run_batched_simulation(
-        configs, save_results=True, return_final_state=True
-    )
+        final_states = sol.ys[1]
+        y0s = final_states
 
-    final_weights = sol.ys[1].agent_state.reward_predictor_state.weights
-    jnp.save(args.output_file + "_final_weights.npy", final_weights)
-    end = time.time()
-    print(f"Simulation took {end - start:.2f} seconds.")
+    end_time = time.time()
+    print(f"Total simulation time: {end_time - start_time:.2f} seconds.")
 
 
 if __name__ == "__main__":

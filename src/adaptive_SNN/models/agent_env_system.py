@@ -23,6 +23,7 @@ class SystemState(eqx.Module):
     environment_state: AbstractEnvironmentState
     agent_output: Array
     reward_signal: Array
+    mean_reward: Array  # For analysis
 
 
 class AgentEnvSystem(eqx.Module):
@@ -39,6 +40,7 @@ class AgentEnvSystem(eqx.Module):
                 self.agent_output_shape, dtype=default_float
             ),  # Initial agent output
             reward_signal=jnp.zeros(1, dtype=default_float),  # Initial reward signal
+            mean_reward=jnp.zeros(1, dtype=default_float),  # Initial mean reward
         )
 
     def pre_step_update(self, t, x: SystemState, args):
@@ -52,6 +54,7 @@ class AgentEnvSystem(eqx.Module):
                 environment_state=new_env_state,
                 agent_output=jnp.zeros_like(x.agent_output),
                 reward_signal=jnp.zeros_like(x.reward_signal),
+                mean_reward=x.mean_reward,
             )
 
         # If we have an episode end function and it returns True, reset the environment and agent states
@@ -92,6 +95,7 @@ class AgentEnvSystem(eqx.Module):
             environment_state=environment_state,
             agent_output=agent_output,
             reward_signal=x.reward_signal,
+            mean_reward=x.mean_reward,
         )
 
     def drift(self, t, x: SystemState, args: dict):
@@ -115,9 +119,14 @@ class AgentEnvSystem(eqx.Module):
         agent_drift = self.agent.drift(t, x.agent_state, args, reward=x.reward_signal)
         agent_output_drift = jnp.zeros_like(x.agent_output)
         reward_signal_drift = jnp.zeros_like(x.reward_signal)
+        mean_reward_drift = (x.reward_signal - x.mean_reward) / 1.0
 
         return SystemState(
-            agent_drift, env_drift, agent_output_drift, reward_signal_drift
+            agent_drift,
+            env_drift,
+            agent_output_drift,
+            reward_signal_drift,
+            mean_reward_drift,
         )
 
     def diffusion(self, t, x: SystemState, args):
@@ -137,9 +146,20 @@ class AgentEnvSystem(eqx.Module):
             default=jnp.zeros_like(x.agent_output),
             else_do=ElementWiseMul(jnp.zeros_like(x.agent_output, dtype=default_float)),
         )
+
+        # mean_reward is not subject to noise
+        mean_reward_diffusion = DefaultIfNone(
+            default=jnp.zeros_like(x.mean_reward),
+            else_do=ElementWiseMul(jnp.zeros_like(x.mean_reward, dtype=default_float)),
+        )
+
         return MixedPyTreeOperator(
             SystemState(
-                agent_diffusion, env_diffusion, agent_output_diffusion, reward_diffusion
+                agent_diffusion,
+                env_diffusion,
+                agent_output_diffusion,
+                reward_diffusion,
+                mean_reward_diffusion,
             )
         )
 
@@ -150,6 +170,7 @@ class AgentEnvSystem(eqx.Module):
             environment_state=self.environment.noise_shape,
             agent_output=None,
             reward_signal=None,
+            mean_reward=None,
         )
 
     def terms(self, key):
@@ -172,7 +193,14 @@ class AgentEnvSystem(eqx.Module):
         new_state = eqx.tree_at(lambda x: x.reward_signal, new_state, reward)
 
         # Update agent state based on new reward signal
-        new_agent_state = self.agent.update(t, x.agent_state, args, reward=reward)
+        # Check if we are still in the warmup period based on the environment's internal time state
+        env_in_warmup = args.get("env_warmup_fn", lambda t, x, args: False)(
+            t, x.environment_state, args
+        )
+
+        new_agent_state = self.agent.update(
+            t, x.agent_state, args, reward=reward, disable_RPE=env_in_warmup
+        )
         new_state = eqx.tree_at(lambda x: x.agent_state, new_state, new_agent_state)
 
         return new_state

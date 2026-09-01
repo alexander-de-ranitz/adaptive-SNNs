@@ -160,6 +160,7 @@ def run_simulation(
     save_model: bool = False,
     return_final_state: bool = False,
     downcast_to_float32: bool = True,
+    y0: PyTree | None = None,
 ):
     """Run a simulation and optionally reuse or overwrite saved results.
 
@@ -185,7 +186,18 @@ def run_simulation(
         config.print_to_file()
 
     model, args, simulation_key = setup_simulation(config)
-    init_state = model.initial
+    if y0 is None:
+        y0 = model.initial
+    else:
+        # Due to stale metadata in the saved state,
+        # we need to reconstruct the pytree structure
+        # of y0 to match the model's initial state.
+        # Otherwise, we get :
+        # "TypeError: cond branch outputs must have the same pytree structure, but they differ"
+        y0 = jax.tree_util.tree_unflatten(
+            jax.tree_util.tree_structure(model.initial), jax.tree_util.tree_leaves(y0)
+        )
+
     solver = dfx.EulerHeun()
 
     sol = solve_ODE(
@@ -194,7 +206,7 @@ def run_simulation(
         config.t0,
         config.t1,
         config.dt,
-        init_state,
+        y0,
         save_at=config.save_at,
         args=args,
         return_final_state=return_final_state,
@@ -237,6 +249,7 @@ def run_batched_simulation(
     save_model: bool = False,
     return_final_state: bool = False,
     downcast_to_float32: bool = True,
+    y0s: list[PyTree] | None = None,
 ):
     """Run multiple simulations in parallel based on a list of configs.
 
@@ -250,7 +263,21 @@ def run_batched_simulation(
     ), "All configs must have the same time parameters for batched simulation."
 
     models, args_list, keys = zip(*(setup_simulation(config) for config in configs))
-    y0s = [model.initial for model in models]
+    if y0s is None:
+        y0s = [model.initial for model in models]
+    else:
+        # Due to stale metadata in the saved state,
+        # we need to reconstruct the pytree structure
+        # of each y0 to match its model's initial state.
+        # Otherwise, we get :
+        # "TypeError: cond branch outputs must have the same pytree structure, but they differ"
+        y0s = [
+            jax.tree_util.tree_unflatten(
+                jax.tree_util.tree_structure(model.initial),
+                jax.tree_util.tree_leaves(y0),
+            )
+            for model, y0 in zip(models, y0s)
+        ]
 
     solver = dfx.EulerHeun()
     sols = solve_ODE_batched(
@@ -269,6 +296,7 @@ def run_batched_simulation(
     if save_results:
         for i, config in enumerate(configs):
             os.makedirs(Path(config.save_file).parent, exist_ok=True)
+            config.print_to_file()
             ys_i = jax.tree.map(lambda arr: arr[i], sols.ys)
             ts_i = sols.ts[i]
             ys_values, ys_tree_def = _serialize_pytree(

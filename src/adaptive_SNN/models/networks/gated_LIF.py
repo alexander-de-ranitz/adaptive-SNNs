@@ -84,7 +84,10 @@ class GatedLIFNetwork(AbstractLIFNetwork):
     ) -> Array:
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        dW = learning_rate * RPE * state.features.eligibility
+        gradient_clip = args.get("gradient_clip", jnp.inf)
+        dW = learning_rate * jnp.clip(
+            RPE * state.features.eligibility, min=-gradient_clip, max=gradient_clip
+        )
 
         dW = jnp.where(
             jnp.isnan(state.W), 0.0, dW

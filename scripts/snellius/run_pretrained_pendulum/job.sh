@@ -1,13 +1,17 @@
 #!/bin/bash
-#SBATCH -J network_test
-#SBATCH -t 15
+#SBATCH -J run_pretrained_pendulum
+#SBATCH -t 40
 #SBATCH -p gpu_a100
 #SBATCH -N 1
 #SBATCH --ntasks=18
+#SBATCH --cpus-per-task=1
 #SBATCH --gpus=1
+#SBATCH --mail-user=alexanderderanitz@gmail.com
+#SBATCH --mail-type=START,END,FAIL
 
 # Load necessary modules
 echo "Starting job on $(hostname) at $(date +%Y%m%d_%H%M%S)"
+echo "Job $SLURM_JOBID started at `date`"
 echo "Loading modules..."
 module load 2025
 module load Python/3.13.1-GCCcore-14.2.0
@@ -28,6 +32,20 @@ mkdir -p "$TMPDIR/output_dir"
 mkdir -p "$TMPDIR/output_dir/logs"
 mkdir -p "$TMPDIR/output_dir/results"
 
+cleanup() {
+    local exit_code=$?
+    echo "Cleanup running with exit code $exit_code at $(date)"
+    echo "Contents of $TMPDIR/output_dir:"
+    find "$TMPDIR/output_dir" -type f 2>/dev/null | head -20
+
+    DEST_DIR="$REPO_DIR/results/pendulum_pretrained_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$DEST_DIR"
+    cp -rv "$TMPDIR/output_dir/." "$DEST_DIR/" || echo "Copy failed with exit code $?"
+    exit "$exit_code"
+}
+
+trap cleanup EXIT INT TERM
+
 # Prevent BLAS/OpenMP oversubscription when running many Python jobs in parallel.
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -37,12 +55,9 @@ export JAX_ENABLE_X64=1 # Enable 64-bit precision in JAX, which is important for
 export JAX_PLATFORMS=cuda # Use CUDA backend for GPU acceleration
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
-echo "Running simulations..."
-python "$REPO_DIR/scripts/snellius/network_tuning/launch.py" \
+echo "Running simulations at $(date)..."
+set -x
+python "$REPO_DIR/scripts/snellius/run_pretrained_pendulum/run.py" \
     --output_dir "$TMPDIR/output_dir"
 
 echo "Simulations completed, copying results back to home directory..."
-# Copy results back to home directory
-DEST_DIR="$REPO_DIR/results/network_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$DEST_DIR"
-cp -r "$TMPDIR/output_dir/." "$DEST_DIR/"

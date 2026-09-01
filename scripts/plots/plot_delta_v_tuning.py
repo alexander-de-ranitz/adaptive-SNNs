@@ -20,9 +20,10 @@ class RunFile:
     dv: float
     method: str
     perturbation_size: float | None
+    weight: float | None = None
 
 
-DATA_DIR = Path("results/delta_v_tuning_20260605_204715/results")
+DATA_DIR = Path("results/delta_v_tuning_20260727_162048/results")
 OUTPUT_PATH = Path("figures/delta_v_tuning")
 
 
@@ -34,8 +35,14 @@ def parse_run_file(file: Path) -> RunFile:
         noise = float("nan")
     else:
         noise = float(noise_match.group(1))
+
+    w_match = re.search(r"w_(\d+\.?\d*)_", file.name)
+    if w_match is None:
+        w = float("nan")
+    else:
+        w = float(w_match.group(1))
     method = "gated" if dv != 0.0 else "default"
-    return RunFile(path=file, dv=dv, method=method, perturbation_size=noise)
+    return RunFile(path=file, dv=dv, method=method, perturbation_size=noise, weight=w)
 
 
 def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -50,7 +57,11 @@ def load_run_arrays(file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def compute_file_stats(file: Path) -> dict[str, float]:
     try:
         data = np.load(file)
-        return {"alignment": float(data["alignment"]), "SNR": float(data["snr"])}
+        return {
+            "alignment": float(data["alignment"]),
+            "SNR": float(data["snr"]),
+            "SNR_raw": float(data["snr_raw"]),
+        }
     except:
         print("Precomputed stats not found, computing from raw data...")
 
@@ -66,6 +77,7 @@ def compute_file_stats(file: Path) -> dict[str, float]:
     result = {
         "alignment": float(alignment),
         "SNR": float(snr),
+        "SNR_raw": float(data["snr_raw"]) if "snr_raw" in data else float("nan"),
     }
     return result
 
@@ -81,10 +93,12 @@ def build_dataframe() -> pd.DataFrame:
             {
                 "filename": run.path.name,
                 "dv": run.dv,
+                "weight": run.weight,
                 "method": run.method,
                 "perturbation_size": run.perturbation_size,
                 "alignment": stats["alignment"],
                 "SNR": stats["SNR"],
+                "SNR_raw": stats["SNR_raw"],
             }
         )
 
@@ -93,10 +107,12 @@ def build_dataframe() -> pd.DataFrame:
         columns=[
             "filename",
             "dv",
+            "weight",
             "method",
             "perturbation_size",
             "alignment",
             "SNR",
+            "SNR_raw",
         ],
     )
 
@@ -116,6 +132,8 @@ def plot_figure(
     summary = df.groupby(["dv", "method"], as_index=False).agg(
         alignment=("alignment", "mean"),
         SNR=("SNR", "mean"),
+        SNR_raw=("SNR_raw", "mean"),
+        SNR_raw_std=("SNR_raw", "std"),
         alignment_std=("alignment", "std"),
         SNR_std=("SNR", "std"),
         run_count=("filename", "count"),
@@ -124,6 +142,7 @@ def plot_figure(
     summary = summary.sort_values(by=["sort_key", "dv"]).drop(columns="sort_key")
     summary["alignment_std"] = summary["alignment_std"].fillna(0.0)
     summary["SNR_std"] = summary["SNR_std"].fillna(0.0)
+    summary["SNR_raw_std"] = summary["SNR_raw_std"].fillna(0.0)
 
     fig = plt.figure(figsize=(8.0, 4.5))
 
@@ -149,6 +168,7 @@ def plot_figure(
         print(f"Processing dv={dv}, method={method}, {int(stats['run_count'])} files")
         print(f"  Alignment: {stats['alignment']:.4f} ± {stats['alignment_std']:.4f}")
         print(f"  SNR: {stats['SNR']:.4f} ± {stats['SNR_std']:.4f}")
+        print(f"  SNR_raw: {stats['SNR_raw']:.4f} ± {stats['SNR_raw_std']:.4f}")
         if method == "gated":
             color = dv_cmap(dv_norm(dv))
             label = rf"$2^{{{-compute_exponent(dv)}}}$"
@@ -166,11 +186,11 @@ def plot_figure(
             )  # Add error bars for alignment
 
             # SNR on second ax
-            ax2.bar(label, stats["SNR"], color=color)
+            ax2.bar(label, stats["SNR_raw"], color=color)
             ax2.errorbar(
                 label,
-                stats["SNR"],
-                yerr=stats["SNR_std"],
+                stats["SNR_raw"],
+                yerr=stats["SNR_raw_std"],
                 color="black",
                 linewidth=1,
                 capsize=0,
@@ -180,7 +200,7 @@ def plot_figure(
             # Gating function on third ax
             network = GatedLIFNetwork(N_neurons=1, dt=1e-4, N_inputs=0)
             voltages = np.linspace(
-                -75 * 1e-3, -50 * 1e-3, 5000
+                -75 * 1e-3, -50 * 1e-3, int(1e5)
             )  # From -80 mV to +20 mV
             gating_values = network.gating_function(voltages, delta_V=dv)
             gating_values = gating_values / gating_values.max()  # Normalize to [0, 1]
@@ -201,7 +221,7 @@ def plot_figure(
 
             xlim2 = ax2.get_xlim()
             ax2.hlines(
-                stats["SNR"],
+                stats["SNR_raw"],
                 xmin=xlim2[0],
                 xmax=xlim2[1],
                 color="black",
@@ -268,4 +288,9 @@ if __name__ == "__main__":
             "Multiple perturbation sizes found, filtering to perturbation size of 1.0 nS for plotting"
         )
         df = df.loc[df["perturbation_size"] == 1.0]
+    if df["weight"].unique().size > 1:
+        print(
+            "Multiple initial weights found, filtering to initial weight of 1.0 for plotting"
+        )
+        df = df.loc[df["weight"] == 1.0]
     plot_figure(df=df, save_path=OUTPUT_PATH, show=True)

@@ -8,7 +8,9 @@ import jax.random as jr
 from diffrax import SaveAt
 from jax import numpy as jnp
 
-from adaptive_SNN.models.environments import SingleSynapseLearningEnv
+from adaptive_SNN.models.environments.single_synapse_learning import (
+    BaselineSingleSynapseLearningEnv,
+)
 from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
 from adaptive_SNN.models.noise import PoissonJumpProcess
 from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
@@ -27,7 +29,7 @@ def create_single_synapse_learning_config(
     t0 = 0
     t1 = 100
     dt = 1e-4
-    N_neurons = 2
+    N_neurons = 1
     N_inputs = 3
     min_noise_std = 1e-9
     balance = jnp.nan
@@ -35,15 +37,15 @@ def create_single_synapse_learning_config(
         [5000, 1250, 10]
     )  # High frequency background input and one moderate frequency input
     initial_weights = jnp.tile(
-        jnp.array([jnp.nan] * N_neurons + [1.0, 8.0, initial_synapse_weight]),
+        jnp.array([jnp.nan] * N_neurons + [1.1, 11, initial_synapse_weight]),
         (N_neurons, 1),
     )
 
     key, spike_key = jr.split(key, 2)
 
-    network_output_fn = lambda t, agent_state, args, env_state: (
-        agent_state.network_state.S[0] - agent_state.network_state.S[1]
-    ).reshape((1,))
+    network_output_fn = lambda t, agent_state, args, env_state: jnp.atleast_1d(
+        agent_state.network_state.S[0]
+    )
 
     def input_spike_fn(t, x, args):
         step_idx = jnp.asarray(jnp.rint((t - t0) / dt), dtype=jnp.int64)
@@ -90,19 +92,21 @@ def create_single_synapse_learning_config(
         network_output_fn=network_output_fn,
         input_spike_fn=input_spike_fn,
         reward_fn=lambda t, x, args: x.environment_state.reward
-        + x.environment_state.reward_noise,  # The reward is determined by the environment, so we just return it here.
-        environment_model=SingleSynapseLearningEnv,
+        - x.environment_state.mean_reward
+        + x.environment_state.reward_noise,  # The reward is determined by the environment
+        environment_model=BaselineSingleSynapseLearningEnv,
         environment_kwargs={
             "tau_reward": 0.1,
+            "tau_mean_reward": 10.0,
             "reward_dim": 1,
             "reward_noise_process": PoissonJumpProcess(
-                jump_rate=reward_noise_jump_rate, jump_std=1.0, jump_mean=0.0
+                jump_rate=reward_noise_jump_rate, jump_std=1.0, jump_mean=0.0, tau=0.1
             ),
         },
         reward_prediction_model=MovingAverageRewardPredictor,  # Not used here, but required by the runner. Rate = 0 -> always predicts 0 reward.
         reward_predictor_kwargs={"rate": 0.0, "dim": 1},
         args={
-            "use_noise": jnp.array([True, False]),  # Only the first neuron has noise
+            "use_noise": jnp.array([True]),  # Only the first neuron has noise
             "RPE_fn": lambda t,
             x,
             args,

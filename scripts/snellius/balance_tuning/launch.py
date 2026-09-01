@@ -42,8 +42,8 @@ def create_jobs():
     num_iterations = 1
     for i in range(num_iterations):
         seed += 543
-        for w in jnp.linspace(0.0, 2, 41):
-            for b in jnp.linspace(1.0, 1.1, 41):
+        for w in jnp.linspace(0.0, 2, 21):
+            for b in jnp.linspace(0.0, 0.05, 21):
                 name = f"w_{w:.4f}_b_{b:.4f}_seed_{seed}_iter_{i}"
 
                 cmd_args = [

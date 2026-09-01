@@ -30,7 +30,8 @@ def test_TD_error():
     #  agent_output is set to 0.15, reward is -0.2 + agent_output
     #  predicted value is 2.0 (which will turn into previous_value during the pre_step_update)
     args["reward_fn"] = lambda t, x, args: jnp.array([-0.2]) - x.agent_output
-    args["input_spike_fn"] = lambda t, x, args: jnp.zeros(model.agent.network.N_inputs)
+    input_spikes = jr.normal(key, (model.agent.network.N_inputs,)) * 0.1
+    args["input_spike_fn"] = lambda t, x, args: input_spikes
     args["network_output_fn"] = lambda t, agent_state, args, env_state: jnp.array(
         [0.15]
     )
@@ -40,15 +41,10 @@ def test_TD_error():
     )
     features = jnp.mod(jnp.arange(model.agent.network.N_inputs), jnp.array([4.0])) - 2.0
     initial_state = eqx.tree_at(
-        lambda s: s.agent_state.reward_predictor_state.value,
-        initial_state,
-        jnp.array([2.0]),
-    )
-    initial_state = eqx.tree_at(
         lambda s: s.agent_state.reward_predictor_state.weights, initial_state, weights
     )
     initial_state = eqx.tree_at(
-        lambda s: s.agent_state.reward_predictor_state.input_features,
+        lambda s: s.agent_state.reward_predictor_state.features,
         initial_state,
         features,
     )
@@ -56,8 +52,10 @@ def test_TD_error():
     new_state = model.pre_step_update(0.0, initial_state, args)
     new_state = model.update(0.0, new_state, args)
 
-    expected_previous_value = 2.0
-    expected_new_value = weights @ jnp.concatenate([features, jnp.array([1.0])])
+    expected_previous_value = weights @ jnp.concatenate([features, jnp.array([1.0])])
+    expected_new_value = weights @ jnp.concatenate(
+        [features + input_spikes, jnp.array([1.0])]
+    )
 
     # Check that the TD error is computed correctly
     # this is the Euler discretization of the TD error: RPE = reward - predicted_reward + gamma * new_value - previous_value
@@ -77,8 +75,9 @@ def test_critic_drift():
         value=jnp.array([1.0]),
         previous_value=jnp.array([0.5]),
         weights=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5]),
-        input_features=jnp.zeros(4),
-        input_features_prev=jnp.array([3.0, 4.0, 5.0, 6.0]),
+        features=jnp.zeros(4),
+        features_prev=jnp.zeros(4),
+        features_prev_prev=jnp.array([3.0, 4.0, 5.0, 6.0]),
     )
     RPE = jnp.array([0.25])
     learning_rate = 0.01
@@ -87,7 +86,7 @@ def test_critic_drift():
     expected_weight_update = (
         learning_rate
         * RPE
-        * jnp.concatenate([state.input_features_prev, jnp.array([1.0])])
+        * jnp.concatenate([state.features_prev_prev, jnp.array([1.0])])
     )
     drift = critic.drift(
         0.0,
@@ -106,8 +105,9 @@ def test_critic_convergence_static_target():
         value=jnp.array([0.0]),
         previous_value=jnp.array([0.0]),
         weights=jnp.zeros(5),
-        input_features=jnp.array([1.0, 2.0, 3.0, 4.0]),
-        input_features_prev=jnp.array([0.0, 0.0, 0.0, 0.0]),
+        features=jnp.array([1.0, 2.0, 3.0, 4.0]),
+        features_prev=jnp.array([0.0, 0.0, 0.0, 0.0]),
+        features_prev_prev=jnp.array([0.0, 0.0, 0.0, 0.0]),
     )
     learning_rate = 0.01
     args = {"get_critic_lr": lambda t, x, args: learning_rate}
@@ -128,10 +128,9 @@ def test_critic_convergence_static_target():
         )
         state = critic.update(0.0, state, args)
 
-        # Compute RPE
-        true_value = true_weights @ jnp.concatenate(
-            [state.input_features_prev, jnp.array([1.0])]
-        )
+        # Compute error
+        # Note: this is not doing TD learning, just gradient descent on the error
+        true_value = true_weights @ jnp.concatenate([state.features, jnp.array([1.0])])
         RPE = true_value - state.value
         drift = critic.drift(0.0, state, args, reward=0.0, RPE=RPE)
         state = eqx.tree_at(lambda s: s.weights, state, state.weights + drift.weights)
@@ -158,8 +157,8 @@ def test_critic_convergence_full():
     discount_rate = 0.99
 
     def reward_fn(t, x, args):
-        s_t_prev = x.agent_state.reward_predictor_state.input_features_prev
-        s_t = x.agent_state.reward_predictor_state.input_features
+        s_t_prev = x.agent_state.reward_predictor_state.features_prev
+        s_t = x.agent_state.reward_predictor_state.features
         V_star_t_prev = true_weights @ jnp.concatenate([s_t_prev, jnp.array([1.0])])
         V_star_t = true_weights @ jnp.concatenate([s_t, jnp.array([1.0])])
         true_reward = V_star_t_prev - discount_rate * V_star_t
@@ -172,8 +171,7 @@ def test_critic_convergence_full():
         "network_output_fn": lambda t, agent_state, args, env_state: jnp.zeros((1,)),
         "input_spike_fn": lambda t,
         x,
-        args: -x.agent_state.reward_predictor_state.input_features
-        + x.environment_state,
+        args: -x.agent_state.reward_predictor_state.features + x.environment_state,
         "reward_fn": lambda t, x, args: reward_fn(t, x, args),
         "RPE_fn": lambda t, x, args, reward: reward
         + discount_rate * x.reward_predictor_state.value
@@ -196,5 +194,4 @@ def test_critic_convergence_full():
     )
     final_state: SystemState = sol.ys
     final_weights = final_state.agent_state.reward_predictor_state.weights
-    print(f"Final weights: {final_weights}, True weights: {true_weights}")
     assert jnp.allclose(final_weights, true_weights, atol=0.1)

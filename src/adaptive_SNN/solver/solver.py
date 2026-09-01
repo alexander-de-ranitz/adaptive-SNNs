@@ -108,13 +108,39 @@ def solve_ODE(
 def _stack_pytree(pytrees):
     """Stack array leaves across a sequence of pytrees with identical structure.
 
-    Non-array leaves (callables, Python ints/floats, etc.) must be identical across
-    all pytrees; the value from the first element is used for them.
+    Non-array leaves (callables, Python ints/floats, etc.) cannot be stacked, so they
+    are only valid if identical across all pytrees (the value from the first element
+    is used for them). Callables are exempted from this check, since they are commonly
+    distinct closures that are nonetheless intended to behave identically; comparing
+    them for equality would compare object identity, not behavior.
+
+    Raises:
+        ValueError: if a non-array, non-callable leaf differs across the pytrees.
+            This is almost always a bug: the differing per-run values (e.g. a plain
+            Python float set per-config) are silently discarded in favor of the first
+            pytree's value unless they are wrapped in jnp.asarray(...) so they can be
+            stacked into a proper batch dimension.
     """
-    return jax.tree.map(
-        lambda *xs: jnp.stack(xs) if eqx.is_array(xs[0]) else xs[0],
-        *pytrees,
-    )
+    if isinstance(pytrees, (list, tuple)):
+
+        def merge(*xs):
+            if eqx.is_array(xs[0]):
+                return jnp.stack(xs)
+            if callable(xs[0]):
+                return xs[0]
+            if any(x != xs[0] for x in xs[1:]):
+                raise ValueError(
+                    "Cannot batch pytrees: found differing non-array leaf values "
+                    f"{xs} that cannot be stacked. If these values are meant to "
+                    "differ per run, wrap them in jnp.asarray(...) so they can be "
+                    "stacked into a batch dimension. If they are meant to be shared, "
+                    "make them identical across all configs."
+                )
+            return xs[0]
+
+        return jax.tree.map(merge, *pytrees)
+    else:
+        return pytrees
 
 
 def solve_ODE_batched(

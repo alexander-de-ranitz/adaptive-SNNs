@@ -146,6 +146,7 @@ def create_pendulum_config(
     model_cls = model_cls
     cfg = SimulationConfig(
         network_cls=model_cls,
+        base_network_kwargs={"tau_spike_filter": 0.05},
         N_neurons=N_neurons,
         N_inputs=N_inputs,
         balance=balance,
@@ -163,7 +164,7 @@ def create_pendulum_config(
         mean_synaptic_delay=1.5e-3,
         noise_level=noise_level,
         min_noise_std=min_noise_std,
-        warmup_time=100,
+        actor_warmup_time=100,
         key=key,
         save_at=save_at,
         save_file="results/pendulum.npz",
@@ -178,6 +179,7 @@ def create_pendulum_config(
         args={
             "delta_V": jnp.power(jnp.float64(2), jnp.float64(-12)),
             "use_noise": jnp.array([True]),
+            "get_critic_lr": lambda t, x, args: 1e-5,
             "feature_fn": lambda t,
             network_state,
             args: network_state.filtered_spike_trains,

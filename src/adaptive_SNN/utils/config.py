@@ -157,7 +157,7 @@ class SimulationConfig:
                     try:
                         f.write(f"{field.name}:\n")
                         value = getattr(self, field.name)
-                        save_fn = value.subs[0].fn
+                        save_fn = getattr(value.subs[0], "fn")
                         if save_fn is not None:
                             f.write(inspect.getsource(save_fn) + "\n")
                     except Exception as e:

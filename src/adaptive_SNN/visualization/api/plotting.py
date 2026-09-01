@@ -309,7 +309,7 @@ def plot_noise_STA(
         sols = [sols]
         noise_levels = [noise_levels]
 
-    fig, axs = plt.subplots(len(sols), 1, figsize=(3.05, 1 * len(sols)))
+    fig, axs = plt.subplots(1, len(sols), figsize=(3.5, 2))
 
     if neurons_to_plot is None:
         neurons_to_plot = jnp.arange(get_LIF_model(model).N_neurons)
@@ -321,18 +321,6 @@ def plot_noise_STA(
             ax, sol, model, neurons_to_plot=neurons_to_plot, noise_std=noise_levels[i]
         )
 
-        lif_state = get_LIF_state(sol.ys)
-        perturbations = get_LIF_state(sol.ys).perturbations
-
-        CV_ISI = compute_CV_ISI(lif_state.S, sol.ts)[
-            0
-        ]  # Compute CV ISI for first neuron
-        corr = jnp.corrcoef(perturbations[:, 0], lif_state.V[:, 0].flatten())[0, 1]
-        ax.set_title(
-            rf"Noise Level = {noise_levels[i] * 1e9} nS | CV ISI =  {CV_ISI:.2f} | Corr(V, Noise) = {corr:.2f}"
-        )
-        ax.set_xlabel("Noise Value")
-        ax.set_ylabel("Density")
         ax.label_outer()
 
     if save_path is not None:
@@ -840,12 +828,14 @@ def plot_weights_over_time(
         plt.show()
 
 
-def plot_spike_raster(ts, spikes):
+def plot_spike_raster(ts, spikes, ax=None):
     neuron_firing_rates = jnp.sum(spikes, axis=0) / (ts[-1] - ts[0])  # in Hz
     mean_firing_rate = jnp.mean(neuron_firing_rates)
     print(f"Mean firing rate: {mean_firing_rate:.2f} Hz")
 
-    fig, ax = plt.subplots(figsize=(8, 4))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4))
+
     # Build spike times per neuron (reverse order to show I neurons at bottom)
     spike_times_per_neuron = [
         ts[jnp.nonzero(spikes[:, i])[0]] for i in range(spikes.shape[1])
@@ -864,4 +854,5 @@ def plot_spike_raster(ts, spikes):
     ax.set_xlabel("Time (s)")
     ax.set_xlim(ts[0], ts[-1])
     ax.set_title("Spike Raster Plot")
-    plt.show()
+    if ax is None:
+        plt.show()

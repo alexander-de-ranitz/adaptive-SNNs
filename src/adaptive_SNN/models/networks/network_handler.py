@@ -21,14 +21,14 @@ class NetworkHandler(eqx.Module):
     def diffusion(self, t, x, args):
         return self.network.diffusion(t, x, args)
 
-    def update(self, t, x, args):
+    def pre_step_update(self, t, x, args):
         input_spikes = args.get(
             "input_spike_fn", lambda t, x, args: jnp.zeros((self.network.N_neurons,))
         )(t, x, args)
-        return self.network.update(t, x, args, input_spikes)
+        return self.network.pre_step_update(t, x, args, input_spikes)
 
-    def pre_step_update(self, t, x, args):
-        return self.network.pre_step_update(t, x, args)
+    def update(self, t, x, args):
+        return self.network.update(t, x, args)
 
     @property
     def noise_shape(self):

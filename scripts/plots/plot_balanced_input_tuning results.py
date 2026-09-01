@@ -7,7 +7,7 @@ from jax import numpy as jnp
 from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 
-DATA_DIR = "results/balance_tuning_20260605_101130/results"
+DATA_DIR = "results/balance_tuning_20260622_185601/results"
 
 
 def load_results():
@@ -17,17 +17,17 @@ def load_results():
             data = np.load(os.path.join(DATA_DIR, f))
             cv_isi = float(data["CV_ISI"].squeeze())
             firing_rate = float(data["firing_rate"].squeeze())
-            charge_ratio = float(data["charge_ratio"].squeeze())
+            balance = float(jnp.mean(data["balance"]).squeeze())
             mean_voltage = float(data["mean_voltage"].squeeze())
-            balance = float(re.search(r"b_(\d+\.\d+)", f).group(1))
+            target_balance = float(re.search(r"b_(\d+\.\d+)", f).group(1))
             init_weight = float(re.search(r"w_(\d+\.\d+)", f).group(1))
             df.append(
                 {
-                    "balance": balance,
+                    "target_balance": target_balance,
                     "init_weight": init_weight,
                     "CV_ISI": cv_isi,
                     "firing_rate": firing_rate,
-                    "charge_ratio": charge_ratio,
+                    "balance": balance,
                     "mean_voltage": mean_voltage,
                 }
             )
@@ -39,7 +39,7 @@ def main():
     df = load_results()
 
     init_weights = jnp.array(sorted(df["init_weight"].unique()))
-    balances = jnp.array(sorted(df["balance"].unique()))
+    target_balances = jnp.array(sorted(df["target_balance"].unique()))
 
     def add_pixel_outline(ax, mask, color="white", linewidth=1.5):
         mask_np = np.asarray(mask, dtype=bool)
@@ -69,21 +69,23 @@ def main():
             )
 
     metric_matrices = [
-        df.pivot(index="balance", columns="init_weight", values="CV_ISI").to_numpy(),
         df.pivot(
-            index="balance", columns="init_weight", values="firing_rate"
+            index="target_balance", columns="init_weight", values="CV_ISI"
         ).to_numpy(),
         df.pivot(
-            index="balance", columns="init_weight", values="charge_ratio"
+            index="target_balance", columns="init_weight", values="firing_rate"
         ).to_numpy(),
         df.pivot(
-            index="balance", columns="init_weight", values="mean_voltage"
+            index="target_balance", columns="init_weight", values="balance"
+        ).to_numpy(),
+        df.pivot(
+            index="target_balance", columns="init_weight", values="mean_voltage"
         ).to_numpy(),
     ]
 
     # Do not show CV ISI for neurons with firing rate < 1 Hz, as CV ISI is not meaningful for very low firing rates.
     cv_isi = metric_matrices[0].copy()
-    cv_isi[metric_matrices[1] < 1.0] = jnp.nan
+    cv_isi[metric_matrices[1] < 3.0] = jnp.nan
     metric_matrices[0] = cv_isi
 
     fig, axs = plt.subplots(2, 2, figsize=(7, 5))
@@ -96,7 +98,7 @@ def main():
     titles = [
         "CV of ISI",
         "Firing Rate",
-        "E/I Ratio",
+        "Balance",
         "Mean Voltage",
     ]
 
@@ -108,7 +110,7 @@ def main():
     ]
 
     x_tick_labels = [f"{float(w):.1f}" for w in init_weights][::2]
-    y_tick_labels = [f"{b:.2f}" for b in balances][::2]
+    y_tick_labels = [f"{b:.2f}" for b in target_balances][::2]
 
     for ax, title in zip(axs, titles):
         ax.set_xticks(jnp.arange(len(x_tick_labels)) * 2)
@@ -116,7 +118,7 @@ def main():
         ax.set_yticks(jnp.arange(len(y_tick_labels)) * 2)
         ax.set_yticklabels(y_tick_labels)
         ax.set_xlabel("E Weight")
-        ax.set_ylabel("Balance (E/I Ratio)")
+        ax.set_ylabel("Balance")
         ax.set_title(rf"\textbf{{{title}}}")
 
     target_masks = []

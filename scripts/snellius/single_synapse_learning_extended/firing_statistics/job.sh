@@ -1,17 +1,13 @@
 #!/bin/bash
-#SBATCH -J pendulum_sim
-#SBATCH -t 900
+#SBATCH -J single_synapse_learning_extended_firing_statistics
+#SBATCH -t 40
 #SBATCH -p gpu_a100
 #SBATCH -N 1
-#SBATCH --ntasks=36
-#SBATCH --cpus-per-task=1
-#SBATCH --gpus=2
-#SBATCH --mail-user=alexanderderanitz@gmail.com
-#SBATCH --mail-type=START,END,FAIL
+#SBATCH --ntasks=72
+#SBATCH --gpus=1
 
 # Load necessary modules
 echo "Starting job on $(hostname) at $(date +%Y%m%d_%H%M%S)"
-echo "Job $SLURM_JOBID started at `date`"
 echo "Loading modules..."
 module load 2025
 module load Python/3.13.1-GCCcore-14.2.0
@@ -32,32 +28,20 @@ mkdir -p "$TMPDIR/output_dir"
 mkdir -p "$TMPDIR/output_dir/logs"
 mkdir -p "$TMPDIR/output_dir/results"
 
-cleanup() {
-    local exit_code=$?
-    echo "Cleanup running with exit code $exit_code at $(date)"
-    echo "Contents of $TMPDIR/output_dir:"
-    find "$TMPDIR/output_dir" -type f 2>/dev/null | head -20
-
-    DEST_DIR="$REPO_DIR/results/pendulum_run_$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$DEST_DIR"
-    cp -rv "$TMPDIR/output_dir/." "$DEST_DIR/" || echo "Copy failed with exit code $?"
-    exit "$exit_code"
-}
-
-trap cleanup EXIT INT TERM
-
 # Prevent BLAS/OpenMP oversubscription when running many Python jobs in parallel.
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export JAX_ENABLE_X64=1 # Enable 64-bit precision in JAX, which is important for numerical stability in our simulations
-export JAX_PLATFORMS=cuda # Use CUDA backend for GPU acceleration
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export JAX_PLATFORMS=cpu # Use CPU backend for JAX, as we are running many low-dimensional parallel jobs (1 core per simulation)
 
-echo "Running simulations at $(date)..."
-set -x
-python "$REPO_DIR/scripts/snellius/pendulum/launch.py" \
+echo "Running simulations..."
+python "$REPO_DIR/scripts/snellius/single_synapse_learning_extended/firing_statistics/launch.py" \
     --output_dir "$TMPDIR/output_dir"
 
 echo "Simulations completed, copying results back to home directory..."
+# Copy results back to home directory
+DEST_DIR="$REPO_DIR/results/single_synapse_learning_extended_firing_statistics_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$DEST_DIR"
+cp -r "$TMPDIR/output_dir/." "$DEST_DIR/"

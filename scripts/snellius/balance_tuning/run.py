@@ -44,7 +44,7 @@ def main():
     script_args = parser.parse_args()
 
     t0 = 0
-    t1 = 1000
+    t1 = 500
     dt0 = 1e-4
     key = jr.PRNGKey(script_args.key_seed)
     balance = script_args.balance
@@ -118,12 +118,11 @@ def main():
     print(f"Simulation completed in {end - start:.2f} seconds")
 
     V, S, charge_in, charge_out = sol.ys
-    charge_ratio = jnp.mean(
-        jnp.where(
-            (jnp.abs(charge_out) > 0) & (jnp.abs(charge_in) > 0),
-            charge_in / jnp.abs(charge_out),
-            1.0,
-        )
+    total_charge = jnp.abs(charge_in) + jnp.abs(charge_out)
+    balance = jnp.where(
+        (charge_in != 0.0) & (charge_out != 0.0),
+        (charge_in + charge_out) / total_charge,
+        jnp.nan,
     )
     cv_isi = compute_CV_ISI(S, sol.ts)
     firing_rate = jnp.sum(S, axis=0) / (t1 - t0)
@@ -133,7 +132,7 @@ def main():
         script_args.output_file,
         CV_ISI=cv_isi,
         firing_rate=firing_rate,
-        charge_ratio=charge_ratio,
+        balance=balance,
         mean_voltage=mean_voltage,
     )
 
