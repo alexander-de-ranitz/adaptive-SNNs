@@ -38,7 +38,7 @@ cleanup() {
     echo "Contents of $TMPDIR/output_dir:"
     find "$TMPDIR/output_dir" -type f 2>/dev/null | head -20
 
-    DEST_DIR="$REPO_DIR/results/pendulum_AC_noiseless_input_$(date +%Y%m%d_%H%M%S)"
+    DEST_DIR="$REPO_DIR/results/pendulum_AC_spiking_input_$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$DEST_DIR"
     cp -rv "$TMPDIR/output_dir/." "$DEST_DIR/" || echo "Copy failed with exit code $?"
     exit "$exit_code"
