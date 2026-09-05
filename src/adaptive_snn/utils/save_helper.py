@@ -1,4 +1,7 @@
 import dataclasses
+from pathlib import Path
+
+import numpy as np
 
 
 def save_part_of_state(state, **to_save):
@@ -39,3 +42,51 @@ def save_part_of_state(state, **to_save):
         else:
             saved_state[field.name] = None
     return type(state)(**saved_state)
+
+
+def get_array_value(value, downcast_to_float32: bool) -> np.ndarray:
+    arr = np.asarray(value)
+    if downcast_to_float32 and arr.dtype.kind == "f" and arr.itemsize > 4:
+        arr = arr.astype(np.float32)
+    return arr
+
+
+def save_named_result(
+    path, result, *, downcast_to_float32: bool = True, **extra_arrays
+):
+    """Save a result as an .npz with named arrays.
+
+    Optionally downcast to float32 to save space.
+    Extra arrays can be passed (e.g. for the final_state) and will be saved alongside the other fields.
+    """
+    fields = {
+        f.name: get_array_value(getattr(result, f.name), downcast_to_float32)
+        for f in dataclasses.fields(result)
+    }
+    overlap = set(fields) & set(extra_arrays)
+    if overlap:
+        raise ValueError(f"extra_arrays collide with record fields: {sorted(overlap)}")
+    np.savez(
+        path,
+        _fields=np.array(list(fields)),
+        **fields,
+        **{k: np.asarray(v) for k, v in extra_arrays.items()},
+    )
+
+
+def load_named_result(path) -> dict:
+    """Load a named-array result as a plain dict"""
+    with np.load(Path(path), allow_pickle=True) as data:
+        if "_fields" not in data.files:
+            if "ys_tree_def" in data.files or "ys" in data.files:
+                raise ValueError(
+                    f"{path} is a legacy pickled-treedef result file (no "
+                    "'_fields' stamp). Load it with "
+                    "adaptive_snn.utils.runner._load_existing_solution instead."
+                )
+            raise ValueError(f"{path} is not a named-result file: no '_fields' stamp.")
+        names = list(data["_fields"])
+        out = {name: data[name] for name in names}
+        if "ts" in data.files:
+            out["ts"] = data["ts"]
+        return out

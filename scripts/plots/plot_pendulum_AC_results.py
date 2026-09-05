@@ -1,10 +1,3 @@
-# Add scripts/ to the path so that we can import from scripts
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(REPO_ROOT))
-
 import os
 import re
 
@@ -12,17 +5,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from jax import numpy as jnp
 
-from adaptive_snn.utils.runner import _load_existing_solution
-from scripts.snellius.pendulum_AC.run import SavedState
+from adaptive_snn.utils.runner import load_final_state
+from adaptive_snn.utils.save_helper import load_named_result
 
 RESULTS_DIR = "results/pendulum_AC_spiking_input_20260903_145905/results/"
 
 
 def load_pendulum_results(file_path):
     model = "gated" if "gated" in file_path else "default"
-    sol, _ = _load_existing_solution(file_path)
-    ts = sol.ts
-    saved_state: SavedState = sol.ys[0]
+    result = load_named_result(file_path)
+    ts = result["ts"]
     try:
         iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
     except:
@@ -33,10 +25,10 @@ def load_pendulum_results(file_path):
     chunk = int(re.search(r"_chunk_(\d+)", file_path).group(1))
     seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
     lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
-    final_state = sol.ys[1]
+    final_state = load_final_state(file_path)
     return {
         "file_path": file_path,
-        "state": saved_state,
+        "state": result,
         "ts": ts,
         "iter": iter,
         "chunk": chunk,
@@ -73,39 +65,39 @@ def plot_full_dynamics():
         all_rewards = []
         all_RPEs = []
         for row in subset.itertuples():
-            state: SavedState = row.state
-            all_rewards.append(state.mean_reward)
-            all_RPEs.append(state.mean_RPE)
+            state = row.state
+            all_rewards.append(state["mean_reward"])
+            all_RPEs.append(state["mean_RPE"])
 
             ts = row.ts
-            axs[0, 0].plot(ts, state.mean_reward)
+            axs[0, 0].plot(ts, state["mean_reward"])
             axs[0, 0].set_title("Mean Reward")
-            axs[1, 0].plot(ts, state.mean_RPE)
+            axs[1, 0].plot(ts, state["mean_RPE"])
             axs[1, 0].set_title("Mean RPE")
-            axs[2, 0].plot(ts, state.mean_W_actor_input)
+            axs[2, 0].plot(ts, state["mean_W_actor_input"])
             axs[2, 0].set_title("Mean Actor Input Weights")
-            axs[3, 0].plot(ts, state.mean_W_actor_recurrent)
+            axs[3, 0].plot(ts, state["mean_W_actor_recurrent"])
             axs[3, 0].set_title("Mean Actor Recurrent Weights")
-            axs[4, 0].plot(ts, state.mean_W_critic)
+            axs[4, 0].plot(ts, state["mean_W_critic"])
             axs[4, 0].set_title("Mean Critic Weights")
             axs[4, 0].set_xlabel("Time")
 
-            axs[0, 1].plot(ts, state.mean_filtered_spikes_L, label="Left")
-            axs[0, 1].plot(ts, -state.mean_filtered_spikes_R, label="Right")
+            axs[0, 1].plot(ts, state["mean_filtered_spikes_L"], label="Left")
+            axs[0, 1].plot(ts, -state["mean_filtered_spikes_R"], label="Right")
             axs[0, 1].plot(
                 ts,
-                state.mean_filtered_spikes_L - state.mean_filtered_spikes_R,
+                state["mean_filtered_spikes_L"] - state["mean_filtered_spikes_R"],
                 label="Difference",
             )
             axs[0, 1].legend()
             axs[0, 1].set_title("Mean Filtered Outputs")
-            axs[1, 1].plot(ts, state.var_RPE)
+            axs[1, 1].plot(ts, state["var_RPE"])
             axs[1, 1].set_title("Variance RPE")
-            axs[2, 1].plot(ts, state.var_W_actor_recurrent)
+            axs[2, 1].plot(ts, state["var_W_actor_recurrent"])
             axs[2, 1].set_title("Variance Actor Recurrent Weights")
-            axs[3, 1].plot(ts, state.fraction_clipped_dW)
+            axs[3, 1].plot(ts, state["fraction_clipped_dW"])
             axs[3, 1].set_title("Fraction Clipped dW")
-            axs[4, 1].plot(ts, state.mean_balance)
+            axs[4, 1].plot(ts, state["mean_balance"])
             axs[4, 1].set_title("Mean Balance")
             axs[4, 1].axhline(
                 y=0.01,
@@ -117,15 +109,15 @@ def plot_full_dynamics():
             )
             axs[4, 1].fill_between(
                 ts,
-                state.mean_balance - jnp.sqrt(state.var_balance),
-                state.mean_balance + jnp.sqrt(state.var_balance),
+                state["mean_balance"] - jnp.sqrt(state["var_balance"]),
+                state["mean_balance"] + jnp.sqrt(state["var_balance"]),
                 alpha=0.3,
             )
             print(
-                f"Mean balance after warmup: {jnp.mean(state.mean_balance[int(len(state.mean_balance) / 4) :])}"
+                f"Mean balance after warmup: {jnp.mean(state['mean_balance'][int(len(state['mean_balance']) / 4) :])}"
             )
             print(
-                f"Std balance after warmup: {jnp.mean(jnp.sqrt(state.var_balance[int(len(state.var_balance) / 4) :]))}"
+                f"Std balance after warmup: {jnp.mean(jnp.sqrt(state['var_balance'][int(len(state['var_balance']) / 4) :]))}"
             )
         all_rewards = jnp.concatenate(all_rewards)
         all_rewards_trend = jnp.convolve(

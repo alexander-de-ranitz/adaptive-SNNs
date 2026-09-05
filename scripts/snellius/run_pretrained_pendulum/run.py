@@ -2,42 +2,52 @@ import jax
 
 jax.config.update("jax_enable_x64", True)
 
-# Add scripts/ to the path so that we can import from scripts
-import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
-
 import argparse
 import os
 import re
 import time
 
 import diffrax as dfx
+import equinox as eqx
 import pandas as pd
 from jax import numpy as jnp
 from jax import random as jr
+from jaxtyping import Array
 
 from adaptive_snn.models.agent_env_system import SystemState
 from adaptive_snn.models.networks.eligibility_LIF import EligibilityLIFNetwork
 from adaptive_snn.models.networks.gated_LIF import GatedLIFNetwork
 from adaptive_snn.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
-from adaptive_snn.utils.runner import (
-    _load_existing_solution,
-    run_batched_simulation,
-)
-
-# Imported so that unpickling the saved treedef can resolve `__main__.SavedState`.
-from scripts.snellius.pendulum_AC.run import SavedState  # noqa: F401
+from adaptive_snn.utils.runner import load_final_state, run_batched_simulation
+from adaptive_snn.utils.save_helper import load_named_result
 
 RESULTS_DIR = "results/pendulum_pretrained_20260903_202317/results/"
 
 
+class Result(eqx.Module):
+    environment_state: Array
+    agent_output: Array
+    critic_value: Array
+    RPE: Array
+    reward_signal: Array
+    balance_hist: Array
+    filtered_spikes_L: Array
+    filtered_spikes_R: Array
+    filtered_spikes_H: Array
+    balance_min: Array
+    balance_max: Array
+    balance_mean: Array
+    balance_var: Array
+    W_actor_input_mean: Array
+    W_actor_recurrent_mean: Array
+    W_actor_input_var: Array
+    W_actor_recurrent_var: Array
+
+
 def load_pendulum_results(file_path):
     model = "gated" if "gated" in file_path else "default"
-    sol, _ = _load_existing_solution(file_path)
-    ts = sol.ts
-    saved_state = sol.ys[0]
+    result = load_named_result(file_path)
+    ts = result["ts"]
     try:
         iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
     except:
@@ -57,10 +67,10 @@ def load_pendulum_results(file_path):
     except:
         seed = None
     lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
-    final_state = sol.ys[1]
+    final_state = load_final_state(file_path)
     return {
         "file_path": file_path,
-        "state": saved_state,
+        "state": result,
         "ts": ts,
         "iter": iter,
         "chunk": chunk,
@@ -144,37 +154,45 @@ def main():
         charge_in = state.agent_state.network_state.charge_in
         charge_out = state.agent_state.network_state.charge_out
         balance = (charge_in + charge_out) / (jnp.abs(charge_in) + jnp.abs(charge_out))
-        return (
-            state.environment_state,
-            state.agent_output,
-            state.agent_state.reward_predictor_state.value,
-            state.agent_state.RPE,
-            state.reward_signal,
-            jnp.histogram(balance, bins=jnp.linspace(0.0, 0.05, 15))[0],
-            jnp.mean(
+        return Result(
+            environment_state=state.environment_state,
+            agent_output=state.agent_output,
+            critic_value=state.agent_state.reward_predictor_state.value,
+            RPE=state.agent_state.RPE,
+            reward_signal=state.reward_signal,
+            balance_hist=jnp.histogram(balance, bins=jnp.linspace(0.0, 0.05, 15))[0],
+            filtered_spikes_L=jnp.mean(
                 state.agent_state.network_state.filtered_spike_trains[
                     : N_neurons // 10
                 ],
                 axis=0,
             ),
-            jnp.mean(
+            filtered_spikes_R=jnp.mean(
                 state.agent_state.network_state.filtered_spike_trains[
                     N_neurons // 10 : N_neurons // 5
                 ],
                 axis=0,
             ),
-            jnp.mean(
+            filtered_spikes_H=jnp.mean(
                 state.agent_state.network_state.filtered_spike_trains[N_neurons // 5 :],
                 axis=0,
             ),
-            jnp.min(balance),
-            jnp.max(balance),
-            jnp.nanmean(balance),
-            jnp.nanvar(balance),
-            jnp.nanmean(state.agent_state.network_state.W[:, N_neurons:]),
-            jnp.nanmean(state.agent_state.network_state.W[:, :N_neurons]),
-            jnp.nanvar(state.agent_state.network_state.W[:, N_neurons:]),
-            jnp.nanvar(state.agent_state.network_state.W[:, :N_neurons]),
+            balance_min=jnp.min(balance),
+            balance_max=jnp.max(balance),
+            balance_mean=jnp.nanmean(balance),
+            balance_var=jnp.nanvar(balance),
+            W_actor_input_mean=jnp.nanmean(
+                state.agent_state.network_state.W[:, N_neurons:]
+            ),
+            W_actor_recurrent_mean=jnp.nanmean(
+                state.agent_state.network_state.W[:, :N_neurons]
+            ),
+            W_actor_input_var=jnp.nanvar(
+                state.agent_state.network_state.W[:, N_neurons:]
+            ),
+            W_actor_recurrent_var=jnp.nanvar(
+                state.agent_state.network_state.W[:, :N_neurons]
+            ),
         )
 
     for p, config in zip(params, configs):
@@ -198,7 +216,7 @@ def main():
     )
     start = time.time()
     sol, model = run_batched_simulation(
-        configs, save_results=True, return_final_state=True, y0s=y0s
+        configs, save_results=True, return_final_state=True, y0s=y0s, named_result=True
     )
     end = time.time()
     print(f"Simulation finished in: {end - start} seconds")

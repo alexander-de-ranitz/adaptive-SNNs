@@ -44,6 +44,17 @@ def _deserialize_pytree(leaves_array: np.ndarray, treedef_array: np.ndarray):
     return jax.tree.unflatten(treedef, leaves)
 
 
+def load_final_state(path):
+    """Load the final state stored alongside a named_result save, if present.
+
+    Returns the deserialized final-state pytree when the if available else None
+    """
+    with np.load(path, allow_pickle=True) as data:
+        if "final_state" not in data:
+            return None
+        return _deserialize_pytree(data["final_state"], data["final_state_tree_def"])
+
+
 def _load_existing_solution(save_file: str) -> tuple[dfx.Solution, AgentEnvSystem]:
     data = np.load(save_file, allow_pickle=True)
 
@@ -164,12 +175,11 @@ def setup_simulation(
         "episode_end_fn",
         "RPE_fn",
         "feature_fn",
-        "final_balance_rate",
+        "balance_rate",
         "gradient_clip",
         "tau_charge",
-        "external_noise_std",
     ):
-        value = getattr(config, field_name)
+        value = getattr(config, field_name, None)
         if value is not None:
             args[field_name] = value
 
@@ -182,6 +192,7 @@ def run_simulation(
     overwrite: bool = False,
     load_if_exists: bool = True,
     save_model: bool = False,
+    named_result: bool = False,
     return_final_state: bool = False,
     downcast_to_float32: bool = True,
     y0: PyTree | None = None,
@@ -197,6 +208,13 @@ def run_simulation(
     save_path = Path(save_file)
 
     if save_results and save_path.exists() and not overwrite:
+        if named_result:
+            raise NotImplementedError(
+                "run_simulation(named_result=True) does not support reloading an existing "
+                "result file; pass overwrite=True, or load it yourself with "
+                "adaptive_snn.utils.save_helper.load_named_result / "
+                "adaptive_snn.utils.runner.load_final_state."
+            )
         if load_if_exists:
             print(f"Loading existing result from {save_file}")
             return _load_existing_solution(save_file)
@@ -237,7 +255,30 @@ def run_simulation(
         key=simulation_key,
     )
 
-    if save_results:
+    if save_results and named_result:
+        from adaptive_snn.utils.save_helper import save_named_result
+
+        if save_model:
+            raise ValueError(
+                "save_model=True is not supported with named_result=True (the "
+                "named-array format is class-independent by design)."
+            )
+        if return_final_state:
+            record, final_state = sol.ys
+            fs_vals, fs_tree = _serialize_pytree(
+                final_state, downcast_to_float32=downcast_to_float32
+            )
+            extra = {"final_state": fs_vals, "final_state_tree_def": fs_tree}
+        else:
+            record, extra = sol.ys, {}
+        save_named_result(
+            save_file,
+            record,
+            downcast_to_float32=downcast_to_float32,
+            ts=np.asarray(jax.device_get(sol.ts)),
+            **extra,
+        )
+    elif save_results:
         ys_values, ys_tree_def = _serialize_pytree(
             sol.ys, downcast_to_float32=downcast_to_float32
         )
@@ -271,6 +312,7 @@ def run_batched_simulation(
     overwrite: bool = False,
     load_if_exists: bool = True,
     save_model: bool = False,
+    named_result: bool = False,
     return_final_state: bool = False,
     downcast_to_float32: bool = True,
     y0s: list[PyTree] | None = None,
@@ -326,6 +368,33 @@ def run_batched_simulation(
             config.print_to_file()
             ys_i = jax.tree.map(lambda arr: arr[i], sols.ys)
             ts_i = sols.ts[i]
+            if named_result:
+                from adaptive_snn.utils.save_helper import save_named_result
+
+                if save_model:
+                    raise ValueError(
+                        "save_model=True is not supported with named_result=True "
+                        "(the named-array format is class-independent by design)."
+                    )
+                if return_final_state:
+                    record, final_state = ys_i
+                    fs_vals, fs_tree = _serialize_pytree(
+                        final_state, downcast_to_float32=downcast_to_float32
+                    )
+                    extra = {
+                        "final_state": fs_vals,
+                        "final_state_tree_def": fs_tree,
+                    }
+                else:
+                    record, extra = ys_i, {}
+                save_named_result(
+                    config.save_file,
+                    record,
+                    downcast_to_float32=downcast_to_float32,
+                    ts=np.asarray(jax.device_get(ts_i)),
+                    **extra,
+                )
+                continue
             ys_values, ys_tree_def = _serialize_pytree(
                 ys_i, downcast_to_float32=downcast_to_float32
             )

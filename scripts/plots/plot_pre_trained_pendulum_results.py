@@ -11,16 +11,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from jax import numpy as jnp
 
-from adaptive_snn.utils.runner import _load_existing_solution
+from adaptive_snn.utils.runner import load_final_state
+from adaptive_snn.utils.save_helper import load_named_result
 
 RESULTS_DIR = "results/pendulum_pretrained_20260904_140811/results/"
 
 
 def load_pendulum_results(file_path):
     model = "gated" if "gated" in file_path else "default"
-    sol, _ = _load_existing_solution(file_path)
-    ts = sol.ts
-    saved_state = sol.ys[0]
+    result = load_named_result(file_path)
+    ts = result["ts"]
     try:
         lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
     except:
@@ -29,10 +29,10 @@ def load_pendulum_results(file_path):
         balance_rate = float(re.search(r"_balance_(\d+\.?\d*)_", file_path).group(1))
     except:
         balance_rate = None
-    final_state = sol.ys[1]
+    final_state = load_final_state(file_path)
     return {
         "file_path": file_path,
-        "state": saved_state,
+        "state": result,
         "ts": ts,
         "final_state": final_state,
         "model": model,
@@ -62,25 +62,18 @@ def plot_pretrained_run():
             raise ValueError("More than one file in group!")
         print(f"Plotting dynamics for model: {m}, lr: {lr}, balance_rate: {b}")
         saved_state = group["state"].iloc[0]
-        (
-            env_state,
-            agent_output,
-            value,
-            RPE,
-            reward,
-            hist,
-            L_rate,
-            R_rate,
-            H_rate,
-            min_bal,
-            max_bal,
-            mean_bal,
-            var_bal,
-            mean_w_in,
-            mean_w_rec,
-            var_w_in,
-            var_w_rec,
-        ) = saved_state
+        env_state = saved_state["environment_state"]
+        agent_output = saved_state["agent_output"]
+        RPE = saved_state["RPE"]
+        reward = saved_state["reward_signal"]
+        hist = saved_state["balance_hist"]
+        L_rate = saved_state["filtered_spikes_L"]
+        R_rate = saved_state["filtered_spikes_R"]
+        H_rate = saved_state["filtered_spikes_H"]
+        min_bal = saved_state["balance_min"]
+        max_bal = saved_state["balance_max"]
+        mean_bal = saved_state["balance_mean"]
+        var_bal = saved_state["balance_var"]
 
         # Plotting the results
         fig, axs = plt.subplots(4, 2, figsize=(12, 8), sharex=True)
@@ -93,9 +86,6 @@ def plot_pretrained_run():
         axs[0, 1].set_title("Agent Output")
         axs[0, 1].legend()
 
-        # axs[1, 0].plot(group["ts"].iloc[0], value, label="Value")
-        # axs[1, 0].set_title("Value Function")
-        # axs[1, 0].legend()
         axs[1, 0].plot(group["ts"].iloc[0], mean_bal, label="Mean Balance")
         axs[1, 0].fill_between(
             group["ts"].iloc[0],

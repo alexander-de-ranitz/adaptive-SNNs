@@ -22,26 +22,24 @@ from adaptive_snn.models.agent_env_system import SystemState
 from adaptive_snn.models.networks.eligibility_LIF import EligibilityLIFNetwork
 from adaptive_snn.models.networks.gated_LIF import GatedLIFNetwork
 from adaptive_snn.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
-from adaptive_snn.utils.runner import _load_existing_solution, run_simulation
-from adaptive_snn.utils.save_helper import save_part_of_state
-from scripts.snellius.pendulum_AC.run import SavedState
+from adaptive_snn.utils.runner import load_final_state, run_simulation
+from adaptive_snn.utils.save_helper import load_named_result, save_part_of_state
 
 RESULTS_DIR = "results/pendulum_AC_noiseless_input_20260808_043000/results/"
 
 
 def load_pendulum_results(file_path):
     model = "gated" if "gated" in file_path else "default"
-    sol, _ = _load_existing_solution(file_path)
-    ts = sol.ts
-    saved_state: SavedState = sol.ys[0]
+    result = load_named_result(file_path)
+    ts = result["ts"]
     iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
     chunk = int(re.search(r"_chunk_(\d+)", file_path).group(1))
     seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
     lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
-    final_state = sol.ys[1]
+    final_state = load_final_state(file_path)
     return {
         "file_path": file_path,
-        "state": saved_state,
+        "state": result,
         "ts": ts,
         "iter": iter,
         "chunk": chunk,

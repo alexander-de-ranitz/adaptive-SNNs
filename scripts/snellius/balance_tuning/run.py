@@ -8,14 +8,24 @@ jax.config.update(
 import argparse
 
 import diffrax as dfx
+import equinox as eqx
 import jax.random as jr
 from diffrax import SaveAt
 from jax import numpy as jnp
+from jaxtyping import Array
 
 from adaptive_snn.models.networks import LIFNetwork
 from adaptive_snn.models.networks.network_handler import NetworkHandler
 from adaptive_snn.solver import solve_ODE
 from adaptive_snn.utils.metrics import compute_CV_ISI
+from adaptive_snn.utils.save_helper import save_named_result
+
+
+class BalanceTuningResult(eqx.Module):
+    CV_ISI: Array
+    firing_rate: Array
+    balance: Array
+    mean_voltage: Array
 
 
 def main():
@@ -128,12 +138,15 @@ def main():
     firing_rate = jnp.sum(S, axis=0) / (t1 - t0)
     mean_voltage = jnp.mean(V) * 1e3
 
-    jnp.savez(
+    save_named_result(
         script_args.output_file,
-        CV_ISI=cv_isi,
-        firing_rate=firing_rate,
-        balance=balance,
-        mean_voltage=mean_voltage,
+        BalanceTuningResult(
+            CV_ISI=cv_isi,
+            firing_rate=firing_rate,
+            balance=balance,
+            mean_voltage=mean_voltage,
+        ),
+        downcast_to_float32=False,
     )
 
 

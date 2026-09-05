@@ -325,3 +325,146 @@ def test_env_warmup_disables_rpe():
 
     # RPE should be zero even though reward - predicted_reward would be non-zero
     assert jnp.allclose(x1.agent_state.RPE, jnp.array([0.0]))
+
+
+def _minimal_sim_config():
+    """Config used for testing that just runs 10 steps of a small network."""
+    from adaptive_snn.models.environments import SpikeRateEnvironment
+    from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
+    from adaptive_snn.utils.config import SimulationConfig
+
+    N_neurons, N_inputs = 2, 1
+    return SimulationConfig(
+        N_neurons=N_neurons,
+        N_inputs=N_inputs,
+        t0=0.0,
+        t1=1e-3,
+        dt=1e-4,
+        actor_warmup_time=0.0,
+        min_noise_std=1e-9,
+        network_output_fn=(
+            lambda t, agent_state, args, env_state: agent_state.network_state.S
+        ),
+        network_output_shape=(N_neurons,),
+        input_spike_fn=lambda t, x, args: jnp.zeros((N_neurons, N_inputs)),
+        reward_fn=lambda t, x, args: jnp.array([0.0]),
+        RPE_fn=lambda t, x, args, reward: reward,
+        environment_model=SpikeRateEnvironment,
+        environment_kwargs={"rate": 1, "dim": N_neurons},
+        reward_prediction_model=MovingAverageRewardPredictor,
+        reward_predictor_kwargs={"rate": 0.0, "dim": 1},
+        use_noise=jnp.array([True] * N_neurons),
+    )
+
+
+def test_named_result_save(tmp_path):
+    import numpy as np
+    from diffrax import SaveAt
+
+    from adaptive_snn.utils.runner import run_simulation
+    from adaptive_snn.utils.save_helper import load_named_result
+
+    class _Summary(eqx.Module):
+        mean_V: jnp.ndarray
+
+    def save_fn(t, x, args):
+        return _Summary(mean_V=jnp.mean(x.agent_state.network_state.V))
+
+    cfg = _minimal_sim_config()
+    cfg.t1 = cfg.t0 + 5 * cfg.dt
+    cfg.save_at = SaveAt(ts=jnp.linspace(cfg.t0, cfg.t1, 3), fn=save_fn)
+    cfg.save_file = str(tmp_path / "out")
+
+    run_simulation(cfg, save_results=True, overwrite=True, named_result=True)
+
+    out = load_named_result(str(tmp_path / "out.npz"))
+    assert set(out) == {"mean_V", "ts"}
+    assert out["mean_V"].shape == (3,)
+    assert np.asarray(out["ts"]).shape == (3,)
+
+
+def test_named_result_save_with_final_state(tmp_path):
+    import jax
+    from diffrax import SaveAt
+
+    from adaptive_snn.utils.runner import load_final_state, run_simulation
+    from adaptive_snn.utils.save_helper import load_named_result
+
+    class _Summary(eqx.Module):
+        mean_V: jnp.ndarray
+
+    def save_fn(t, x, args):
+        return _Summary(mean_V=jnp.mean(x.agent_state.network_state.V))
+
+    def make_cfg(name):
+        cfg = _minimal_sim_config()
+        cfg.t1 = cfg.t0 + 5 * cfg.dt
+        cfg.save_at = SaveAt(ts=jnp.linspace(cfg.t0, cfg.t1, 3), fn=save_fn)
+        cfg.save_file = str(tmp_path / name)
+        return cfg
+
+    # named_result + return_final_state: summary and final state share one file.
+    run_simulation(
+        make_cfg("with_fs"),
+        save_results=True,
+        overwrite=True,
+        named_result=True,
+        return_final_state=True,
+    )
+    fs_path = str(tmp_path / "with_fs.npz")
+    out = load_named_result(fs_path)
+    # Only the summary half is surfaced; final_state* stay out of load_named_result.
+    assert set(out) == {"mean_V", "ts"}
+    assert out["mean_V"].shape == (3,)
+    assert out["ts"].shape == (3,)
+    # The final-state pytree is reachable only via load_final_state.
+    final_state = load_final_state(fs_path)
+    assert final_state is not None
+    assert jax.tree_util.tree_leaves(final_state)
+
+    # Plain named_result file (no return_final_state) -> load_final_state is None.
+    run_simulation(
+        make_cfg("plain"),
+        save_results=True,
+        overwrite=True,
+        named_result=True,
+    )
+    assert load_final_state(str(tmp_path / "plain.npz")) is None
+
+
+def test_named_result_save_batched(tmp_path):
+    from diffrax import SaveAt
+
+    from adaptive_snn.utils.runner import load_final_state, run_batched_simulation
+    from adaptive_snn.utils.save_helper import load_named_result
+
+    class _Summary(eqx.Module):
+        mean_V: jnp.ndarray
+
+    def save_fn(t, x, args):
+        return _Summary(mean_V=jnp.mean(x.agent_state.network_state.V))
+
+    def make_cfg(name):
+        cfg = _minimal_sim_config()
+        cfg.t1 = cfg.t0 + 5 * cfg.dt
+        cfg.save_at = SaveAt(ts=jnp.linspace(cfg.t0, cfg.t1, 3), fn=save_fn)
+        cfg.save_file = str(tmp_path / name)
+        return cfg
+
+    cfg0 = make_cfg("batched0")
+    cfg1 = make_cfg("batched1")
+
+    run_batched_simulation(
+        [cfg0, cfg1],
+        save_results=True,
+        overwrite=True,
+        named_result=True,
+        return_final_state=True,
+    )
+
+    for name in ("batched0", "batched1"):
+        path = str(tmp_path / f"{name}.npz")
+        out = load_named_result(path)
+        assert set(out) == {"mean_V", "ts"}
+        assert out["mean_V"].shape == (3,)
+        assert load_final_state(path) is not None
