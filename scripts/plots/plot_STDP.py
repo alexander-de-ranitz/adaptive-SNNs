@@ -10,9 +10,9 @@ from diffrax import SaveAt
 
 from adaptive_snn.models.agent_env_system import SystemState
 from adaptive_snn.models.networks import (
-    ElibilityState,
     Eligibility,
     EligibilityLIFNetwork,
+    EligibilityState,
     GatedLIFNetwork,
 )
 from adaptive_snn.simulation_configs.single_synapse_config import (
@@ -25,7 +25,7 @@ WINDOW_BUFFER = 10e-3
 
 
 class NoDecayGatedLIFNetwork(GatedLIFNetwork):
-    def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
+    def compute_feature_drift(self, t, state: EligibilityState, args) -> Eligibility:
         noise_std = self.compute_desired_noise_std(t, state, args)
         perturbations = state.perturbations
 

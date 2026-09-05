@@ -11,7 +11,7 @@ class Eligibility(eqx.Module):
     eligibility: Array
 
 
-class ElibilityState(LIFState):
+class EligibilityState(LIFState):
     features: Eligibility
 
 
@@ -23,7 +23,7 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
             eligibility=jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs))
         )
 
-    def compute_feature_diffusion(self, t, state: ElibilityState, args):
+    def compute_feature_diffusion(self, t, state: EligibilityState, args):
         tree = jax.tree.map(
             lambda arr: DefaultIfNone(
                 default=jnp.zeros_like(arr),
@@ -33,7 +33,7 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
         )
         return tree
 
-    def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
+    def compute_feature_drift(self, t, state: EligibilityState, args) -> Eligibility:
         noise_std = self.compute_desired_noise_std(t, state, args)
         # When learning I weights, perturbations and noise_std both cover E weights
         # (first N) and I weights (second N); otherwise only the E weights.
@@ -73,14 +73,14 @@ class EligibilityLIFNetwork(AbstractLIFNetwork):
         d_eligibility = d_eligibility_E + d_eligibility_I + d_eligibility_decay
         return Eligibility(eligibility=d_eligibility)
 
-    def compute_feature_update(self, t, state: ElibilityState, args) -> Eligibility:
+    def compute_feature_update(self, t, state: EligibilityState, args) -> Eligibility:
         return state.features
 
     def noise_shape_features(self) -> Eligibility:
         return Eligibility(eligibility=None)
 
     def compute_weight_updates(
-        self, t, state: ElibilityState, args, RPE: Array
+        self, t, state: EligibilityState, args, RPE: Array
     ) -> Array:
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
