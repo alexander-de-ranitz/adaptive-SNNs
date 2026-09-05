@@ -7,39 +7,15 @@ jax.config.update("jax_enable_x64", True)
 import argparse
 import time
 
-import equinox as eqx
 from diffrax import SaveAt
 from jax import numpy as jnp
 from jax import random as jr
-from jaxtyping import Array
 
 from adaptive_snn.models.agent_env_system import SystemState
 from adaptive_snn.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
 from adaptive_snn.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
 from adaptive_snn.utils.runner import run_batched_simulation
-
-
-class SavedState(eqx.Module):
-    mean_V: Array
-    mean_RPE: Array
-    var_RPE: Array
-    mean_reward: Array
-    mean_balance: Array
-    var_balance: Array
-    agent_output: Array
-    mean_filtered_spikes_L: Array
-    mean_filtered_spikes_R: Array
-    mean_filtered_spikes_H: Array
-    var_filtered_spikes_L: Array
-    var_filtered_spikes_R: Array
-    var_filtered_spikes_H: Array
-    mean_W_actor_input: Array
-    mean_W_actor_recurrent: Array
-    var_W_actor_input: Array
-    var_W_actor_recurrent: Array
-    mean_W_critic: Array
-    var_W_critic: Array
-    fraction_clipped_dW: Array
+from scripts.snellius.pendulum_AC.results import SavedState
 
 
 def main():
