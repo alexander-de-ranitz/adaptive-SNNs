@@ -9,8 +9,81 @@ from adaptive_snn.models import SystemState
 from adaptive_snn.models.environments import PendulumEnvironment
 from adaptive_snn.models.networks import GatedLIFNetwork
 from adaptive_snn.models.reward_prediction import LinearReadoutCritic
-from adaptive_snn.simulation_configs.pendulum_config import compute_rates
 from adaptive_snn.utils.config import SimulationConfig
+
+
+def compute_rates(
+    env_state,
+    grid_shape=(16, 16),
+    copies_per_feature=1,
+    width_factor=0.2,
+    pad_factor=0.2,
+    target_in_rate=1500,
+    downstream_connectivity=0.1,
+    normalize=True,
+    max_state_values=jnp.array(
+        [
+            PendulumEnvironment.max_allowed_angle,
+            PendulumEnvironment.max_allowed_angular_velocity,
+        ]
+    ),
+):
+    """Compute the firing rates for the encoding population.
+
+    The angle and angular velocity are jointly encoded by a population of 2D Gaussian tuning
+    curves on a grid_shape grid, so each neuron is tuned to an (angle, velocity) pair and a
+    linear critic can represent their interaction. Each tuning curve is replicated into
+    copies_per_feature independent Poisson units, and the rates are normalized so the total
+    drive stays constant across states. The amplitude is scaled such that a neuron connected to
+    a fraction downstream_connectivity of the population receives target_in_rate spikes per second.
+
+    Args:
+        env_state: The state of the pendulum environment.
+        grid_shape: The (angle, velocity) grid of tuning curves.
+        copies_per_feature: Independent Poisson replicas per tuning curve.
+        width_factor: The Gaussian width as a fraction of the padded encoding span.
+        pad_factor: How far to extend the tuning-curve centers beyond the visited region.
+        target_in_rate: The target input rate for a downstream neuron.
+        downstream_connectivity: The connection probability assumed for the rate calibration.
+        normalize: Whether to keep the total drive constant across states.
+        max_state_values: The maximum (visited) state values, i.e. the reset threshold.
+    Returns:
+        rates: A vector of firing rates of length grid_shape[0] * grid_shape[1] * copies_per_feature.
+    """
+    env_state = env_state[
+        :2
+    ]  # Only encode the angle and angular velocity, not the time
+    center_range = max_state_values * (1 + pad_factor)
+    tuning_curve_widths = width_factor * (2 * center_range)
+
+    # Grid of preferred (angle, velocity) pairs
+    axes = [
+        jnp.linspace(-center_range[i], center_range[i], grid_shape[i]) for i in range(2)
+    ]
+    preferred_inputs = jnp.stack(jnp.meshgrid(*axes, indexing="ij"), axis=-1).reshape(
+        -1, 2
+    )
+    # 2D Gaussian tuning curves, normalized to a constant total drive
+    env_state = jnp.clip(env_state, -center_range, center_range)
+    rates = jnp.exp(
+        -jnp.sum(
+            (env_state - preferred_inputs) ** 2 / (2 * tuning_curve_widths**2), axis=-1
+        )
+    )
+    if normalize:
+        rates = rates / jnp.sum(rates)
+
+    # Scale so a downstream neuron sampling downstream_connectivity of the population gets target_in_rate
+    expected_total = (
+        1.0
+        if normalize
+        else grid_shape[0] * grid_shape[1] * (jnp.sqrt(2 * jnp.pi) * width_factor) ** 2
+    )
+    max_encoding_rate = target_in_rate / (
+        downstream_connectivity * copies_per_feature * expected_total
+    )
+
+    return jnp.tile(max_encoding_rate * rates, copies_per_feature)
 
 
 def create_pendulum_AC_config(
