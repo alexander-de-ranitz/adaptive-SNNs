@@ -54,6 +54,7 @@ class SimulationConfig:
     args: dict[str, Any] = eqx.field(default_factory=lambda: {})
     network_output_fn: Callable[..., Any] | None = None
     network_output_shape: tuple[int, ...] = (1,)
+    learn_I_weights: bool = False
 
     # Reward model
     reward_prediction_model: type[AbstractRewardPredictor] = (

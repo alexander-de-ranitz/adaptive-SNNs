@@ -144,6 +144,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
     buffer_size: int  = 1 # Size of spike history buffer
     noise_model: AbstractNoiseModel | None = None # Noise model to add noise to the network
     min_noise_std: float = 0.0 # Minimum std of noise to prevent it from going to zero when synaptic variance is low
+    learn_I_weights: bool = False # If True, inhibitory weights are learned, otherwise they are fixed
 
     # fmt: on
 
@@ -152,7 +153,8 @@ class AbstractLIFNetwork(AbstractNeuronModel):
 
         # Initialize noise model
         if self.noise_model is None:
-            self.noise_model = OUP(dim=self.N_neurons, tau=self.tau_E)
+            noise_dim = self.N_neurons * 2 if self.learn_I_weights else self.N_neurons
+            self.noise_model = OUP(dim=noise_dim, tau=self.tau_E)
 
         # Set up neuron types for recurrent connections
         key, subkey = jr.split(self.key)
@@ -589,13 +591,25 @@ class AbstractLIFNetwork(AbstractNeuronModel):
             synaptic_E_conductances = weighted_conductances @ self.excitatory_mask
             synaptic_I_conductances = weighted_conductances @ self.inhibitory_mask
 
+        # Perturbations are of shape (N,) if not learning I weights, else they are of shape (2*N,)
+        #  with the first half being the perturbations for E weights and the second half for I weights.
+        if self.learn_I_weights:
+            E_conductance_perturbations = state.perturbations[: self.N_neurons]
+            I_conductance_perturbations = state.perturbations[self.N_neurons :]
+        else:
+            E_conductance_perturbations = state.perturbations
+            I_conductance_perturbations = jnp.zeros((self.N_neurons,))
+
         total_E_conductances = (
-            synaptic_E_conductances + state.perturbations
+            synaptic_E_conductances + E_conductance_perturbations
         )  # Add perturbations to total excitatory conductance
+        total_I_conductances = (
+            synaptic_I_conductances + I_conductance_perturbations
+        )  # Add perturbations to total inhibitory conductance
 
         # Ensure non-negative conductances
         total_E_conductances = jnp.clip(total_E_conductances, min=0.0)
-        total_I_conductances = jnp.clip(synaptic_I_conductances, min=0.0)
+        total_I_conductances = jnp.clip(total_I_conductances, min=0.0)
 
         syn_I_current = (
             total_I_conductances
@@ -865,15 +879,21 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         Returns:
             Array: Noise scale for each neuron.
         """
-        synaptic_variance = state.var_E_conductance
 
         use_noise = args.get("use_noise", jnp.array([True] * self.N_neurons))
+        synaptic_variance = state.var_E_conductance
 
         # Compute desired noise std using the computed variance and a hyperparameter, then clip to min value
         noise_scale_hyperparam = args.get("noise_scale_hyperparam", 0.0)
         desired_noise_std = jnp.sqrt(synaptic_variance) * noise_scale_hyperparam
         desired_noise_std = self.min_noise_std + desired_noise_std
         desired_noise_std = jnp.where(use_noise, desired_noise_std, 0.0)
+
+        if self.learn_I_weights:
+            # Perturbations cover E weights (first N) and I weights (second N), so
+            # the per-neuron noise std is duplicated to match that layout.
+            # TODO: use var_I_conductance for the I half if needed
+            desired_noise_std = jnp.concatenate([desired_noise_std, desired_noise_std])
         return desired_noise_std
 
     def reset(self, t, state: LIFState, args):

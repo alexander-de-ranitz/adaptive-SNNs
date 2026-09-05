@@ -113,6 +113,7 @@ def setup_simulation(
         min_noise_std=config.min_noise_std,
         input_weight_std=config.input_weight_std,
         key=network_key,
+        learn_I_weights=config.learn_I_weights,
         **config.base_network_kwargs,
     )
 
@@ -253,7 +254,10 @@ def run_batched_simulation(
 ):
     """Run multiple simulations in parallel based on a list of configs.
 
-    All configs use the same args, taken from the first config. #TODO: Can we relax this?
+    Only array values in the simulations' 'args' dict are correctly batched over all simulations.
+    For non-array values (e.g. lambdas), the same value is used for all simulations, taken from the first config.
+    For floating point values that differ per simulation (e.g. most hyperparameters), be sure to wrap them in jnp.asarray() to ensure they are treated as arrays and batched correctly.
+    All configs must result in identically shaped states and time arrays for the batched simulation to work.
     """
     assert all(
         config.t0 == configs[0].t0

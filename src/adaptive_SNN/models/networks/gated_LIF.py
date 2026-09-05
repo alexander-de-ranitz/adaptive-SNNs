@@ -27,25 +27,46 @@ class GatedLIFNetwork(AbstractLIFNetwork):
 
     def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
         noise_std = self.compute_desired_noise_std(t, state, args)
-        perturbations = state.perturbations
+        # When learning I weights, perturbations and noise_std both cover E weights
+        # (first N) and I weights (second N); otherwise only the E weights.
+        if self.learn_I_weights:
+            E_perturbations = state.perturbations[: self.N_neurons]
+            I_perturbations = state.perturbations[self.N_neurons :]
+            E_noise_std = noise_std[: self.N_neurons]
+            I_noise_std = noise_std[self.N_neurons :]
+        else:
+            E_perturbations = state.perturbations
+            I_perturbations = jnp.zeros((self.N_neurons,))
+            E_noise_std = noise_std
+            I_noise_std = noise_std
 
         # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
-        # In case the noise std is zero (no noise), avoid division by zero and set relative noise strength to zero
-        relative_noise_strength = jnp.where(
-            noise_std != 0.0, perturbations / noise_std, 0.0
+        # In case the noise std is zero (no noise), avoid division by zero and set the perturbations to zero
+        E_perturbations = jnp.where(
+            E_noise_std != 0.0, E_perturbations / E_noise_std, 0.0
+        )
+        I_perturbations = jnp.where(
+            I_noise_std != 0.0, I_perturbations / I_noise_std, 0.0
         )
 
         delta_V = args.get("delta_V", self.delta_V)
 
-        coeff = (
-            relative_noise_strength
+        d_eligibility_E = (
+            E_perturbations[:, None]
+            * self.gating_function(state.V, delta_V)[:, None]
             / self.synaptic_increment
-            * self.gating_function(state.V, delta_V)
-        )  # (N_neurons,)
-        d_eligibility = (
-            -state.features.eligibility / self.tau_eligibility
-            + coeff[:, None] * self.excitatory_mask[None, :] * state.G
+            * self.excitatory_mask[None, :]
+            * state.G
         )
+        d_eligibility_I = (
+            I_perturbations[:, None]
+            * self.gating_function(state.V, delta_V)[:, None]
+            / self.synaptic_increment
+            * self.inhibitory_mask[None, :]
+            * state.G
+        )
+        d_eligibility_decay = -state.features.eligibility / self.tau_eligibility
+        d_eligibility = d_eligibility_E + d_eligibility_I + d_eligibility_decay
         return Eligibility(eligibility=d_eligibility)
 
     def compute_feature_update(self, t, state: ElibilityState, args) -> Eligibility:
