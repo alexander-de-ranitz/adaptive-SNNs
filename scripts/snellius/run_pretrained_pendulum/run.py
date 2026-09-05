@@ -27,7 +27,10 @@ from adaptive_SNN.utils.runner import (
     run_batched_simulation,
 )
 
-RESULTS_DIR = "results/pendulum_AC_noiseless_input_20260812_203939/results/"
+# Imported so that unpickling the saved treedef can resolve `__main__.SavedState`.
+from scripts.snellius.pendulum_AC.run import SavedState  # noqa: F401
+
+RESULTS_DIR = "results/pendulum_pretrained_20260903_202317/results/"
 
 
 def load_pendulum_results(file_path):
@@ -35,9 +38,24 @@ def load_pendulum_results(file_path):
     sol, _ = _load_existing_solution(file_path)
     ts = sol.ts
     saved_state = sol.ys[0]
-    iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
-    chunk = int(re.search(r"_chunk_(\d+)", file_path).group(1))
-    seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
+    try:
+        iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
+    except:
+        try:
+            iter = int(re.search(r"_(\d+)_lr_", file_path).group(1))
+        except:
+            try:
+                iter = int(re.search(r"_iter_(\d+)", file_path).group(1))
+            except:
+                iter = None
+    try:
+        chunk = int(re.search(r"_chunk_(\d+)", file_path).group(1))
+    except:
+        chunk = None
+    try:
+        seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
+    except:
+        seed = None
     lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
     final_state = sol.ys[1]
     return {
@@ -92,7 +110,10 @@ def main():
     t0 = ts[-1]
     delta_t = 250.0
     t1 = t0 + delta_t
+    # t1 = 974
+    # delta_t = t1 - t0
     key = jr.fold_in(jr.PRNGKey(int(selected_run["seed"])), int(selected_run["iter"]))
+    print("Using key: ", key)
     configs = [
         create_pendulum_AC_config(
             N_neurons=1000,
@@ -104,10 +125,19 @@ def main():
     N_neurons = 1000
 
     params = [
-        {"lr": 0.0, "balance_rate": 0.0},
-        {"lr": 0.0, "balance_rate": 0.1},
-        {"lr": 1e3, "balance_rate": 0.0},
-        {"lr": 1e3, "balance_rate": 0.1},
+        {"lr": 0.0, "balance_rate": 0.0, "tau_charge": 10.0},
+        {"lr": 1e3, "balance_rate": 1.0, "tau_charge": 1.0},
+        {"lr": 1e3, "balance_rate": 0.1, "tau_charge": 1.0},
+        {"lr": 1e3, "balance_rate": 0.01, "tau_charge": 1.0},
+        {"lr": 1e3, "balance_rate": 1.0, "tau_charge": 10.0},
+        {"lr": 1e3, "balance_rate": 0.1, "tau_charge": 10.0},
+        {"lr": 1e3, "balance_rate": 0.01, "tau_charge": 10.0},
+        {"lr": 0.0, "balance_rate": 1.0, "tau_charge": 1.0},
+        {"lr": 0.0, "balance_rate": 0.1, "tau_charge": 1.0},
+        {"lr": 0.0, "balance_rate": 0.01, "tau_charge": 1.0},
+        {"lr": 0.0, "balance_rate": 1.0, "tau_charge": 10.0},
+        {"lr": 0.0, "balance_rate": 0.1, "tau_charge": 10.0},
+        {"lr": 0.0, "balance_rate": 0.01, "tau_charge": 10.0},
     ]
 
     def save_fn(t, state: SystemState, args):
@@ -115,14 +145,32 @@ def main():
         charge_out = state.agent_state.network_state.charge_out
         balance = (charge_in + charge_out) / (jnp.abs(charge_in) + jnp.abs(charge_out))
         return (
-            state.environment_state.astype(jnp.float32),
-            state.agent_output.astype(jnp.float32),
-            state.agent_state.reward_predictor_state.value.astype(jnp.float32),
-            state.agent_state.RPE.astype(jnp.float32),
-            state.reward_signal.astype(jnp.float32),
-            jnp.histogram(balance, bins=jnp.linspace(0.0, 0.05, 15))[0].astype(
-                jnp.float32
+            state.environment_state,
+            state.agent_output,
+            state.agent_state.reward_predictor_state.value,
+            state.agent_state.RPE,
+            state.reward_signal,
+            jnp.histogram(balance, bins=jnp.linspace(0.0, 0.05, 15))[0],
+            jnp.mean(
+                state.agent_state.network_state.filtered_spike_trains[
+                    : N_neurons // 10
+                ],
+                axis=0,
             ),
+            jnp.mean(
+                state.agent_state.network_state.filtered_spike_trains[
+                    N_neurons // 10 : N_neurons // 5
+                ],
+                axis=0,
+            ),
+            jnp.mean(
+                state.agent_state.network_state.filtered_spike_trains[N_neurons // 5 :],
+                axis=0,
+            ),
+            jnp.min(balance),
+            jnp.max(balance),
+            jnp.nanmean(balance),
+            jnp.nanvar(balance),
             jnp.nanmean(state.agent_state.network_state.W[:, N_neurons:]),
             jnp.nanmean(state.agent_state.network_state.W[:, :N_neurons]),
             jnp.nanvar(state.agent_state.network_state.W[:, N_neurons:]),
@@ -134,6 +182,7 @@ def main():
         config.t0 = t0
         config.t1 = t1
         config.args["final_balance_rate"] = jnp.asarray(p["balance_rate"])
+        config.args["tau_charge"] = jnp.asarray(p["tau_charge"])
         config.args["get_balance_rate"] = lambda t, state, args: args[
             "final_balance_rate"
         ]
@@ -143,9 +192,7 @@ def main():
         config.save_file = os.path.join(
             args.output_dir,
             "results",
-            "pendulum_AC_continued_{}_lr_{}_balance_{}_{}.npz".format(
-                model, p["lr"], p["balance_rate"], int(selected_run["seed"])
-            ),
+            f"pendulum_AC_continued_{model}_lr_{p['lr']}_balance_{p['balance_rate']}_tau_charge_{p['tau_charge']}_seed_{int(selected_run['seed'])}.npz",
         )
 
     print(

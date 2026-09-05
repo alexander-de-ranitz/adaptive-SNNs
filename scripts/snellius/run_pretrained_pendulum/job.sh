@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J run_pretrained_pendulum
-#SBATCH -t 40
+#SBATCH -t 100
 #SBATCH -p gpu_a100
 #SBATCH -N 1
 #SBATCH --ntasks=18

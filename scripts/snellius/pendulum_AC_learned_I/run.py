@@ -100,12 +100,12 @@ def main():
         )
         mean_balance = jnp.nanmean(balance)
         var_balance = jnp.nanvar(balance)
-        fraction_clipped_dW = jnp.sum(
+        fraction_clipped_dW = jnp.mean(
             jnp.abs(
                 x.agent_state.network_state.features.eligibility * x.agent_state.RPE
             )
             > args["gradient_clip"]
-        ) / jnp.sum(~jnp.isnan(x.agent_state.network_state.W))
+        )
 
         return SavedState(
             mean_RPE=x.agent_state.mean_RPE,
@@ -159,45 +159,31 @@ def main():
     params = [
         {
             "lr": 1e3,
+            "balance_rate": 0.0,
+            "gradient_clip": jnp.inf,
+            "tau_charge": 1.0,
+            "learn_I_weights": True,
+        },
+        {
+            "lr": 250,
+            "balance_rate": 0.0,
+            "gradient_clip": jnp.inf,
+            "tau_charge": 1.0,
+            "learn_I_weights": True,
+        },
+        {
+            "lr": 500,
             "balance_rate": 0.1,
             "gradient_clip": jnp.inf,
             "tau_charge": 1.0,
-            "learn_I_weights": False,
+            "learn_I_weights": True,
         },
         {
             "lr": 1e3,
-            "balance_rate": 0.033,
+            "balance_rate": 1.0,
             "gradient_clip": jnp.inf,
             "tau_charge": 1.0,
-            "learn_I_weights": False,
-        },
-        {
-            "lr": 1e3,
-            "balance_rate": 0.01,
-            "gradient_clip": jnp.inf,
-            "tau_charge": 1.0,
-            "learn_I_weights": False,
-        },
-        {
-            "lr": 1e3,
-            "balance_rate": 0.1,
-            "gradient_clip": jnp.inf,
-            "tau_charge": 10.0,
-            "learn_I_weights": False,
-        },
-        {
-            "lr": 1e3,
-            "balance_rate": 0.033,
-            "gradient_clip": jnp.inf,
-            "tau_charge": 10.0,
-            "learn_I_weights": False,
-        },
-        {
-            "lr": 1e3,
-            "balance_rate": 0.01,
-            "gradient_clip": jnp.inf,
-            "tau_charge": 10.0,
-            "learn_I_weights": False,
+            "learn_I_weights": True,
         },
     ]
     for i, cfg in enumerate(configs):
@@ -219,21 +205,19 @@ def main():
         cfg.learn_I_weights = p["learn_I_weights"]
         cfg.save_file = (
             args.output_file
-            + f"_iter_{i}_lr_{p['lr']}_clip_{p['gradient_clip']}_tau_charge_{p['tau_charge']}_balance_rate_{p['balance_rate']}_learn_I_{p['learn_I_weights']}"
+            + f"_lr_{p['lr']}_{i}_clip_{p['gradient_clip']}_tau_charge_{p['tau_charge']}_balance_rate_{p['balance_rate']}_learn_I_{p['learn_I_weights']}"
         )
         cfg.t1 = 2000
 
     start_time = time.time()
-    chunk_times = [0.0, 2000]
-    N_chunks = len(chunk_times) - 1
-    t_prev = chunk_times[0]
-    # full_t1 = configs[0].t1
+    N_chunks = 1
+    t_prev = configs[0].t0
+    full_t1 = configs[0].t1
     y0s = None
-
     print(f"Starting simulation with {N_parallel} parallel runs in {N_chunks} chunks.")
     for chunk in range(N_chunks):
         chunk_t0 = t_prev
-        chunk_t1 = chunk_times[chunk + 1]  # (chunk + 1) * (full_t1) / N_chunks
+        chunk_t1 = (chunk + 1) * (full_t1) / N_chunks
         for cfg in configs:
             cfg.t0 = chunk_t0
             cfg.t1 = chunk_t1
@@ -255,9 +239,7 @@ def main():
         )
 
         final_states = sol.ys[1]
-        y0s = [
-            jax.tree.map(lambda arr: arr[i], final_states) for i in range(N_parallel)
-        ]
+        y0s = final_states
 
     end_time = time.time()
     print(f"Total simulation time: {end_time - start_time:.2f} seconds.")

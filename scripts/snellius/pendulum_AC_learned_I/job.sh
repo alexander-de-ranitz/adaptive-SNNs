@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J pendulum_sim
-#SBATCH -t 360
+#SBATCH -t 440
 #SBATCH -p gpu_a100
 #SBATCH -N 1
 #SBATCH --ntasks=18
@@ -38,7 +38,7 @@ cleanup() {
     echo "Contents of $TMPDIR/output_dir:"
     find "$TMPDIR/output_dir" -type f 2>/dev/null | head -20
 
-    DEST_DIR="$REPO_DIR/results/pendulum_AC_spiking_input_$(date +%Y%m%d_%H%M%S)"
+    DEST_DIR="$REPO_DIR/results/pendulum_AC_learned_I_$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$DEST_DIR"
     cp -rv "$TMPDIR/output_dir/." "$DEST_DIR/" || echo "Copy failed with exit code $?"
     exit "$exit_code"
@@ -57,7 +57,7 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 
 echo "Running simulations at $(date)..."
 set -x
-python "$REPO_DIR/scripts/snellius/pendulum_AC/launch.py" \
+python "$REPO_DIR/scripts/snellius/pendulum_AC_learned_I/launch.py" \
     --output_dir "$TMPDIR/output_dir"
 
 echo "Simulations completed, copying results back to home directory..."

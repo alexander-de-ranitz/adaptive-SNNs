@@ -2,7 +2,8 @@
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(REPO_ROOT))
 
 import os
 import re
@@ -14,7 +15,7 @@ from jax import numpy as jnp
 from adaptive_SNN.utils.runner import _load_existing_solution
 from scripts.snellius.pendulum_AC.run import SavedState
 
-RESULTS_DIR = "results/pendulum_AC_spiking_input_20260831_191314/results/"
+RESULTS_DIR = "results/pendulum_AC_spiking_input_20260903_145905/results/"
 
 
 def load_pendulum_results(file_path):
@@ -22,7 +23,13 @@ def load_pendulum_results(file_path):
     sol, _ = _load_existing_solution(file_path)
     ts = sol.ts
     saved_state: SavedState = sol.ys[0]
-    iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
+    try:
+        iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
+    except:
+        try:
+            iter = int(re.search(r"_(\d+)_lr_", file_path).group(1))
+        except:
+            iter = None
     chunk = int(re.search(r"_chunk_(\d+)", file_path).group(1))
     seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
     lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
@@ -62,7 +69,7 @@ def plot_full_dynamics():
         print(f"Plotting dynamics for model: {m}, lr: {lr}, iteration: {i}, seed: {s}")
         print(f"Files: {subset['file_path'].values}")
         subset = subset.sort_values("chunk")
-        fig, axs = plt.subplots(5, 2, sharex=True)
+        fig, axs = plt.subplots(5, 2, sharex=True, figsize=(5, 6))
         all_rewards = []
         all_RPEs = []
         for row in subset.itertuples():
@@ -132,7 +139,26 @@ def plot_full_dynamics():
         )
         axs[1, 0].plot(ts, all_RPEs_trend, color="black", linewidth=2, label="Trend")
         print("Mean RPE after warmup: ", jnp.mean(all_RPEs[int(len(all_RPEs) / 4) :]))
+
         plt.show()
+
+        # try:
+        #     balance_rate = re.search(
+        #         r"balance_rate_(\d+\.\d+)", subset["file_path"].values[0]
+        #     ).group(1)
+        # except AttributeError:
+        #     balance_rate = None
+        # try:
+        #     tau = re.search(
+        #         r"tau_charge_(\d+\.\d+)", subset["file_path"].values[0]
+        #     ).group(1)
+        # except AttributeError:
+        #     tau = None
+        # FIGURES_DIR = REPO_ROOT / "figures" / "pendulum" / "learned_I_weights"
+        # FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+        # plt.savefig(
+        #     FIGURES_DIR / f"{m}_lr_{lr}_balance_rate_{balance_rate}.png"
+        # )
 
 
 if __name__ == "__main__":

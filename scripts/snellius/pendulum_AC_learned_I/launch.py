@@ -8,7 +8,7 @@ from qcg.pilotjob.api.manager import LocalManager
 
 def create_jobs():
     base_dir = Path(__file__).resolve().parent.parent.parent.parent
-    module_path = "scripts.snellius.pendulum_AC.run"
+    module_path = "scripts.snellius.pendulum_AC_learned_I.run"
 
     parser = argparse.ArgumentParser(description="Launch jobs on Snellius")
     parser.add_argument(
@@ -38,7 +38,7 @@ def create_jobs():
     seed = 0
 
     for model in ["gated"]:
-        for N_parallel in [6]:
+        for N_parallel in [4]:
             name = f"{model}_pendulum_AC_seed_{seed}_Nparallel_{N_parallel}"
             cmd_args = [
                 "--model",

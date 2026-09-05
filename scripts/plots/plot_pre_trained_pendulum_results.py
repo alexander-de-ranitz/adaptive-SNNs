@@ -13,7 +13,7 @@ from jax import numpy as jnp
 
 from adaptive_SNN.utils.runner import _load_existing_solution
 
-RESULTS_DIR = "results/pendulum_pretrained_20260813_171520/results/"
+RESULTS_DIR = "results/pendulum_pretrained_20260904_140811/results/"
 
 
 def load_pendulum_results(file_path):
@@ -21,8 +21,14 @@ def load_pendulum_results(file_path):
     sol, _ = _load_existing_solution(file_path)
     ts = sol.ts
     saved_state = sol.ys[0]
-    lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
-    balance_rate = float(re.search(r"_balance_(\d+\.?\d*)_", file_path).group(1))
+    try:
+        lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
+    except:
+        lr = None
+    try:
+        balance_rate = float(re.search(r"_balance_(\d+\.?\d*)_", file_path).group(1))
+    except:
+        balance_rate = None
     final_state = sol.ys[1]
     return {
         "file_path": file_path,
@@ -63,6 +69,13 @@ def plot_pretrained_run():
             RPE,
             reward,
             hist,
+            L_rate,
+            R_rate,
+            H_rate,
+            min_bal,
+            max_bal,
+            mean_bal,
+            var_bal,
             mean_w_in,
             mean_w_rec,
             var_w_in,
@@ -70,7 +83,7 @@ def plot_pretrained_run():
         ) = saved_state
 
         # Plotting the results
-        fig, axs = plt.subplots(4, 2, figsize=(12, 8), sharex=False)
+        fig, axs = plt.subplots(4, 2, figsize=(12, 8), sharex=True)
         axs[0, 0].plot(group["ts"].iloc[0], env_state[:, 0], label="Pendulum Angle")
         axs[0, 0].plot(group["ts"].iloc[0], env_state[:, 1], label="Pendulum Velocity")
         axs[0, 0].set_title("Pendulum State")
@@ -80,64 +93,60 @@ def plot_pretrained_run():
         axs[0, 1].set_title("Agent Output")
         axs[0, 1].legend()
 
-        axs[1, 0].plot(group["ts"].iloc[0], value, label="Value")
-        axs[1, 0].set_title("Value Function")
+        # axs[1, 0].plot(group["ts"].iloc[0], value, label="Value")
+        # axs[1, 0].set_title("Value Function")
+        # axs[1, 0].legend()
+        axs[1, 0].plot(group["ts"].iloc[0], mean_bal, label="Mean Balance")
+        axs[1, 0].fill_between(
+            group["ts"].iloc[0],
+            mean_bal - jnp.sqrt(var_bal),
+            mean_bal + jnp.sqrt(var_bal),
+            color="gray",
+            alpha=0.3,
+        )
+        axs[1, 0].plot(group["ts"].iloc[0], min_bal, label="Min Balance")
+        axs[1, 0].plot(group["ts"].iloc[0], max_bal, label="Max Balance")
+        axs[1, 0].set_title("Balance Metrics")
         axs[1, 0].legend()
 
         axs[1, 1].plot(group["ts"].iloc[0], RPE, label="RPE")
         axs[1, 1].set_title("Reward Prediction Error")
         axs[1, 1].legend()
 
-        axs[2, 0].plot(group["ts"].iloc[0], reward, label="Reward")
+        filter_size = 1000
+        filtered_reward = jnp.convolve(
+            reward.squeeze(), jnp.ones(filter_size) / filter_size, mode="valid"
+        )
+        axs[2, 0].plot(
+            group["ts"].iloc[0], reward, label="Reward", linewidth=0.5, alpha=0.5
+        )
+        axs[2, 0].plot(
+            group["ts"].iloc[0][filter_size // 2 : -filter_size // 2 + 1],
+            filtered_reward,
+            label="Filtered Reward",
+        )
         axs[2, 0].set_title("Reward")
         axs[2, 0].legend()
 
-        axs[2, 1].plot(group["ts"].iloc[0], mean_w_in, label="Mean Input Weights")
-        axs[2, 1].plot(group["ts"].iloc[0], mean_w_rec, label="Mean Recurrent Weights")
-        axs[2, 1].set_title("Mean Weights")
+        axs[2, 1].plot(group["ts"].iloc[0], L_rate, label="Left Rate", alpha=0.5)
+        axs[2, 1].plot(group["ts"].iloc[0], R_rate, label="Right Rate", alpha=0.5)
+        axs[2, 1].plot(group["ts"].iloc[0], H_rate, label="Hidden Rate", alpha=0.5)
+        axs[2, 1].set_title("Neuron Firing Rates")
         axs[2, 1].legend()
 
-        axs[3, 0].plot(group["ts"].iloc[0], var_w_in, label="Var Input Weights")
-        axs[3, 0].plot(group["ts"].iloc[0], var_w_rec, label="Var Recurrent Weights")
-        axs[3, 0].set_title("Variance Weights")
-        axs[3, 0].legend()
-
         bins = jnp.linspace(0.0, 0.05, 15)
-        aggregate_hist = jnp.sum(hist, axis=0) / jnp.sum(hist)
-        first_hist = hist[0] / jnp.sum(hist[0])
-        last_hist = hist[-1] / jnp.sum(hist[-1])
-        axs[3, 1].bar(
-            bins[:-1],
-            first_hist,
-            width=bins[1] - bins[0],
-            align="edge",
-            alpha=0.5,
-            label="First Time Step",
-            fill=False,
-            edgecolor="blue",
+        axs[3, 1].imshow(
+            hist.T,
+            aspect="auto",
+            extent=[group["ts"].iloc[0][0], group["ts"].iloc[0][-1], 0, hist.shape[1]],
+            origin="lower",
         )
-        axs[3, 1].bar(
-            bins[:-1],
-            last_hist,
-            width=bins[1] - bins[0],
-            align="edge",
-            alpha=0.5,
-            label="Last Time Step",
-            fill=False,
-            edgecolor="red",
-        )
-        axs[3, 1].bar(
-            bins[:-1],
-            aggregate_hist,
-            width=bins[1] - bins[0],
-            align="edge",
-            label="Aggregate",
-            alpha=0.5,
-            fill=False,
-            edgecolor="black",
-        )
-        axs[3, 1].set_title("Balance Distribution")
-        axs[3, 1].legend()
+        axs[3, 1].set_title("Balance Histogram")
+        axs[3, 1].set_xlabel("Time")
+        axs[3, 1].set_ylabel("Balance Bins")
+        axs[3, 1].set_yticks(jnp.arange(len(bins) - 1))
+        axs[3, 1].set_yticklabels([f"{bins[i]:.2f}" for i in range(len(bins) - 1)])
+
         plt.show()
 
 
