@@ -113,6 +113,13 @@ class AgentEnvSystem(eqx.Module):
         Returns:
             (d_agent_state, d_env_state, reward_signal)
         """
+        env_in_warmup = args.get("env_warmup_fn", lambda t, x, args: False)(
+            t, x.environment_state, args
+        )
+        args = {
+            **args,
+            "env_in_warmup": env_in_warmup,
+        }  # Add env_in_warmup to args so that it can be used in the agent's drift function
         env_drift = self.environment.drift(
             t, x.environment_state, args, env_input=x.agent_output
         )

@@ -664,11 +664,13 @@ class AbstractLIFNetwork(AbstractNeuronModel):
 
         # Only update weights if:
         # 1) desired balance is not nan (i.e. we have a target balance to achieve)
-        # 2) current balance is not nan (i.e. we have received some input and can compute a meaningful balance)
-        # 3) there is an existing connection (weight is not NaN)
+        # 2) we are not in the warmup period
+        # 3) current balance is not nan (i.e. we have received some input and can compute a meaningful balance)
+        # 4) there is an existing connection (weight is not NaN)
         balance_rate = args.get(
             "get_balance_rate", lambda t, state, args: self.balance_rate
-        )(t, state, args)
+        )(t, state, args) * jnp.where(args.get("env_in_warmup", False), 0.0, 1.0)
+
         I_weight_drift = jnp.where(
             (~jnp.isnan(desired_balance))
             & (~jnp.isnan(balance))[:, None]

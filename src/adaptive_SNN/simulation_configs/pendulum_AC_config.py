@@ -127,7 +127,7 @@ def create_pendulum_AC_config(
         reward_predictor_kwargs={
             "input_dim": N_inputs,
             "pre_trained_weights": None,
-        },  # "scripts/snellius/pendulum_AC/pendulum_pre_trained_critic_weights.npy"},
+        },
         args={
             "delta_V": jnp.power(jnp.float64(2), jnp.float64(-13)),
             "critic_input_fn": lambda t, x, args, input_spikes, env_state: input_spikes,
