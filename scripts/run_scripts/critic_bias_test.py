@@ -8,9 +8,9 @@ from jax import numpy as jnp
 from jax import random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.reward_prediction import LinearReadoutCritic
-from adaptive_SNN.solver import solve_ODE
-from adaptive_SNN.utils.operators import (
+from adaptive_snn.models.reward_prediction import LinearReadoutCritic
+from adaptive_snn.solver import solve_ODE
+from adaptive_snn.utils.operators import (
     DefaultIfNone,
     ElementWiseMul,
     MixedPyTreeOperator,

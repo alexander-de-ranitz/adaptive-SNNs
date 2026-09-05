@@ -7,10 +7,10 @@ from diffrax import SaveAt
 from jax import numpy as jnp
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.simulation_configs.single_synapse_config import (
+from adaptive_snn.simulation_configs.single_synapse_config import (
     create_single_synapse_learning_config,
 )
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.utils.runner import run_simulation
 
 
 def main():

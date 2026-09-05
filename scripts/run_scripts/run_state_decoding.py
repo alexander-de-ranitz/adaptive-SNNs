@@ -10,9 +10,9 @@ from matplotlib import pyplot as plt
 from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 
-from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.simulation_configs.pendulum_config import create_pendulum_config
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.models.agent_env_system import SystemState
+from adaptive_snn.simulation_configs.pendulum_config import create_pendulum_config
+from adaptive_snn.utils.runner import run_simulation
 
 
 def find_best_decoder(X_train, y_train, X_test, y_test):

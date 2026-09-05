@@ -4,15 +4,15 @@ from helpers import DummyModel, RotatingDummyEnv
 from jax import numpy as jnp
 from jax import random as jr
 
-from adaptive_SNN.models.agent_env_system import AgentEnvSystem, SystemState
-from adaptive_SNN.models.networks.agent import Agent
-from adaptive_SNN.models.reward_prediction.critic import (
+from adaptive_snn.models.agent_env_system import AgentEnvSystem, SystemState
+from adaptive_snn.models.networks.agent import Agent
+from adaptive_snn.models.reward_prediction.critic import (
     CriticPrediction,
     LinearReadoutCritic,
 )
-from adaptive_SNN.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
-from adaptive_SNN.solver import solve_ODE
-from adaptive_SNN.utils.runner import setup_simulation
+from adaptive_snn.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
+from adaptive_snn.solver import solve_ODE
+from adaptive_snn.utils.runner import setup_simulation
 
 
 def test_TD_error():

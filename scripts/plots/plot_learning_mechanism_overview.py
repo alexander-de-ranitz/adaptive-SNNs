@@ -22,15 +22,15 @@ import jax.random as jr
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-from adaptive_SNN.models import (
+from adaptive_snn.models import (
     AgentEnvSystem,
     SystemState,
 )
-from adaptive_SNN.models.environments import SpikeRateEnvironment
-from adaptive_SNN.models.networks import Agent, GatedLIFNetwork
-from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
-from adaptive_SNN.solver import solve_ODE
-from adaptive_SNN.utils.save_helper import save_part_of_state
+from adaptive_snn.models.environments import SpikeRateEnvironment
+from adaptive_snn.models.networks import Agent, GatedLIFNetwork
+from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
+from adaptive_snn.solver import solve_ODE
+from adaptive_snn.utils.save_helper import save_part_of_state
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 

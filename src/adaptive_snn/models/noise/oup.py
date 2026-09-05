@@ -1,0 +1,49 @@
+import diffrax as dfx
+import jax
+import jax.numpy as jnp
+from jaxtyping import Array
+
+from adaptive_snn.models.noise import AbstractNoiseModel
+from adaptive_snn.utils.operators import ElementWiseMul
+
+default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
+
+class OUP(AbstractNoiseModel):
+    tau: float | Array = 1.0
+    noise_std: float | Array = 0.0
+    mean: float | Array = 0.0
+    dim: int = 1
+
+    @property
+    def initial(self):
+        return jnp.ones((self.dim,)) * self.mean
+
+    def drift(self, t, x, args):
+        return -1.0 / self.tau * (x - self.mean)
+
+    def diffusion(self, t, x, args, noise_std: float | Array = None):
+        """Compute the diffusion operator for the OUP noise.
+
+        Uses the noise_std argument if provided, otherwise defaults to self.noise_std"""
+        noise_std = self.noise_std if noise_std is None else noise_std
+        scale = jnp.asarray(noise_std, dtype=default_float) * jnp.sqrt(2.0 / self.tau)
+        return ElementWiseMul(jnp.broadcast_to(scale, (self.dim,)))
+
+    def update(self, t, x, args):
+        return x
+
+    def pre_step_update(self, t, x, args):
+        return x
+
+    @property
+    def noise_shape(self):
+        return jax.ShapeDtypeStruct(shape=(self.dim,), dtype=default_float)
+
+    def terms(self, key):
+        process_noise = dfx.UnsafeBrownianPath(
+            shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
+        )
+        return dfx.MultiTerm(
+            dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
+        )

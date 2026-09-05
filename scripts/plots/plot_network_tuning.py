@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from jax import numpy as jnp
 
-from adaptive_SNN.utils.metrics import (
+from adaptive_snn.utils.metrics import (
     compute_CV_ISI,
     compute_synchrony,
 )

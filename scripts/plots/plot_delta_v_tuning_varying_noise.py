@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.utils.runner import _load_existing_solution
+from adaptive_snn.utils.runner import _load_existing_solution
 
 
 @dataclass

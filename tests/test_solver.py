@@ -12,12 +12,12 @@ from helpers import (
     make_default_args,
 )
 
-from adaptive_SNN.models import AgentEnvSystem, SystemState
-from adaptive_SNN.models.networks import LIFNetwork
-from adaptive_SNN.models.networks.agent import Agent
-from adaptive_SNN.models.noise import OUP
-from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
-from adaptive_SNN.solver import solve_ODE
+from adaptive_snn.models import AgentEnvSystem, SystemState
+from adaptive_snn.models.networks import LIFNetwork
+from adaptive_snn.models.networks.agent import Agent
+from adaptive_snn.models.noise import OUP
+from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
+from adaptive_snn.solver import solve_ODE
 
 
 def test_solver_timesteps():

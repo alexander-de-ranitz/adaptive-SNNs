@@ -8,17 +8,17 @@ import jax.random as jr
 import matplotlib.pyplot as plt
 from diffrax import SaveAt
 
-from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks import (
+from adaptive_snn.models.agent_env_system import SystemState
+from adaptive_snn.models.networks import (
     ElibilityState,
     Eligibility,
     EligibilityLIFNetwork,
     GatedLIFNetwork,
 )
-from adaptive_SNN.simulation_configs.single_synapse_config import (
+from adaptive_snn.simulation_configs.single_synapse_config import (
     create_single_synapse_learning_config,
 )
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.utils.runner import run_simulation
 
 MAX_TIME_DIFF = 0.1
 WINDOW_BUFFER = 10e-3

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from jax import numpy as jnp
 
-from adaptive_SNN.utils.runner import _load_existing_solution
+from adaptive_snn.utils.runner import _load_existing_solution
 
 RESULTS_DIR = "results/pendulum_pretrained_20260904_140811/results/"
 

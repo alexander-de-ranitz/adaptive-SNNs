@@ -2,13 +2,13 @@ import diffrax as dfx
 import jax.numpy as jnp
 from helpers import DummySpikingNetwork
 
-from adaptive_SNN.models import AgentEnvSystem, SystemState
-from adaptive_SNN.models.environments import (
+from adaptive_snn.models import AgentEnvSystem, SystemState
+from adaptive_snn.models.environments import (
     SpikeRateEnvironment,
 )
-from adaptive_SNN.models.networks import Agent
-from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
-from adaptive_SNN.solver import solve_ODE
+from adaptive_snn.models.networks import Agent
+from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
+from adaptive_snn.solver import solve_ODE
 
 
 def test_spike_rate_env():

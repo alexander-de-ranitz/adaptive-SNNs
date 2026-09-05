@@ -9,9 +9,9 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.image import AxesImage
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from adaptive_SNN.utils.metrics import compute_CV_ISI, compute_synchrony
-from adaptive_SNN.utils.runner import _load_existing_solution
-from adaptive_SNN.visualization.api.plotting import plot_spike_raster
+from adaptive_snn.utils.metrics import compute_CV_ISI, compute_synchrony
+from adaptive_snn.utils.runner import _load_existing_solution
+from adaptive_snn.visualization.api.plotting import plot_spike_raster
 
 RESULTS_DIR = "results/pendulum_AC_no_network_reset_20260729_142000/results/"
 

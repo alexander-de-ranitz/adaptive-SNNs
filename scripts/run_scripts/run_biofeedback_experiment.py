@@ -8,11 +8,11 @@ from jax import numpy as jnp
 from jax import random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.networks import GatedLIFNetwork
-from adaptive_SNN.models.RPE import BiphasicRPEModel
-from adaptive_SNN.simulation_configs.biofeedback_config import create_config
-from adaptive_SNN.solver import solve_ODE
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.models.networks import GatedLIFNetwork
+from adaptive_snn.models.RPE import BiphasicRPEModel
+from adaptive_snn.simulation_configs.biofeedback_config import create_config
+from adaptive_snn.solver import solve_ODE
+from adaptive_snn.utils.runner import run_simulation
 
 # TODO: fix this script if needed
 # It relied on the old RPEModel implementation, which has been removed

@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from adaptive_SNN.models.reward_prediction import RLSRewardPredictor
+from adaptive_snn.models.reward_prediction import RLSRewardPredictor
 
 
 def make_predictor(input_dim=1, lambda_=0.9999, P_init=100.0):

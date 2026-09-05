@@ -11,13 +11,13 @@ from diffrax import SaveAt
 from scipy.optimize import curve_fit
 from statsmodels.tsa.ar_model import AutoReg
 
-from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks import LIFNetwork, LIFState
-from adaptive_SNN.simulation_configs.single_synapse_config import (
+from adaptive_snn.models.agent_env_system import SystemState
+from adaptive_snn.models.networks import LIFNetwork, LIFState
+from adaptive_snn.simulation_configs.single_synapse_config import (
     create_single_synapse_learning_config,
 )
-from adaptive_SNN.utils.runner import run_simulation
-from adaptive_SNN.utils.save_helper import save_part_of_state
+from adaptive_snn.utils.runner import run_simulation
+from adaptive_snn.utils.save_helper import save_part_of_state
 
 
 class ExternalNoiseStd(LIFNetwork):

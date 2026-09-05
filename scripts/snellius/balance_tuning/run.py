@@ -12,10 +12,10 @@ import jax.random as jr
 from diffrax import SaveAt
 from jax import numpy as jnp
 
-from adaptive_SNN.models.networks import LIFNetwork
-from adaptive_SNN.models.networks.network_handler import NetworkHandler
-from adaptive_SNN.solver import solve_ODE
-from adaptive_SNN.utils.metrics import compute_CV_ISI
+from adaptive_snn.models.networks import LIFNetwork
+from adaptive_snn.models.networks.network_handler import NetworkHandler
+from adaptive_snn.solver import solve_ODE
+from adaptive_snn.utils.metrics import compute_CV_ISI
 
 
 def main():

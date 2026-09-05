@@ -6,8 +6,8 @@ import jax.numpy as jnp
 from jax import random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.environments.pendulum import PendulumEnvironment
-from adaptive_SNN.simulation_configs.pendulum_config import (
+from adaptive_snn.models.environments.pendulum import PendulumEnvironment
+from adaptive_snn.simulation_configs.pendulum_config import (
     compute_rates,
 )
 

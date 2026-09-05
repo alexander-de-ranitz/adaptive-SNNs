@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from jax import numpy as jnp
 
-from adaptive_SNN.utils.runner import _load_existing_solution
+from adaptive_snn.utils.runner import _load_existing_solution
 from scripts.snellius.pendulum_AC.run import SavedState
 
 RESULTS_DIR = "results/pendulum_AC_spiking_input_20260903_145905/results/"

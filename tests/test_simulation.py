@@ -3,19 +3,19 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from adaptive_SNN.models import AgentEnvSystem, SystemState
-from adaptive_SNN.models.environments.base import (
+from adaptive_snn.models import AgentEnvSystem, SystemState
+from adaptive_snn.models.environments.base import (
     AbstractEnvironment,
     AbstractEnvironmentState,
 )
-from adaptive_SNN.models.networks import Agent, AgentState
-from adaptive_SNN.models.networks.base import AbstractNeuronModel
-from adaptive_SNN.models.reward_prediction.base import (
+from adaptive_snn.models.networks import Agent, AgentState
+from adaptive_snn.models.networks.base import AbstractNeuronModel
+from adaptive_snn.models.reward_prediction.base import (
     AbstractRewardPredictor,
     RewardPrediction,
 )
-from adaptive_SNN.solver import solve_ODE
-from adaptive_SNN.utils.operators import DefaultIfNone, ElementWiseMul
+from adaptive_snn.solver import solve_ODE
+from adaptive_snn.utils.operators import DefaultIfNone, ElementWiseMul
 
 
 class DummyNetworkState(eqx.Module):

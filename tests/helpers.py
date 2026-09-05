@@ -6,10 +6,10 @@ import jax.random as jr
 from diffrax import Solution
 from jaxtyping import Array, PyTree
 
-from adaptive_SNN.models.environments import AbstractEnvironment
-from adaptive_SNN.models.networks import AbstractNeuronModel, LIFNetwork, LIFState
-from adaptive_SNN.models.noise import OUP, PoissonJumpProcess
-from adaptive_SNN.utils.operators import (
+from adaptive_snn.models.environments import AbstractEnvironment
+from adaptive_snn.models.networks import AbstractNeuronModel, LIFNetwork, LIFState
+from adaptive_snn.models.noise import OUP, PoissonJumpProcess
+from adaptive_snn.utils.operators import (
     DefaultIfNone,
     ElementWiseMul,
     MixedPyTreeOperator,

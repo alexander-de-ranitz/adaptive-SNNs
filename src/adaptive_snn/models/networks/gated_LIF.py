@@ -1,0 +1,148 @@
+import jax
+from jax import numpy as jnp
+from jaxtyping import Array
+
+from adaptive_snn.models.networks import AbstractLIFNetwork, ElibilityState, Eligibility
+from adaptive_snn.utils.operators import DefaultIfNone, ElementWiseMul
+
+
+class GatedLIFNetwork(AbstractLIFNetwork):
+    tau_eligibility: float = 0.1  # Time constant for eligibility trace
+    delta_V: float = 0.001  # Steepness of the gating function
+
+    def init_features(self) -> Eligibility:
+        return Eligibility(
+            eligibility=jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs))
+        )
+
+    def compute_feature_diffusion(self, t, state: ElibilityState, args):
+        tree = jax.tree.map(
+            lambda arr: DefaultIfNone(
+                default=jnp.zeros_like(arr),
+                else_do=ElementWiseMul(jnp.zeros_like(arr, dtype=arr.dtype)),
+            ),
+            state.features,
+        )
+        return tree
+
+    def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
+        noise_std = self.compute_desired_noise_std(t, state, args)
+        # When learning I weights, perturbations and noise_std both cover E weights
+        # (first N) and I weights (second N); otherwise only the E weights.
+        if self.learn_I_weights:
+            E_perturbations = state.perturbations[: self.N_neurons]
+            I_perturbations = state.perturbations[self.N_neurons :]
+            E_noise_std = noise_std[: self.N_neurons]
+            I_noise_std = noise_std[self.N_neurons :]
+        else:
+            E_perturbations = state.perturbations
+            I_perturbations = jnp.zeros((self.N_neurons,))
+            E_noise_std = noise_std
+            I_noise_std = noise_std
+
+        # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
+        # In case the noise std is zero (no noise), avoid division by zero and set the perturbations to zero
+        E_perturbations = jnp.where(
+            E_noise_std != 0.0, E_perturbations / E_noise_std, 0.0
+        )
+        I_perturbations = jnp.where(
+            I_noise_std != 0.0, I_perturbations / I_noise_std, 0.0
+        )
+
+        delta_V = args.get("delta_V", self.delta_V)
+
+        d_eligibility_E = (
+            E_perturbations[:, None]
+            * self.gating_function(state.V, delta_V)[:, None]
+            / self.synaptic_increment
+            * self.excitatory_mask[None, :]
+            * state.G
+        )
+        d_eligibility_I = (
+            I_perturbations[:, None]
+            * self.gating_function(state.V, delta_V)[:, None]
+            / self.synaptic_increment
+            * self.inhibitory_mask[None, :]
+            * state.G
+        )
+        d_eligibility_decay = -state.features.eligibility / self.tau_eligibility
+        d_eligibility = d_eligibility_E + d_eligibility_I + d_eligibility_decay
+        return Eligibility(eligibility=d_eligibility)
+
+    def compute_feature_update(self, t, state: ElibilityState, args) -> Eligibility:
+        return state.features
+
+    def noise_shape_features(self) -> Eligibility:
+        return Eligibility(eligibility=None)
+
+    def gating_function(self, voltage: Array, delta_V: float) -> Array:
+        """Gating function based on membrane voltage."""
+
+        # Voltage might be temporarily above the firing threshold within a single step,
+        # we clip the voltage to ensure the gating function does not become too large in this case
+        voltage = jnp.clip(voltage, min=None, max=self.firing_threshold)
+
+        default_area = 1.0 * (
+            self.firing_threshold - self.resting_potential
+        )  # Area under the default gating function (which is constant at 1)
+        driving_force = self.reversal_potential_E - voltage
+
+        integral = lambda V: (self.reversal_potential_E + delta_V - V) * -jnp.exp(
+            (V - self.firing_threshold) / delta_V
+        )
+        area = integral(self.resting_potential) - integral(self.firing_threshold)
+        gating = (
+            driving_force
+            / delta_V
+            * jnp.exp((voltage - self.firing_threshold) / delta_V)
+        )
+        normalization_factor = area / default_area
+
+        return gating / normalization_factor
+
+    def compute_weight_updates(
+        self, t, state: ElibilityState, args, RPE: Array
+    ) -> Array:
+        # Compute weight changes
+        learning_rate = args["get_learning_rate"](t, state, args)
+        gradient_clip = args.get("gradient_clip", jnp.inf)
+        dW = learning_rate * jnp.clip(
+            RPE * state.features.eligibility, min=-gradient_clip, max=gradient_clip
+        )
+
+        dW = jnp.where(
+            jnp.isnan(state.W), 0.0, dW
+        )  # No weight change for non-existing connections
+        return dW
+
+
+def plot_gating_function():
+    import matplotlib.pyplot as plt
+
+    network = GatedLIFNetwork(N_neurons=1, dt=1e-4, N_inputs=0)
+    voltages = jnp.linspace(-75 * 1e-3, -50 * 1e-3, 100)  # From -80 mV to +20 mV
+    gating_values = network.gating_function(voltages, delta_V=network.delta_V)
+    plt.figure(figsize=(3.5, 2))
+    plt.hlines(
+        1.0,
+        -77 * 1e-3,
+        -48 * 1e-3,
+        colors="k",
+        linestyles="--",
+        label="Constant gating function",
+    )
+    plt.plot(voltages, gating_values, c="k", label="Voltage-dependent gating function")
+    plt.xlabel("Membrane Voltage (mV)")
+    plt.xlim(voltages[0], voltages[-1])
+    plt.xticks(
+        jnp.arange(-75, -50 + 1, 5) * 1e-3, labels=[-75, -70, -65, -60, -55, -50]
+    )
+    plt.ylabel("Gating Function Value")
+    plt.legend(loc="upper left")
+    plt.grid(alpha=0.3)
+    plt.savefig("../figures/gating_function.pdf")
+    plt.show()
+
+
+if __name__ == "__main__":
+    plot_gating_function()

@@ -11,12 +11,12 @@ import jax.numpy as jnp
 import jax.random as jr
 from diffrax import SaveAt
 
-from adaptive_SNN.models import SystemState
-from adaptive_SNN.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
-from adaptive_SNN.simulation_configs.single_synapse_learning_AC import (
+from adaptive_snn.models import SystemState
+from adaptive_snn.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
+from adaptive_snn.simulation_configs.single_synapse_learning_AC import (
     create_single_synapse_learning_config,
 )
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.utils.runner import run_simulation
 
 
 def main():

@@ -14,7 +14,7 @@ from helpers import (
     make_poisson_jump_model,
 )
 
-from adaptive_SNN.models.networks import LIFState
+from adaptive_snn.models.networks import LIFState
 
 
 def test_initial_state():

@@ -3,9 +3,9 @@ import time
 import diffrax as dfx
 from jax import numpy as jnp
 
-from adaptive_SNN.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
-from adaptive_SNN.utils.runner import run_simulation
-from adaptive_SNN.utils.save_helper import save_part_of_state
+from adaptive_snn.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
+from adaptive_snn.utils.runner import run_simulation
+from adaptive_snn.utils.save_helper import save_part_of_state
 
 
 def main():

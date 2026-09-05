@@ -18,11 +18,11 @@ import pandas as pd
 from jax import numpy as jnp
 from jax import random as jr
 
-from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks.eligibility_LIF import EligibilityLIFNetwork
-from adaptive_SNN.models.networks.gated_LIF import GatedLIFNetwork
-from adaptive_SNN.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
-from adaptive_SNN.utils.runner import (
+from adaptive_snn.models.agent_env_system import SystemState
+from adaptive_snn.models.networks.eligibility_LIF import EligibilityLIFNetwork
+from adaptive_snn.models.networks.gated_LIF import GatedLIFNetwork
+from adaptive_snn.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
+from adaptive_snn.utils.runner import (
     _load_existing_solution,
     run_batched_simulation,
 )

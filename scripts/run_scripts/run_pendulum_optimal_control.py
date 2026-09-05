@@ -3,8 +3,8 @@ from jax import numpy as jnp
 from jax import random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.environments import ExternalController, PendulumEnvironment
-from adaptive_SNN.solver import solve_ODE
+from adaptive_snn.models.environments import ExternalController, PendulumEnvironment
+from adaptive_snn.solver import solve_ODE
 
 
 def plot_optimal_control():

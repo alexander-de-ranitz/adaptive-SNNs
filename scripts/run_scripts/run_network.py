@@ -9,9 +9,9 @@ from jax import numpy as jnp
 from jax import random as jr
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.simulation_configs.network_config import create_network_config
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.models.agent_env_system import SystemState
+from adaptive_snn.simulation_configs.network_config import create_network_config
+from adaptive_snn.utils.runner import run_simulation
 
 
 def main():
