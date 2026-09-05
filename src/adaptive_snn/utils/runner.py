@@ -134,8 +134,12 @@ def setup_simulation(
         "get_learning_rate": lambda t, x, args: jnp.where(
             t < args["actor_warmup_time"], 0.0, args["lr"]
         ),
-        "get_critic_lr": lambda t, x, args: jnp.where(
-            t < args["critic_warmup_time"], 0.0, args["critic_lr"]
+        "get_critic_lr": (
+            config.get_critic_lr
+            if config.get_critic_lr is not None
+            else lambda t, x, args: jnp.where(
+                t < args["critic_warmup_time"], 0.0, args["critic_lr"]
+            )
         ),
         "network_output_fn": config.network_output_fn,
         "reward_fn": config.reward_fn,
@@ -147,8 +151,26 @@ def setup_simulation(
         "critic_warmup_time": jnp.asarray(config.critic_warmup_time),
         "balance": jnp.asarray(config.balance),
         "noise_scale_hyperparam": jnp.asarray(config.noise_level),
-        **config.args,
     }
+    args.update(config.additional_args)
+    for field_name in (
+        "use_noise",
+        "delta_V",
+        "gamma",
+        "critic_input_fn",
+        "get_balance_rate",
+        "env_warmup_fn",
+        "episode_end_fn",
+        "RPE_fn",
+        "feature_fn",
+        "final_balance_rate",
+        "gradient_clip",
+        "tau_charge",
+        "external_noise_std",
+    ):
+        value = getattr(config, field_name)
+        if value is not None:
+            args[field_name] = value
 
     return model, args, simulation_key
 

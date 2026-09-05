@@ -76,8 +76,6 @@ def create_network_config(N_neurons=100, key=jr.PRNGKey(0)) -> SimulationConfig:
         environment_kwargs={"rate": 1, "dim": N_neurons},
         reward_prediction_model=MovingAverageRewardPredictor,
         reward_predictor_kwargs={"rate": 0.0, "dim": 1},
-        args={
-            "use_noise": jnp.array([True] * N_neurons),
-        },
+        use_noise=jnp.array([True] * N_neurons),
     )
     return cfg

@@ -181,11 +181,9 @@ def main():
         config.lr = jnp.asarray(p["lr"])
         config.t0 = t0
         config.t1 = t1
-        config.args["final_balance_rate"] = jnp.asarray(p["balance_rate"])
-        config.args["tau_charge"] = jnp.asarray(p["tau_charge"])
-        config.args["get_balance_rate"] = lambda t, state, args: args[
-            "final_balance_rate"
-        ]
+        config.balance_rate = jnp.asarray(p["balance_rate"])
+        config.tau_charge = jnp.asarray(p["tau_charge"])
+        config.get_balance_rate = lambda t, state, args: args["final_balance_rate"]
         config.save_at = dfx.SaveAt(
             ts=jnp.linspace(config.t0, config.t1, int(1e2 * delta_t)), fn=save_fn
         )

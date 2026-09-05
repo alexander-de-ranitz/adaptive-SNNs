@@ -101,12 +101,10 @@ def create_single_synapse_learning_config(
         },
         reward_prediction_model=MovingAverageRewardPredictor,  # Not used here, but required by the runner. Rate = 0 -> always predicts 0 reward.
         reward_predictor_kwargs={"rate": 0.0, "dim": 1},
-        args={
-            "use_noise": jnp.array([True, False]),  # Only the first neuron has noise
-            "RPE_fn": lambda t,
-            x,
-            args,
-            reward: reward,  # RPE is just the reward here since we have no reward prediction. Everything is handled inside the environment.
-        },
+        use_noise=jnp.array([True, False]),  # Only the first neuron has noise
+        RPE_fn=lambda t,
+        x,
+        args,
+        reward: reward,  # RPE is just the reward here since we have no reward prediction. Everything is handled inside the environment.
     )
     return cfg

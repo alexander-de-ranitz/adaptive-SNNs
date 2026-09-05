@@ -61,7 +61,7 @@ def plot_perturbation_distribution_over_time(ax):
         ),
     )
 
-    config.args["external_noise_std"] = lambda t, x, args: jnp.where(
+    config.additional_args["external_noise_std"] = lambda t, x, args: jnp.where(
         t > t_onset,
         jnp.where(
             t < t_offset,
@@ -70,7 +70,7 @@ def plot_perturbation_distribution_over_time(ax):
         ),
         jnp.zeros((config.N_neurons,)),
     )
-    config.args["use_noise"] = jnp.array([True, False])
+    config.use_noise = jnp.array([True, False])
 
     max_iterations = 1000
     N_target = 100
@@ -201,7 +201,7 @@ def plot_cross_correlation(ax):
         ),
     )
 
-    config.args["use_noise"] = jnp.array([True, False])
+    config.use_noise = jnp.array([True, False])
     config.min_noise_std = 10e-9
     config.balance = 0.05
 

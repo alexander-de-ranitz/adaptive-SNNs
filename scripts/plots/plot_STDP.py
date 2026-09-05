@@ -126,7 +126,7 @@ def run_sim(id, key):
     config.network_cls = NoDecayGatedLIFNetwork
     config.min_noise_std = 1e-9
     config.noise_level = 0.0
-    config.args.update({"delta_V": 0.5**13})
+    config.delta_V = 0.5**13
 
     def save_fn(t, x: SystemState, args):
         pre_synaptic_spikes = args["input_spike_fn"](t, None, None)[

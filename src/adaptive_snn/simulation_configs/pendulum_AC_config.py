@@ -128,31 +128,27 @@ def create_pendulum_AC_config(
             "input_dim": N_inputs,
             "pre_trained_weights": None,
         },
-        args={
-            "delta_V": jnp.power(jnp.float64(2), jnp.float64(-13)),
-            "critic_input_fn": lambda t, x, args, input_spikes, env_state: input_spikes,
-            "gamma": gamma,
-            "get_balance_rate": lambda t, state, args: jnp.max(
-                jnp.array([10 - t * 9.0 / 100, 1.0])
-            ),
-            "use_noise": jnp.array([True]),
-            "env_warmup_fn": lambda t, env_state, args: jnp.asarray(
-                env_state[2] < 0.25
-            ),
-            "RPE_fn": lambda t, x, args, reward: reward
-            - x.reward_predictor_state.previous_value
-            + gamma * x.reward_predictor_state.value,
-            "episode_end_fn": lambda t, x, args: jnp.any(
-                jnp.abs(x.environment_state)
-                > jnp.array(
-                    [
-                        env.max_allowed_angle,
-                        env.max_allowed_angular_velocity,
-                        env.max_episode_time,
-                    ]
-                )
-            ),
-        },
+        delta_V=jnp.power(jnp.float64(2), jnp.float64(-13)),
+        critic_input_fn=lambda t, x, args, input_spikes, env_state: input_spikes,
+        gamma=gamma,
+        get_balance_rate=lambda t, state, args: jnp.max(
+            jnp.array([10 - t * 9.0 / 100, 1.0])
+        ),
+        use_noise=jnp.array([True]),
+        env_warmup_fn=lambda t, env_state, args: jnp.asarray(env_state[2] < 0.25),
+        RPE_fn=lambda t, x, args, reward: reward
+        - x.reward_predictor_state.previous_value
+        + gamma * x.reward_predictor_state.value,
+        episode_end_fn=lambda t, x, args: jnp.any(
+            jnp.abs(x.environment_state)
+            > jnp.array(
+                [
+                    env.max_allowed_angle,
+                    env.max_allowed_angular_velocity,
+                    env.max_episode_time,
+                ]
+            )
+        ),
     )
     return cfg
 

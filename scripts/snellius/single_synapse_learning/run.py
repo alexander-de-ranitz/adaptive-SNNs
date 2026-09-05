@@ -90,7 +90,7 @@ def main():
 
     cfg.save_file = args.output_file
 
-    cfg.args.update({"delta_V": args.delta_V})
+    cfg.delta_V = args.delta_V
 
     sol, model = run_simulation(cfg, save_results=False)
 

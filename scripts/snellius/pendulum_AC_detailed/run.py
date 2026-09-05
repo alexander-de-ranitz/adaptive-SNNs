@@ -96,7 +96,7 @@ def main():
         cfg.save_at = SaveAt(
             ts=jnp.linspace(100, cfg.t1, int((cfg.t1 - 100) * 100)), fn=save_fn
         )
-        cfg.args["get_balance_rate"] = lambda t, state, args: jnp.max(
+        cfg.get_balance_rate = lambda t, state, args: jnp.max(
             jnp.array([10 - t * 9.0 / 100, 1.0])
         )
         cfg.balance = args.balance

@@ -172,12 +172,12 @@ def main():
             axis=1,
         )
         cfg.lr = lr
-        cfg.args["final_balance_rate"] = jnp.asarray(p["balance_rate"])
-        cfg.args["get_balance_rate"] = lambda t, state, args: jnp.max(
+        cfg.balance_rate = jnp.asarray(p["balance_rate"])
+        cfg.get_balance_rate = lambda t, state, args: jnp.max(
             jnp.array([10 - t * 9.0 / 100, args["final_balance_rate"]])
         )
-        cfg.args["gradient_clip"] = jnp.asarray(p["gradient_clip"])
-        cfg.args["tau_charge"] = jnp.asarray(p["tau_charge"])
+        cfg.gradient_clip = jnp.asarray(p["gradient_clip"])
+        cfg.tau_charge = jnp.asarray(p["tau_charge"])
         cfg.learn_I_weights = p["learn_I_weights"]
         cfg.save_file = (
             args.output_file

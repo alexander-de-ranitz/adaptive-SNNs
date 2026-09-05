@@ -102,16 +102,14 @@ def create_single_synapse_learning_config(
         },
         reward_prediction_model=LinearReadoutCritic,
         reward_predictor_kwargs={"input_dim": 0},
-        args={
-            "critic_input_fn": lambda t, x, args, input_spikes, env_state: jnp.zeros(
-                (0,)
-            ),  # No input to the critic
-            "use_noise": jnp.array([True]),
-            "RPE_fn": lambda t, x, args, reward: (
-                reward
-                - x.reward_predictor_state.previous_value
-                + gamma * x.reward_predictor_state.value
-            ),
-        },
+        critic_input_fn=lambda t, x, args, input_spikes, env_state: jnp.zeros(
+            (0,)
+        ),  # No input to the critic
+        use_noise=jnp.array([True]),
+        RPE_fn=lambda t, x, args, reward: (
+            reward
+            - x.reward_predictor_state.previous_value
+            + gamma * x.reward_predictor_state.value
+        ),
     )
     return cfg

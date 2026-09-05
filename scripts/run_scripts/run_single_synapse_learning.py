@@ -61,7 +61,7 @@ def main():
         fn=save_fn,
     )
     cfg.save_file = "results/single_synapse_learning.npz"
-    cfg.args["delta_V"] = jnp.pow(2.0, -13)
+    cfg.delta_V = jnp.pow(2.0, -13)
 
     sol, model = run_simulation(cfg, save_results=False)
 

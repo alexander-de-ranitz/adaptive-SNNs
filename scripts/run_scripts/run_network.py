@@ -23,8 +23,6 @@ def main():
     cfg.base_network_kwargs["balance_rate"] = 10.0
 
     N_E_in = 150
-    N_I_in = 0  # N_E_in // 4
-    cfg.args.update({"N_simulated_I_inputs": N_I_in, "N_simulated_E_inputs": N_E_in})
     # save file from my manual run
     cfg.save_file = "results/network_tuning_manual/firing_rates_w_10.npz"
 

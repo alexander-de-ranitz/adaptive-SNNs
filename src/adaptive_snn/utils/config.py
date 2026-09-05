@@ -51,7 +51,19 @@ class SimulationConfig:
     initial_weight_matrix: Array | None = None
     mean_synaptic_delay: float = 0.0
     base_network_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
-    args: dict[str, Any] = eqx.field(default_factory=lambda: {})
+    use_noise: Array | None = None
+    delta_V: Array | None = None
+    gamma: float | Array | None = None
+    critic_input_fn: Callable[..., Any] | None = None
+    get_balance_rate: Callable[..., Any] | None = None
+    env_warmup_fn: Callable[..., Any] | None = None
+    episode_end_fn: Callable[..., Any] | None = None
+    RPE_fn: Callable[..., Any] | None = None
+    get_critic_lr: Callable[..., Any] | None = None
+    feature_fn: Callable[..., Any] | None = None
+    balance_rate: Array | None = None
+    gradient_clip: Array | None = None
+    tau_charge: Array | None = None
     network_output_fn: Callable[..., Any] | None = None
     network_output_shape: tuple[int, ...] = (1,)
     learn_I_weights: bool = False
@@ -77,6 +89,7 @@ class SimulationConfig:
     # Other
     key: int | Array = 0
     save_file: str | None = None
+    additional_args: dict[str, Any] = eqx.field(default_factory=lambda: {})
 
     def __post_init__(self) -> None:
         self._validate_scalars()
