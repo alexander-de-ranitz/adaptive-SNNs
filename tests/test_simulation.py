@@ -175,6 +175,8 @@ def test_agent_env_system_drift_uses_connections():
         network_state=DummyNetworkState(value=jnp.array([1.0])),
         reward_predictor_state=RewardPrediction(value=jnp.array([0.0])),
         RPE=jnp.array([2.0]),
+        mean_RPE=jnp.array([0.0]),
+        var_RPE=jnp.array([0.0]),
     )
     env_state = DummyEnvironmentState(value=jnp.array([3.0]))
     x = SystemState(
@@ -182,6 +184,7 @@ def test_agent_env_system_drift_uses_connections():
         environment_state=env_state,
         agent_output=jnp.array([4.0]),
         reward_signal=jnp.array([5.0]),
+        mean_reward=jnp.array([0.0]),
     )
 
     drift = model.drift(0.0, x, args)
@@ -210,6 +213,8 @@ def test_agent_env_system_update_uses_agent_output():
         network_state=DummyNetworkState(value=jnp.array([1.0])),
         reward_predictor_state=RewardPrediction(value=jnp.array([0.0])),
         RPE=jnp.array([0.0]),
+        mean_RPE=jnp.array([0.0]),
+        var_RPE=jnp.array([0.0]),
     )
     env_state = DummyEnvironmentState(value=jnp.array([5.0]))
     x = SystemState(
@@ -217,6 +222,7 @@ def test_agent_env_system_update_uses_agent_output():
         environment_state=env_state,
         agent_output=jnp.array([3.0]),
         reward_signal=jnp.array([0.0]),
+        mean_reward=jnp.array([0.0]),
     )
 
     updated = model.update(0.0, x, args)

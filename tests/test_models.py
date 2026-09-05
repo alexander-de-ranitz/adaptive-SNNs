@@ -801,7 +801,7 @@ def test_noise_scaling():
 
 def test_noise_variance():
     args = {"noise_std": jnp.array(0.314)}
-    oup = make_OUP_model(dim=1, tau=6e-3)
+    oup = make_OUP_model(dim=1, tau=6e-3, noise_std=0.314)
     sol = dfx.diffeqsolve(
         terms=oup.terms(jr.PRNGKey(0)),
         solver=dfx.EulerHeun(),

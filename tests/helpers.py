@@ -263,9 +263,7 @@ class DummyEnvironment(AbstractEnvironment):
         return -x + jnp.arange(2, x.shape[0] + 2) * 0.1  # arbitrary drift
 
     def diffusion(self, t, x, args):
-        return (
-            jnp.eye(x.shape[0]) * jnp.arange(1, x.shape[0] + 1) * 0.1
-        )  # small independent noise
+        return jnp.zeros((x.shape[0], x.shape[0]))
 
     def update(self, t, x, args, env_input=None):
         return x

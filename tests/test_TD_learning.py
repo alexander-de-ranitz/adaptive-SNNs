@@ -21,7 +21,6 @@ def test_TD_error():
     model, args, key = setup_simulation(cfg)
     model: AgentEnvSystem = model  # Type hint for clarity
     initial_state: SystemState = model.initial
-    dt = 1e-4
 
     # Turn off warmup for these tests
     args["env_warmup_fn"] = lambda t, x, args: False
@@ -60,9 +59,7 @@ def test_TD_error():
     # Check that the TD error is computed correctly
     # this is the Euler discretization of the TD error: RPE = reward - predicted_reward + gamma * new_value - previous_value
     expected_RPE = (
-        (-0.2 - 0.15)
-        + 1 / dt * args["gamma"] * expected_new_value
-        - 1 / dt * expected_previous_value
+        (-0.2 - 0.15) + args["gamma"] * expected_new_value - expected_previous_value
     )
     assert jnp.allclose(
         new_state.agent_state.RPE, jnp.array([expected_RPE]), atol=1e-10, rtol=1e-10
@@ -110,7 +107,10 @@ def test_critic_convergence_static_target():
         features_prev_prev=jnp.array([0.0, 0.0, 0.0, 0.0]),
     )
     learning_rate = 0.01
-    args = {"get_critic_lr": lambda t, x, args: learning_rate}
+    args = {
+        "get_critic_lr": lambda t, x, args: learning_rate,
+        "critic_input_fn": lambda t, x, args, input_spikes, env_state: input_spikes,
+    }
     true_weights = jnp.array([0.5, -0.3, 0.2, 0.1, 0.4])
 
     # Simulate multiple updates to see if the weights converge
@@ -166,6 +166,7 @@ def test_critic_convergence_full():
 
     args = {
         "get_critic_lr": lambda t, x, args: learning_rate,
+        "critic_input_fn": lambda t, x, args, input_spikes, env_state: input_spikes,
         "env_warmup_fn": lambda t, x, args: False,
         "episode_end_fn": lambda t, x, args: False,
         "network_output_fn": lambda t, agent_state, args, env_state: jnp.zeros((1,)),
