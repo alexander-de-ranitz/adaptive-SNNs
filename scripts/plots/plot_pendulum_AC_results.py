@@ -15,13 +15,7 @@ def load_pendulum_results(file_path):
     model = "gated" if "gated" in file_path else "default"
     result = load_named_result(file_path)
     ts = result["ts"]
-    try:
-        iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
-    except:
-        try:
-            iter = int(re.search(r"_(\d+)_lr_", file_path).group(1))
-        except:
-            iter = None
+    cfg_id = int(re.search(r"_cfg_(\d+)", file_path).group(1))
     chunk = int(re.search(r"_chunk_(\d+)", file_path).group(1))
     seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
     lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
@@ -30,7 +24,7 @@ def load_pendulum_results(file_path):
         "file_path": file_path,
         "state": result,
         "ts": ts,
-        "iter": iter,
+        "cfg_id": cfg_id,
         "chunk": chunk,
         "final_state": final_state,
         "model": model,
@@ -56,9 +50,9 @@ def plot_full_dynamics():
     full_df = full_df.sort_values("file_path")
 
     for (m, lr, i, s), subset in full_df.sort_values(
-        ["model", "lr", "iter", "seed"]
-    ).groupby(["model", "lr", "iter", "seed"]):
-        print(f"Plotting dynamics for model: {m}, lr: {lr}, iteration: {i}, seed: {s}")
+        ["model", "lr", "cfg_id", "seed"]
+    ).groupby(["model", "lr", "cfg_id", "seed"]):
+        print(f"Plotting dynamics for model: {m}, lr: {lr}, cfg_id: {i}, seed: {s}")
         print(f"Files: {subset['file_path'].values}")
         subset = subset.sort_values("chunk")
         fig, axs = plt.subplots(5, 2, sharex=True, figsize=(5, 6))

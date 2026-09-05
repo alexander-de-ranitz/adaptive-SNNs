@@ -21,14 +21,8 @@ def load_pendulum_results(file_path):
     model = "gated" if "gated" in file_path else "default"
     result = load_named_result(file_path)
     ts = result["ts"]
-    try:
-        lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
-    except:
-        lr = None
-    try:
-        balance_rate = float(re.search(r"_balance_(\d+\.?\d*)_", file_path).group(1))
-    except:
-        balance_rate = None
+    lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
+    balance_rate = float(re.search(r"_balance_(\d+\.?\d*)_", file_path).group(1))
     final_state = load_final_state(file_path)
     return {
         "file_path": file_path,

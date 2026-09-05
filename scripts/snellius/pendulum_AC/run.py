@@ -73,13 +73,12 @@ def main():
     )
 
     args = parser.parse_args()
-    key = jr.PRNGKey(args.key_seed)
     N_parallel = args.N_parallel
     N_neurons = 1000
     model = GatedLIFNetwork if args.model == "gated" else EligibilityLIFNetwork
     configs = [
         create_pendulum_AC_config(
-            N_neurons=N_neurons, model_cls=model, key=jr.fold_in(key, i)
+            N_neurons=N_neurons, model_cls=model, key=jr.PRNGKey(args.key_seed)
         )
         for i in range(N_parallel)
     ]
@@ -219,7 +218,7 @@ def main():
         cfg.learn_I_weights = p["learn_I_weights"]
         cfg.save_file = (
             args.output_file
-            + f"_iter_{i}_lr_{p['lr']}_clip_{p['gradient_clip']}_tau_charge_{p['tau_charge']}_balance_rate_{p['balance_rate']}_learn_I_{p['learn_I_weights']}"
+            + f"_cfg_{i}_lr_{p['lr']}_clip_{p['gradient_clip']}_tau_charge_{p['tau_charge']}_balance_rate_{p['balance_rate']}_learn_I_{p['learn_I_weights']}"
         )
         cfg.t1 = 2000
 

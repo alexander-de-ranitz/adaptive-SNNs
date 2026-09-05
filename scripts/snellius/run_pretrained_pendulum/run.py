@@ -48,32 +48,13 @@ def load_pendulum_results(file_path):
     model = "gated" if "gated" in file_path else "default"
     result = load_named_result(file_path)
     ts = result["ts"]
-    try:
-        iter = int(re.search(r"_lr_\d+\.?\d*_(\d+)", file_path).group(1))
-    except:
-        try:
-            iter = int(re.search(r"_(\d+)_lr_", file_path).group(1))
-        except:
-            try:
-                iter = int(re.search(r"_iter_(\d+)", file_path).group(1))
-            except:
-                iter = None
-    try:
-        chunk = int(re.search(r"_chunk_(\d+)", file_path).group(1))
-    except:
-        chunk = None
-    try:
-        seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
-    except:
-        seed = None
+    seed = int(re.search(r"_seed_(\d+)", file_path).group(1))
     lr = float(re.search(r"_lr_(\d+\.?\d*)_", file_path).group(1))
     final_state = load_final_state(file_path)
     return {
         "file_path": file_path,
         "state": result,
         "ts": ts,
-        "iter": iter,
-        "chunk": chunk,
         "final_state": final_state,
         "model": model,
         "lr": lr,
@@ -122,7 +103,7 @@ def main():
     t1 = t0 + delta_t
     # t1 = 974
     # delta_t = t1 - t0
-    key = jr.fold_in(jr.PRNGKey(int(selected_run["seed"])), int(selected_run["iter"]))
+    key = jr.PRNGKey(int(selected_run["seed"]))
     print("Using key: ", key)
     configs = [
         create_pendulum_AC_config(
