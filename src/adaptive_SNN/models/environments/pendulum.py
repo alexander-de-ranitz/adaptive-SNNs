@@ -57,13 +57,20 @@ class PendulumEnvironment(AbstractEnvironment):
 
     @property
     def initial(self):
+        ang_key, ang_vel_key = jr.split(self.key)
         angle = jax.random.uniform(
-            self.key,
+            ang_key,
             shape=(),
             minval=self.initial_angle_range[0],
             maxval=self.initial_angle_range[1],
         )
-        return jnp.array([angle, 0.0, 0.0], dtype=default_float)
+        angular_velocity = jax.random.uniform(
+            ang_vel_key,
+            shape=(),
+            minval=self.initial_angular_velocity_range[0],
+            maxval=self.initial_angular_velocity_range[1],
+        )
+        return jnp.array([angle, angular_velocity, 0.0], dtype=default_float)
 
     @property
     def noise_shape(self):
