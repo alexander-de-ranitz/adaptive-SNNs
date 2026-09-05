@@ -1,47 +1,16 @@
-import argparse
-import shlex
 import sys
 from pathlib import Path
 
-import jax
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-jax.config.update("jax_enable_x64", True)
-from qcg.pilotjob.api.job import Jobs
-from qcg.pilotjob.api.manager import LocalManager
+from scripts.snellius.templates.launch import build_jobs, parse_output_dir, submit
+
+MODULE_PATH = "scripts.snellius.single_synapse_learning_extended.firing_statistics.run"
 
 
-def create_jobs():
-    base_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
-    module_path = (
-        "scripts.snellius.single_synapse_learning_extended.firing_statistics.run"
-    )
-
-    parser = argparse.ArgumentParser(description="Launch jobs on Snellius")
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="results/default_folder/",
-        help="Directory to store output files",
-    )
-    cmd_args = parser.parse_args()
-
-    log_dir = (
-        Path(cmd_args.output_dir) / "logs" if cmd_args.output_dir else base_dir / "logs"
-    )
-    results_dir = (
-        Path(cmd_args.output_dir) / "results"
-        if cmd_args.output_dir
-        else base_dir / "results"
-    )
-
-    log_dir.mkdir(parents=True, exist_ok=True)
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    jobs = Jobs()
-
+def param_grid():
     seed = 1234
-    num_iterations = 1
-    for i in range(num_iterations):
+    for i in range(1):
         seed += 129
         for noise_level in [1e-10, 1e-9, 1e-8]:
             for balance in [0.0, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05]:
@@ -52,50 +21,21 @@ def create_jobs():
                         + f"b_{balance:.5f}_"
                         + f"seed_{seed}_iter_{i}"
                     )
-
-                    cmd_args = [
-                        "--key_seed",
-                        str(seed),
-                        "--noise_level",
-                        str(noise_level),
-                        "--balance",
-                        str(balance),
-                        "--initial_weight",
-                        str(w),
-                        "--output_file",
-                        str(results_dir / name),
-                    ]
-
-                    # Create a bash script to set PYTHONPATH and run the processing script
-                    bash_script = "\n".join(
-                        [
-                            "#!/usr/bin/env bash",
-                            "set -euo pipefail",
-                            f'export PYTHONPATH={shlex.quote(str(base_dir))}:"${{PYTHONPATH:-}}"',
-                            f"{shlex.quote(sys.executable)} -m {shlex.quote(module_path)} {' '.join(shlex.quote(arg) for arg in cmd_args)}",
-                        ]
+                    yield (
+                        name,
+                        {
+                            "--key_seed": seed,
+                            "--noise_level": noise_level,
+                            "--balance": balance,
+                            "--initial_weight": w,
+                        },
                     )
-
-                    jobs.add(
-                        name=name,
-                        script=bash_script,
-                        stdout=str(log_dir / f"job.out.{name}"),
-                        stderr=str(log_dir / f"job.err.{name}"),
-                        wd=str(base_dir),
-                        numCores=1,
-                        iteration=1,
-                    )
-    return jobs
 
 
 def main():
-    jobs = create_jobs()
-    manager = LocalManager()
-
-    print(f"Submitting {len(jobs.jobs())} jobs to the local manager...")
-    manager.submit(jobs)
-    manager.wait4all()
-    manager.finish()
+    log_dir, results_dir = parse_output_dir()
+    jobs = build_jobs(MODULE_PATH, param_grid(), log_dir, results_dir)
+    submit(jobs)
 
 
 if __name__ == "__main__":

@@ -5,43 +5,13 @@
 #SBATCH -N 1
 #SBATCH --ntasks=72
 #SBATCH --gpus=1
+#SBATCH --mail-user=alexanderderanitz@gmail.com
+#SBATCH --mail-type=END,FAIL
 
-# Load necessary modules
-echo "Starting job on $(hostname) at $(date +%Y%m%d_%H%M%S)"
-echo "Loading modules..."
-module load 2025
-module load Python/3.13.1-GCCcore-14.2.0
+REPO_DIR="${REPO_DIR:-$HOME/adaptive_SNNs}"
 
-echo "Modules loaded, starting job..."
+export JOB_NAME="single_synapse_learning_extended_firing_statistics"
+export LAUNCH_SCRIPT="scripts/snellius/single_synapse_learning_extended/firing_statistics/launch.py"
+export JAX_PLATFORM="cpu"
 
-echo "Activating venv..."
-REPO_DIR="$HOME/adaptive_SNNs"
-
-# Install required Python packages in user space
-source ~/venvs/adaptive_snns/bin/activate
-
-echo "Environment setup complete, setting up directories..."
-cd "$REPO_DIR"
-
-# Make output directory in TMPDIR
-mkdir -p "$TMPDIR/output_dir"
-mkdir -p "$TMPDIR/output_dir/logs"
-mkdir -p "$TMPDIR/output_dir/results"
-
-# Prevent BLAS/OpenMP oversubscription when running many Python jobs in parallel.
-export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-export JAX_ENABLE_X64=1 # Enable 64-bit precision in JAX, which is important for numerical stability in our simulations
-export JAX_PLATFORMS=cpu # Use CPU backend for JAX, as we are running many low-dimensional parallel jobs (1 core per simulation)
-
-echo "Running simulations..."
-python "$REPO_DIR/scripts/snellius/single_synapse_learning_extended/firing_statistics/launch.py" \
-    --output_dir "$TMPDIR/output_dir"
-
-echo "Simulations completed, copying results back to home directory..."
-# Copy results back to home directory
-DEST_DIR="$REPO_DIR/results/single_synapse_learning_extended_firing_statistics_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$DEST_DIR"
-cp -r "$TMPDIR/output_dir/." "$DEST_DIR/"
+source "$REPO_DIR/scripts/snellius/templates/job_template.sh"
