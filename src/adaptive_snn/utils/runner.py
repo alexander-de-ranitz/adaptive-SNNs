@@ -153,6 +153,7 @@ def setup_simulation(
         "noise_scale_hyperparam": jnp.asarray(config.noise_level),
     }
     args.update(config.additional_args)
+
     for field_name in (
         "use_noise",
         "delta_V",
