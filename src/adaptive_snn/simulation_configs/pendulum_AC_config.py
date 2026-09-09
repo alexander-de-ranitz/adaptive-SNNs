@@ -10,80 +10,7 @@ from adaptive_snn.models.environments import PendulumEnvironment
 from adaptive_snn.models.networks import GatedLIFNetwork
 from adaptive_snn.models.reward_prediction import LinearReadoutCritic
 from adaptive_snn.utils.config import SimulationConfig
-
-
-def compute_rates(
-    env_state,
-    grid_shape=(16, 16),
-    copies_per_feature=1,
-    width_factor=0.2,
-    pad_factor=0.2,
-    target_in_rate=1500,
-    downstream_connectivity=0.1,
-    normalize=True,
-    max_state_values=jnp.array(
-        [
-            PendulumEnvironment.max_allowed_angle,
-            PendulumEnvironment.max_allowed_angular_velocity,
-        ]
-    ),
-):
-    """Compute the firing rates for the encoding population.
-
-    The angle and angular velocity are jointly encoded by a population of 2D Gaussian tuning
-    curves on a grid_shape grid, so each neuron is tuned to an (angle, velocity) pair and a
-    linear critic can represent their interaction. Each tuning curve is replicated into
-    copies_per_feature independent Poisson units, and the rates are normalized so the total
-    drive stays constant across states. The amplitude is scaled such that a neuron connected to
-    a fraction downstream_connectivity of the population receives target_in_rate spikes per second.
-
-    Args:
-        env_state: The state of the pendulum environment.
-        grid_shape: The (angle, velocity) grid of tuning curves.
-        copies_per_feature: Independent Poisson replicas per tuning curve.
-        width_factor: The Gaussian width as a fraction of the padded encoding span.
-        pad_factor: How far to extend the tuning-curve centers beyond the visited region.
-        target_in_rate: The target input rate for a downstream neuron.
-        downstream_connectivity: The connection probability assumed for the rate calibration.
-        normalize: Whether to keep the total drive constant across states.
-        max_state_values: The maximum (visited) state values, i.e. the reset threshold.
-    Returns:
-        rates: A vector of firing rates of length grid_shape[0] * grid_shape[1] * copies_per_feature.
-    """
-    env_state = env_state[
-        :2
-    ]  # Only encode the angle and angular velocity, not the time
-    center_range = max_state_values * (1 + pad_factor)
-    tuning_curve_widths = width_factor * (2 * center_range)
-
-    # Grid of preferred (angle, velocity) pairs
-    axes = [
-        jnp.linspace(-center_range[i], center_range[i], grid_shape[i]) for i in range(2)
-    ]
-    preferred_inputs = jnp.stack(jnp.meshgrid(*axes, indexing="ij"), axis=-1).reshape(
-        -1, 2
-    )
-    # 2D Gaussian tuning curves, normalized to a constant total drive
-    env_state = jnp.clip(env_state, -center_range, center_range)
-    rates = jnp.exp(
-        -jnp.sum(
-            (env_state - preferred_inputs) ** 2 / (2 * tuning_curve_widths**2), axis=-1
-        )
-    )
-    if normalize:
-        rates = rates / jnp.sum(rates)
-
-    # Scale so a downstream neuron sampling downstream_connectivity of the population gets target_in_rate
-    expected_total = (
-        1.0
-        if normalize
-        else grid_shape[0] * grid_shape[1] * (jnp.sqrt(2 * jnp.pi) * width_factor) ** 2
-    )
-    max_encoding_rate = target_in_rate / (
-        downstream_connectivity * copies_per_feature * expected_total
-    )
-
-    return jnp.tile(max_encoding_rate * rates, copies_per_feature)
+from adaptive_snn.utils.encoding import poisson_grid_encoding
 
 
 def create_pendulum_AC_config(
@@ -91,27 +18,25 @@ def create_pendulum_AC_config(
     model_cls=GatedLIFNetwork,
     encoding_grid_shape=(16, 16),
     key=jr.PRNGKey(0),
+    **env_kwargs,
 ) -> SimulationConfig:
     t0 = 0
     t1 = 5
     dt = 1e-4
     lr = 0.0
-    noise_level = 0.0
+    noise_scaling_factor = 0.0
     tau_discount = 0.1
     gamma = 1 - dt / tau_discount
-    min_noise_std = 5e-9
+    noise_floor = 5e-9
     balance = 0.01
-    N_neurons_per_in_feature = 1
-    N_inputs = (
-        encoding_grid_shape[0] * encoding_grid_shape[1] * N_neurons_per_in_feature
-    )
+    N_inputs = encoding_grid_shape[0] * encoding_grid_shape[1]
+    total_input_rate = N_inputs * 60
     agent_output_scaling = (
-        0.25  # Scale the output so that it doesn't produce excessively large torques
+        1.0  # Scale the output so that it doesn't produce excessively large torques
     )
-
-    env = PendulumEnvironment()
 
     key, spike_key, env_key = jr.split(key, 3)
+    env = PendulumEnvironment(key=env_key, **env_kwargs)
 
     def input_spike_fn(t, x: SystemState, args):
         step_idx = jnp.asarray(jnp.rint((t) / dt), dtype=jnp.int64)
@@ -119,24 +44,32 @@ def create_pendulum_AC_config(
 
         env_state = x.environment_state
 
-        rates = compute_rates(
-            env_state,
+        rates = poisson_grid_encoding(
+            env_state[:2],  # Only encode time and ang. vel, not time
             grid_shape=encoding_grid_shape,
-            target_in_rate=1500,
-            copies_per_feature=N_neurons_per_in_feature,
-            normalize=True,
-        )
+            total_rate=total_input_rate,
+            grid_range=[
+                (-env.max_allowed_angle, env.max_allowed_angle),
+                (-env.max_allowed_angular_velocity, env.max_allowed_angular_velocity),
+            ],
+        ).flatten()
 
         # Generate the spikes of the encoding population — shape (N_inputs,).
         # This is broadcast to all neurons in the recurrent population
         encoding_spikes = jr.poisson(current_key, rates * dt)
         return encoding_spikes
 
-    # def critic_input_fn(t, x, args, input_spikes, env_state):
-    #     rates = compute_rates(
-    #         env_state, grid_shape=encoding_grid_shape, target_in_rate=1500, copies_per_feature=N_neurons_per_in_feature, normalize=True
-    #     )
-    #     return rates * dt # Noiseless non-spiking encoding
+    def critic_input_fn(t, x, args, input_spikes, env_state):
+        rates = poisson_grid_encoding(
+            env_state[:2],  # Only encode time and ang. vel, not time
+            grid_shape=encoding_grid_shape,
+            total_rate=total_input_rate,
+            grid_range=[
+                (-env.max_allowed_angle, env.max_allowed_angle),
+                (-env.max_allowed_angular_velocity, env.max_allowed_angular_velocity),
+            ],
+        ).flatten()
+        return rates * dt  # Noiseless non-spiking encoding
 
     # Define network output function
     output_pop = jnp.arange(
@@ -183,8 +116,8 @@ def create_pendulum_AC_config(
         lr=lr,
         critic_lr=1e-1,
         mean_synaptic_delay=1.5e-3,
-        noise_level=noise_level,
-        min_noise_std=min_noise_std,
+        noise_scaling_factor=noise_scaling_factor,
+        noise_floor=noise_floor,
         actor_warmup_time=300,
         critic_warmup_time=10,
         key=key,
@@ -195,14 +128,14 @@ def create_pendulum_AC_config(
         input_spike_fn=input_spike_fn,
         reward_fn=reward_fn,
         environment_model=PendulumEnvironment,
-        environment_kwargs={"key": env_key},
+        environment_kwargs={"key": env_key, **env_kwargs},
         reward_prediction_model=LinearReadoutCritic,
         reward_predictor_kwargs={
             "input_dim": N_inputs,
             "pre_trained_weights": None,
         },
         delta_V=jnp.power(jnp.float64(2), jnp.float64(-13)),
-        critic_input_fn=lambda t, x, args, input_spikes, env_state: input_spikes,
+        critic_input_fn=critic_input_fn,  # lambda t, x, args, input_spikes, env_state: input_spikes,
         gamma=gamma,
         get_balance_rate=lambda t, state, args: jnp.max(
             jnp.array([10 - t * 9.0 / 100, 1.0])
