@@ -15,5 +15,6 @@ export JOB_NAME="pendulum_pretrained"
 export LAUNCH_SCRIPT="scripts/snellius/run_pretrained_pendulum/run.py"
 export JAX_PLATFORM="cuda"
 export COPY_ON_EXIT="1"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
 source "$REPO_DIR/scripts/snellius/templates/job_template.sh"

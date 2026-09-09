@@ -11,9 +11,10 @@
 
 REPO_DIR="${REPO_DIR:-$HOME/adaptive_SNNs}"
 
-export JOB_NAME="pendulum_AC_spiking_input"
+export JOB_NAME="pendulum_AC_smaller_state_noiseless_input_zero_mean_eligibility"
 export LAUNCH_SCRIPT="scripts/snellius/pendulum_AC/launch.py"
 export JAX_PLATFORM="cuda"
 export COPY_ON_EXIT="1"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
 source "$REPO_DIR/scripts/snellius/templates/job_template.sh"
