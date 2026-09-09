@@ -161,32 +161,51 @@ class SimulationConfig:
         path = Path(self.normalized_save_file())
         path.parent.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _format_callable_source(fn: Callable[..., Any]) -> str:
+        """Return the source of a callable, falling back to its repr."""
+        try:
+            return inspect.getsource(fn).strip() + "\n"
+        except (OSError, TypeError) as e:
+            return f"{fn!r} (source unavailable: {e})\n"
+
+    def _format_save_at(self, value: Any) -> str:
+        """Return the source of the save function(s) attached to a SaveAt."""
+        try:
+            subs = getattr(value, "subs", None)
+            if subs is None:
+                return "None\n"
+            subs_list = list(subs) if isinstance(subs, (list, tuple)) else [subs]
+            lines = []
+            for sub in subs_list:
+                save_fn = getattr(sub, "fn", None)
+                if save_fn is None:
+                    continue
+                lines.append(self._format_callable_source(save_fn).rstrip("\n"))
+            if not lines:
+                return f"{value!r}\n"
+            return "\n".join(lines) + "\n"
+        except Exception as e:
+            return f"Could not retrieve save_at function source code: {e}\n"
+
     def print_to_file(self) -> None:
         log_path = Path(self.normalized_save_file()).with_suffix("")
         info_file = f"{log_path}_info.txt"
 
         with open(info_file, "w", encoding="utf-8") as f:
             for field in fields(self):
+                value = getattr(self, field.name)
+
                 if field.name == "save_at":
-                    try:
-                        f.write(f"{field.name}:\n")
-                        value = getattr(self, field.name)
-                        save_fn = getattr(value.subs[0], "fn")
-                        if save_fn is not None:
-                            f.write(inspect.getsource(save_fn) + "\n")
-                    except Exception as e:
-                        f.write(
-                            f"Could not retrieve save_at function source code: {e}\n"
-                        )
-                    continue
-                if field.name in ["network_output_fn", "input_spike_fn", "reward_fn"]:
                     f.write(f"{field.name}:\n")
-                    value = getattr(self, field.name)
-                    if value is not None:
-                        f.write(inspect.getsource(value) + "\n")
-                    else:
-                        f.write(
-                            f"Could not retrieve {field.name} function source code.\n"
-                        )
+                    f.write(self._format_save_at(value))
                     continue
-                f.write(f"{field.name}: {getattr(self, field.name)}\n")
+
+                # Print the source for any callable field (plain functions and
+                # lambdas alike); classes fall through to their repr.
+                if callable(value) and not isinstance(value, type):
+                    f.write(f"{field.name}:\n")
+                    f.write(self._format_callable_source(value))
+                    continue
+
+                f.write(f"{field.name}: {value}\n")
