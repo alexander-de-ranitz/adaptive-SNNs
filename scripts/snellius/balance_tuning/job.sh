@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J delta_v_tuning
+#SBATCH -J balance_tuning
 #SBATCH -t 60
 #SBATCH -p gpu_a100
 #SBATCH -N 1
