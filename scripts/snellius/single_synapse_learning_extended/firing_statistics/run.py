@@ -54,8 +54,8 @@ def main():
         reward_noise_jump_rate=1.0,
         key=jr.PRNGKey(args.key_seed),
     )
-    cfg.min_noise_std = args.noise_level
-    cfg.noise_level = 0.0
+    cfg.noise_floor = args.noise_level
+    cfg.noise_scaling_factor = 0.0
     cfg.balance = args.balance
     cfg.initial_weight_matrix = jnp.tile(
         jnp.array(

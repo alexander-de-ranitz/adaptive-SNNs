@@ -121,7 +121,7 @@ def setup_simulation(
         fraction_excitatory_recurrent=config.fraction_excitatory_recurrent,
         rec_weight_std=config.rec_weight_std,
         mean_synaptic_delay=config.mean_synaptic_delay,
-        min_noise_std=config.min_noise_std,
+        min_noise_std=config.noise_floor,
         input_weight_std=config.input_weight_std,
         key=network_key,
         learn_I_weights=config.learn_I_weights,
@@ -161,7 +161,7 @@ def setup_simulation(
         "actor_warmup_time": jnp.asarray(config.actor_warmup_time),
         "critic_warmup_time": jnp.asarray(config.critic_warmup_time),
         "balance": jnp.asarray(config.balance),
-        "noise_scale_hyperparam": jnp.asarray(config.noise_level),
+        "noise_scale_hyperparam": jnp.asarray(config.noise_scaling_factor),
     }
     args.update(config.additional_args)
 

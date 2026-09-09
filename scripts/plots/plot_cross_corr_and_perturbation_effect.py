@@ -202,7 +202,7 @@ def plot_cross_correlation(ax):
     )
 
     config.use_noise = jnp.array([True, False])
-    config.min_noise_std = 10e-9
+    config.noise_floor = 10e-9
     config.balance = 0.05
 
     config.save_file = "results/perturbation_dist/correlation_run"

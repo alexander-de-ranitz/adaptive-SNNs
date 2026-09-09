@@ -31,7 +31,7 @@ def main():
         key=jr.PRNGKey(12),
     )
     cfg.balance = 0.01
-    cfg.min_noise_std = 1e-9
+    cfg.noise_floor = 1e-9
     cfg.initial_weight_matrix = jnp.tile(
         jnp.array([jnp.nan] * cfg.N_neurons + [0.5, 2, 0.5]),
         (cfg.N_neurons, 1),

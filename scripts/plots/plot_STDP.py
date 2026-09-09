@@ -12,7 +12,7 @@ from adaptive_snn.models.agent_env_system import SystemState
 from adaptive_snn.models.networks import (
     Eligibility,
     EligibilityLIFNetwork,
-    EligibilityState,
+    EligibilityLIFState,
     GatedLIFNetwork,
 )
 from adaptive_snn.simulation_configs.single_synapse_config import (
@@ -25,7 +25,7 @@ WINDOW_BUFFER = 10e-3
 
 
 class NoDecayGatedLIFNetwork(GatedLIFNetwork):
-    def compute_feature_drift(self, t, state: EligibilityState, args) -> Eligibility:
+    def compute_feature_drift(self, t, state: EligibilityLIFState, args) -> Eligibility:
         noise_std = self.compute_desired_noise_std(t, state, args)
         perturbations = state.perturbations
 
@@ -124,8 +124,8 @@ def run_sim(id, key):
     config = create_single_synapse_learning_config(key=key, initial_synapse_weight=5.0)
     config.t1 = 30
     config.network_cls = NoDecayGatedLIFNetwork
-    config.min_noise_std = 1e-9
-    config.noise_level = 0.0
+    config.noise_floor = 1e-9
+    config.noise_scaling_factor = 0.0
     config.delta_V = 0.5**13
 
     def save_fn(t, x: SystemState, args):

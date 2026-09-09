@@ -21,7 +21,7 @@ def main():
     cfg.balance = 0.01
     cfg.base_network_kwargs["balance_rate"] = 5.0
     cfg.base_network_kwargs["tau_spike_filter"] = 1.0
-    cfg.min_noise_std = 1e-9
+    cfg.noise_floor = 1e-9
 
     def save_fn(t, x, args):
         return (

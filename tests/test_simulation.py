@@ -347,7 +347,7 @@ def _minimal_sim_config():
         t1=1e-3,
         dt=1e-4,
         actor_warmup_time=0.0,
-        min_noise_std=1e-9,
+        noise_floor=1e-9,
         network_output_fn=(
             lambda t, agent_state, args, env_state: agent_state.network_state.S
         ),

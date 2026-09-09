@@ -26,7 +26,7 @@ def plot_noise_level_STA():
             key=key, initial_synapse_weight=1.0
         )
         config.balance = 0.01
-        config.min_noise_std = noise_level
+        config.noise_floor = noise_level
         config.t1 = 510
 
         save_at = SaveAt(
@@ -66,7 +66,7 @@ def plot_STA_voltage_trace():
     key = jr.PRNGKey(26358)
 
     config = create_single_synapse_learning_config(key=key, initial_synapse_weight=1.0)
-    config.min_noise_std = 0.0
+    config.noise_floor = 0.0
     config.save_at = save_at
     config.t1 = 100
     config.save_file = "results/STA_voltage_trace.npz"
