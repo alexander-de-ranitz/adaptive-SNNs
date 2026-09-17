@@ -15,7 +15,7 @@ def poisson_grid_encoding(
         state: A 1D array of shape (n_dim,) representing the continuous state to encode.
         grid_shape: A tuple of n_dim integers representing the number neurons along each dimension of the grid.
         grid_range: A list of n_dim tuples specifying the (min, max) range for each dimension of the state space.
-        tuning_curve_width: Optional; a 1D array of shape (n_dim,) specifying the width of the Gaussian tuning curves for each dimension as a fraction of the grid range. If none, defaults to 2 * 1/grid_shape for each dimension.
+        tuning_curve_width: Optional; a 1D array of shape (n_dim,) specifying the width of the Gaussian tuning curves for each dimension as a fraction of the grid range. If none, defaults to 4 * 1/grid_shape for each dimension.
         total_rate: The total firing rate to be distributed across the grid of neurons. The sum over the returned rates exactly equals total_rate.
 
     Returns:
@@ -30,7 +30,7 @@ def poisson_grid_encoding(
         raise ValueError(f"state must have length {n_dim}, but got {state.shape[0]}")
     if tuning_curve_width is None:
         tuning_curve_width = jnp.array(
-            [2 * (r[1] - r[0]) / (s) for r, s in zip(grid_range, grid_shape)]
+            [4 * (r[1] - r[0]) / (s) for r, s in zip(grid_range, grid_shape)]
         )
 
     # Grid of tuning curve centers
