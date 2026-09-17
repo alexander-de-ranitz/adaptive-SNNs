@@ -566,6 +566,10 @@ class AbstractLIFNetwork(AbstractNeuronModel):
 
         C_m * dV/dt = -g_L*(V - E_L) + g_E*(V - E_E) + g_I(V - E_I)
 
+        The currents are evaluated at the step-averaged voltage of the exact (exponential Euler)
+        solution over one step of size self.dt, so that a forward Euler step of the returned
+        dV/dt reproduces the exponential Euler update and cannot overshoot the reversal potentials.
+
         Where g_L is the leak conductance, g_E and g_I are the total excitatory and inhibitory conductances,
         and E_L, E_E, E_I are the respective reversal potentials. If external excitatory noise is provided in args,
         it is added to the total excitatory conductance. The conductances are ensured to be non-negative.
@@ -610,6 +614,22 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         # Ensure non-negative conductances
         total_E_conductances = jnp.clip(total_E_conductances, min=0.0)
         total_I_conductances = jnp.clip(total_I_conductances, min=0.0)
+
+        # Exponential Euler: with conductances held fixed over a step, V relaxes exponentially
+        # towards the equilibrium potential. Evaluating the currents at the step-averaged voltage
+        # makes our solver's forward Euler step exactly equal to an Exponential Euler step and keeps charge_in + charge_out consistent with the change in V.
+        # This prevents overshooting the reversal potentials and ensures that V remains bounded between the reversal potentials.
+        total_conductances = (
+            self.leak_conductance + total_E_conductances + total_I_conductances
+        )
+        equilibrium_potential = (
+            self.leak_conductance * self.resting_potential
+            + total_E_conductances * self.reversal_potential_E
+            + total_I_conductances * self.reversal_potential_I
+        ) / total_conductances
+        z = total_conductances * self.dt / self.membrane_capacitance
+        phi = jnp.where(z < 1e-6, 1.0 - z / 2, -jnp.expm1(-z) / z)
+        V = V + (equilibrium_potential - V) * (1.0 - phi)
 
         syn_I_current = (
             total_I_conductances
