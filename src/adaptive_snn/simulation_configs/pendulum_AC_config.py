@@ -12,6 +12,8 @@ from adaptive_snn.models.reward_prediction import LinearReadoutCritic
 from adaptive_snn.utils.config import SimulationConfig
 from adaptive_snn.utils.encoding import poisson_grid_encoding
 
+default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
 
 def create_pendulum_AC_config(
     N_neurons=1000,
@@ -32,7 +34,7 @@ def create_pendulum_AC_config(
     N_inputs = encoding_grid_shape[0] * encoding_grid_shape[1]
     total_input_rate = N_inputs * 60
     agent_output_scaling = (
-        1.0  # Scale the output so that it doesn't produce excessively large torques
+        0.25  # Scale the output so that it doesn't produce excessively large torques
     )
 
     key, spike_key, env_key = jr.split(key, 3)
@@ -60,16 +62,7 @@ def create_pendulum_AC_config(
         return encoding_spikes
 
     def critic_input_fn(t, x, args, input_spikes, env_state):
-        rates = poisson_grid_encoding(
-            env_state[:2],  # Only encode time and ang. vel, not time
-            grid_shape=encoding_grid_shape,
-            total_rate=total_input_rate,
-            grid_range=[
-                (-env.max_allowed_angle, env.max_allowed_angle),
-                (-env.max_allowed_angular_velocity, env.max_allowed_angular_velocity),
-            ],
-        ).flatten()
-        return rates * dt  # Noiseless non-spiking encoding
+        return input_spikes
 
     # Define network output function
     output_pop = jnp.arange(
