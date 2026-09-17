@@ -1,25 +1,37 @@
+import equinox as eqx
 import jax
 from jax import numpy as jnp
 from jaxtyping import Array
 
-from adaptive_snn.models.networks import (
-    AbstractLIFNetwork,
-    Eligibility,
-    EligibilityState,
-)
+from adaptive_snn.models.networks import AbstractLIFNetwork, LIFState
 from adaptive_snn.utils.operators import DefaultIfNone, ElementWiseMul
+
+
+class GatedEligibility(eqx.Module):
+    eligibility: Array  # Shape: (N_neurons, N_neurons + N_inputs)
+    mean_scaled_perturbations: (
+        Array  # Shape: (N_neurons, ) or (N_neurons * 2, ) if learn_I_weights is True
+    )
+
+
+class GatedLIFState(LIFState):
+    features: GatedEligibility
 
 
 class GatedLIFNetwork(AbstractLIFNetwork):
     tau_eligibility: float = 0.1  # Time constant for eligibility trace
+    tau_mean_scaled_noise: float = 1.0  # Time constant for mean eligibility trace
     delta_V: float = 0.001  # Steepness of the gating function
 
-    def init_features(self) -> Eligibility:
-        return Eligibility(
-            eligibility=jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs))
+    def init_features(self) -> GatedEligibility:
+        return GatedEligibility(
+            eligibility=jnp.zeros((self.N_neurons, self.N_neurons + self.N_inputs)),
+            mean_scaled_perturbations=jnp.zeros((self.N_neurons,))
+            if not self.learn_I_weights
+            else jnp.zeros((self.N_neurons * 2,)),
         )
 
-    def compute_feature_diffusion(self, t, state: EligibilityState, args):
+    def compute_feature_diffusion(self, t, state: GatedLIFState, args):
         tree = jax.tree.map(
             lambda arr: DefaultIfNone(
                 default=jnp.zeros_like(arr),
@@ -29,55 +41,66 @@ class GatedLIFNetwork(AbstractLIFNetwork):
         )
         return tree
 
-    def compute_feature_drift(self, t, state: EligibilityState, args) -> Eligibility:
+    def compute_feature_drift(self, t, state: GatedLIFState, args) -> GatedEligibility:
         noise_std = self.compute_desired_noise_std(t, state, args)
-        # When learning I weights, perturbations and noise_std both cover E weights
-        # (first N) and I weights (second N); otherwise only the E weights.
-        if self.learn_I_weights:
-            E_perturbations = state.perturbations[: self.N_neurons]
-            I_perturbations = state.perturbations[self.N_neurons :]
-            E_noise_std = noise_std[: self.N_neurons]
-            I_noise_std = noise_std[self.N_neurons :]
-        else:
-            E_perturbations = state.perturbations
-            I_perturbations = jnp.zeros((self.N_neurons,))
-            E_noise_std = noise_std
-            I_noise_std = noise_std
+        delta_V = args.get("delta_V", self.delta_V)
 
         # To decouple the absolute noise level from the synaptic weight changes, we normalize the noise by the desired noise std
         # In case the noise std is zero (no noise), avoid division by zero and set the perturbations to zero
-        E_perturbations = jnp.where(
-            E_noise_std != 0.0, E_perturbations / E_noise_std, 0.0
-        )
-        I_perturbations = jnp.where(
-            I_noise_std != 0.0, I_perturbations / I_noise_std, 0.0
+        normalized_perturbations = jnp.where(
+            noise_std != 0.0, state.perturbations / noise_std, 0.0
         )
 
-        delta_V = args.get("delta_V", self.delta_V)
+        # When learning I weights, perturbations and noise_std both cover E weights
+        # (first N) and I weights (second N); otherwise only the E weights.
+        gating = self.gating_function(state.V, delta_V)
+        if self.learn_I_weights:
+            gating = jnp.concatenate([gating, gating])
+
+        scaled_perturbations = normalized_perturbations * gating
+        d_mean_scaled_perturbations = (
+            scaled_perturbations - state.features.mean_scaled_perturbations
+        ) / self.tau_mean_scaled_noise
+
+        subtract_mean_perturbation = args.get("subtract_mean_perturbation", True)
+        scaled_perturbations = jnp.where(
+            subtract_mean_perturbation,
+            scaled_perturbations - state.features.mean_scaled_perturbations,
+            scaled_perturbations,
+        )
+
+        if self.learn_I_weights:
+            E_perturbations = scaled_perturbations[: self.N_neurons]
+            I_perturbations = scaled_perturbations[self.N_neurons :]
+        else:
+            E_perturbations = scaled_perturbations
+            I_perturbations = jnp.zeros((self.N_neurons,))
 
         d_eligibility_E = (
             E_perturbations[:, None]
-            * self.gating_function(state.V, delta_V)[:, None]
             / self.synaptic_increment
             * self.excitatory_mask[None, :]
             * state.G
         )
         d_eligibility_I = (
             I_perturbations[:, None]
-            * self.gating_function(state.V, delta_V)[:, None]
             / self.synaptic_increment
             * self.inhibitory_mask[None, :]
             * state.G
         )
         d_eligibility_decay = -state.features.eligibility / self.tau_eligibility
         d_eligibility = d_eligibility_E + d_eligibility_I + d_eligibility_decay
-        return Eligibility(eligibility=d_eligibility)
 
-    def compute_feature_update(self, t, state: EligibilityState, args) -> Eligibility:
+        return GatedEligibility(
+            eligibility=d_eligibility,
+            mean_scaled_perturbations=d_mean_scaled_perturbations,
+        )
+
+    def compute_feature_update(self, t, state: GatedLIFState, args) -> GatedEligibility:
         return state.features
 
-    def noise_shape_features(self) -> Eligibility:
-        return Eligibility(eligibility=None)
+    def noise_shape_features(self) -> GatedEligibility:
+        return GatedEligibility(eligibility=None, mean_scaled_perturbations=None)
 
     def gating_function(self, voltage: Array, delta_V: float) -> Array:
         """Gating function based on membrane voltage."""
@@ -105,14 +128,11 @@ class GatedLIFNetwork(AbstractLIFNetwork):
         return gating / normalization_factor
 
     def compute_weight_updates(
-        self, t, state: EligibilityState, args, RPE: Array
+        self, t, state: GatedLIFState, args, RPE: Array
     ) -> Array:
         # Compute weight changes
         learning_rate = args["get_learning_rate"](t, state, args)
-        gradient_clip = args.get("gradient_clip", jnp.inf)
-        dW = learning_rate * jnp.clip(
-            RPE * state.features.eligibility, min=-gradient_clip, max=gradient_clip
-        )
+        dW = learning_rate * RPE * state.features.eligibility
 
         dW = jnp.where(
             jnp.isnan(state.W), 0.0, dW
