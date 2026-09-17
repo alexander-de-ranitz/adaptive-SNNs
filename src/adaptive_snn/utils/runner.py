@@ -176,7 +176,6 @@ def setup_simulation(
         "RPE_fn",
         "feature_fn",
         "balance_rate",
-        "gradient_clip",
         "tau_charge",
     ):
         value = getattr(config, field_name, None)

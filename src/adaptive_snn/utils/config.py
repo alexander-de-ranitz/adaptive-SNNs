@@ -62,7 +62,6 @@ class SimulationConfig:
     get_critic_lr: Callable[..., Any] | None = None
     feature_fn: Callable[..., Any] | None = None
     balance_rate: Array | None = None
-    gradient_clip: Array | None = None
     tau_charge: Array | None = None
     network_output_fn: Callable[..., Any] | None = None
     network_output_shape: tuple[int, ...] = (1,)
