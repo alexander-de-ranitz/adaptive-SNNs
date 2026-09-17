@@ -29,7 +29,7 @@ class LinearReadoutCritic(AbstractRewardPredictor):
     """A simple spiking critic that uses a single feed-forward layer to predict the reward signal from the state-encoding population."""
 
     scale: float = 1.0
-    tau_filtered_input: float = 0.05  # Time constant for filtering the input features
+    tau_filtered_input: float = 0.1  # Time constant for filtering the input features
     input_dim: int = 1  # Dimension of the input features for reward prediction
     pre_trained_weights: str = None
     use_bias: bool = True  # Whether to include a bias term in the linear readout
