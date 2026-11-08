@@ -20,7 +20,7 @@ class GatedLIFState(LIFState):
 
 class GatedLIFNetwork(AbstractLIFNetwork):
     tau_eligibility: float = 0.1  # Time constant for eligibility trace
-    tau_mean_scaled_noise: float = 1.0  # Time constant for mean eligibility trace
+    tau_mean_scaled_noise: float = 10.0  # Time constant for mean eligibility trace
     delta_V: float = 0.001  # Steepness of the gating function
 
     def init_features(self) -> GatedEligibility:
@@ -53,7 +53,7 @@ class GatedLIFNetwork(AbstractLIFNetwork):
 
         # When learning I weights, perturbations and noise_std both cover E weights
         # (first N) and I weights (second N); otherwise only the E weights.
-        gating = self.gating_function(state.V, delta_V)
+        gating = self.gating_function(state.V, delta_V, S=state.S[: self.N_neurons])
         if self.learn_I_weights:
             gating = jnp.concatenate([gating, gating])
 
@@ -102,9 +102,10 @@ class GatedLIFNetwork(AbstractLIFNetwork):
     def noise_shape_features(self) -> GatedEligibility:
         return GatedEligibility(eligibility=None, mean_scaled_perturbations=None)
 
-    def gating_function(self, voltage: Array, delta_V: float) -> Array:
+    def gating_function(
+        self, voltage: Array, delta_V: float, S: Array | None = None
+    ) -> Array:
         """Gating function based on membrane voltage."""
-
         # Voltage might be temporarily above the firing threshold within a single step,
         # we clip the voltage to ensure the gating function does not become too large in this case
         voltage = jnp.clip(voltage, min=None, max=self.firing_threshold)
@@ -112,6 +113,19 @@ class GatedLIFNetwork(AbstractLIFNetwork):
         default_area = 1.0 * (
             self.firing_threshold - self.resting_potential
         )  # Area under the default gating function (which is constant at 1)
+
+        # We use delta_V = jnp.inf to represent a binary gating function,
+        # which is high when the neuron spikes and 0 otherwise.
+        # Note that S is actually 1 step delayed, but this does not make a meaningful difference
+        # for us since we use dt=0.1ms and the noise varies on a much slower timescale (6 ms)
+        is_binary = jnp.isinf(delta_V)
+        if S is None:
+            S = jnp.zeros_like(voltage)
+        binary_gate = S / self.dt * default_area
+
+        # Compute the gating function for non-binary case
+        # Set delta_V to a dummy 1.0 to avoid NaNs
+        delta_V = jnp.where(is_binary, 1.0, delta_V)
         driving_force = self.reversal_potential_E - voltage
 
         integral = lambda V: (self.reversal_potential_E + delta_V - V) * -jnp.exp(
@@ -125,7 +139,9 @@ class GatedLIFNetwork(AbstractLIFNetwork):
         )
         normalization_factor = area / default_area
 
-        return gating / normalization_factor
+        gating = gating / normalization_factor
+
+        return jnp.where(is_binary, binary_gate, gating)
 
     def compute_weight_updates(
         self, t, state: GatedLIFState, args, RPE: Array
@@ -138,35 +154,3 @@ class GatedLIFNetwork(AbstractLIFNetwork):
             jnp.isnan(state.W), 0.0, dW
         )  # No weight change for non-existing connections
         return dW
-
-
-def plot_gating_function():
-    import matplotlib.pyplot as plt
-
-    network = GatedLIFNetwork(N_neurons=1, dt=1e-4, N_inputs=0)
-    voltages = jnp.linspace(-75 * 1e-3, -50 * 1e-3, 100)  # From -80 mV to +20 mV
-    gating_values = network.gating_function(voltages, delta_V=network.delta_V)
-    plt.figure(figsize=(3.5, 2))
-    plt.hlines(
-        1.0,
-        -77 * 1e-3,
-        -48 * 1e-3,
-        colors="k",
-        linestyles="--",
-        label="Constant gating function",
-    )
-    plt.plot(voltages, gating_values, c="k", label="Voltage-dependent gating function")
-    plt.xlabel("Membrane Voltage (mV)")
-    plt.xlim(voltages[0], voltages[-1])
-    plt.xticks(
-        jnp.arange(-75, -50 + 1, 5) * 1e-3, labels=[-75, -70, -65, -60, -55, -50]
-    )
-    plt.ylabel("Gating Function Value")
-    plt.legend(loc="upper left")
-    plt.grid(alpha=0.3)
-    plt.savefig("../figures/gating_function.pdf")
-    plt.show()
-
-
-if __name__ == "__main__":
-    plot_gating_function()

@@ -336,7 +336,6 @@ def test_env_warmup_disables_rpe():
 def _minimal_sim_config():
     """Config used for testing that just runs 10 steps of a small network."""
     from adaptive_snn.models.environments import SpikeRateEnvironment
-    from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
     from adaptive_snn.utils.config import SimulationConfig
 
     N_neurons, N_inputs = 2, 1
@@ -357,10 +356,51 @@ def _minimal_sim_config():
         RPE_fn=lambda t, x, args, reward: reward,
         environment_model=SpikeRateEnvironment,
         environment_kwargs={"rate": 1, "dim": N_neurons},
-        reward_prediction_model=MovingAverageRewardPredictor,
-        reward_predictor_kwargs={"rate": 0.0, "dim": 1},
         use_noise=jnp.array([True] * N_neurons),
     )
+
+
+def _I_weight_drift(balance_rate, get_balance_rate=None):
+    """I weight drift of the single synapse setup for a fixed, unbalanced charge state."""
+    import jax.random as jr
+
+    from adaptive_snn.models.networks import LIFNetwork
+    from adaptive_snn.simulation_configs.single_synapse_config import (
+        create_single_synapse_config,
+    )
+    from adaptive_snn.utils.runner import setup_simulation
+
+    config = create_single_synapse_config(
+        jr.PRNGKey(0), network_cls=LIFNetwork, balance=0.01, balance_rate=balance_rate
+    )
+    config.get_balance_rate = get_balance_rate
+    model, args, _ = setup_simulation(config)
+    state = model.initial.agent_state.network_state
+    state = eqx.tree_at(
+        lambda s: (s.charge_in, s.charge_out),
+        state,
+        (jnp.array([1.0]), jnp.array([-0.5])),
+    )
+    return model.agent.network.compute_I_weight_drift(0.0, state, args)
+
+
+def test_balance_rate_scales_I_weight_drift():
+    default_drift = _I_weight_drift(
+        balance_rate=None
+    )  # Network default balance rate (1.0)
+    drift = _I_weight_drift(balance_rate=0.3)
+    assert jnp.any(default_drift != 0.0)
+    assert jnp.allclose(drift, 0.3 * default_drift)
+
+
+def test_get_balance_rate_overrides_and_reads_balance_rate():
+    # As in the pendulum runs: get_balance_rate is a schedule that uses balance_rate as a (batchable) parameter
+    default_drift = _I_weight_drift(balance_rate=None)
+    drift = _I_weight_drift(
+        balance_rate=0.3,
+        get_balance_rate=lambda t, state, args: 2.0 * args["balance_rate"],
+    )
+    assert jnp.allclose(drift, 0.6 * default_drift)
 
 
 def test_named_result_save(tmp_path):

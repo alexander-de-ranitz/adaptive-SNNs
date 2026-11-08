@@ -7,7 +7,7 @@ from adaptive_snn.models.environments import (
     SpikeRateEnvironment,
 )
 from adaptive_snn.models.networks import Agent
-from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
+from adaptive_snn.models.reward_prediction import NullRewardPredictor
 from adaptive_snn.solver import solve_ODE
 
 
@@ -24,7 +24,7 @@ def test_spike_rate_env():
     network = DummySpikingNetwork(output_dim=dim, output_rates=rates, dt=dt0)
     agent = Agent(
         neuron_model=network,
-        reward_prediction_model=MovingAverageRewardPredictor(rate=0.0),
+        reward_prediction_model=NullRewardPredictor(),
     )
     model = AgentEnvSystem(
         agent=agent,

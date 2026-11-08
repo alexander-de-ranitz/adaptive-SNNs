@@ -8,13 +8,13 @@ from adaptive_snn.models.reward_prediction.base import (
 from adaptive_snn.utils.operators import DefaultIfNone, ElementWiseMul
 
 
-class MovingAverageRewardPredictor(AbstractRewardPredictor):
-    rate: float = 1  # Rate at which the reward is integrated
-    dim: int = 1  # Dimension of the reward process
+class NullRewardPredictor(AbstractRewardPredictor):
+    """No reward prediction: the predicted value is constant at zero.
 
-    def __init__(self, rate: float = 1, dim: int = 1):
-        self.rate = rate
-        self.dim = dim
+    Used when the RPE does not depend on a reward prediction (e.g. RPE = reward).
+    """
+
+    dim: int = 1  # Dimension of the (zero) reward prediction
 
     @property
     def initial(self):
@@ -24,6 +24,9 @@ class MovingAverageRewardPredictor(AbstractRewardPredictor):
     def noise_shape(self):
         return RewardPrediction(value=None)
 
+    def drift(self, t, x: RewardPrediction, args, reward, RPE):
+        return RewardPrediction(value=jnp.zeros_like(x.value))
+
     def diffusion(self, t, x: RewardPrediction, args):
         return RewardPrediction(
             value=DefaultIfNone(
@@ -32,9 +35,6 @@ class MovingAverageRewardPredictor(AbstractRewardPredictor):
             )
         )
 
-    def drift(self, t, x: RewardPrediction, args, reward, RPE):
-        return RewardPrediction(value=self.rate * (reward - x.value))
-
     def terms(self, key):
         process_noise = dfx.UnsafeBrownianPath(
             shape=self.noise_shape, key=key, levy_area=dfx.SpaceTimeLevyArea
@@ -42,7 +42,3 @@ class MovingAverageRewardPredictor(AbstractRewardPredictor):
         return dfx.MultiTerm(
             dfx.ODETerm(self.drift), dfx.ControlTerm(self.diffusion, process_noise)
         )
-
-    def update(self, t, x: RewardPrediction, args):
-        """No non-differential updates needed for this reward model."""
-        return x

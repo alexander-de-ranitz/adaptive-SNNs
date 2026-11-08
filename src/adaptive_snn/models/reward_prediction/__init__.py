@@ -3,14 +3,10 @@ from adaptive_snn.models.reward_prediction.base import (
     RewardPrediction,
 )
 from adaptive_snn.models.reward_prediction.critic import LinearReadoutCritic
-from adaptive_snn.models.reward_prediction.moving_average import (
-    MovingAverageRewardPredictor,
-)
-from adaptive_snn.models.reward_prediction.student_teacher import StudentRewardModel
+from adaptive_snn.models.reward_prediction.null import NullRewardPredictor
 
 __all__ = [
-    "MovingAverageRewardPredictor",
-    "StudentRewardModel",
+    "NullRewardPredictor",
     "AbstractRewardPredictor",
     "RewardPrediction",
     "LinearReadoutCritic",

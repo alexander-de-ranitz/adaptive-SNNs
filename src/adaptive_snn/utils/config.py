@@ -15,7 +15,7 @@ from adaptive_snn.models.environments import AbstractEnvironment, SpikeRateEnvir
 from adaptive_snn.models.networks import AbstractNeuronModel, Agent, LIFNetwork
 from adaptive_snn.models.reward_prediction import (
     AbstractRewardPredictor,
-    MovingAverageRewardPredictor,
+    NullRewardPredictor,
 )
 
 
@@ -53,24 +53,23 @@ class SimulationConfig:
     base_network_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
     use_noise: Array | None = None
     delta_V: Array | None = None
-    gamma: float | Array | None = None
     critic_input_fn: Callable[..., Any] | None = None
     get_balance_rate: Callable[..., Any] | None = None
     env_warmup_fn: Callable[..., Any] | None = None
     episode_end_fn: Callable[..., Any] | None = None
     RPE_fn: Callable[..., Any] | None = None
     get_critic_lr: Callable[..., Any] | None = None
-    feature_fn: Callable[..., Any] | None = None
-    balance_rate: Array | None = None
+    # Rate at which I weights are adjusted to maintain balance (None: the network's default). It is available to
+    # get_balance_rate as args["balance_rate"]. If get_balance_rate is set, it takes precedence: it can use
+    # balance_rate as a parameter (e.g. the floor of a schedule), which, unlike a lambda, can differ per batched run.
+    balance_rate: float | Array | None = None
     tau_charge: Array | None = None
     network_output_fn: Callable[..., Any] | None = None
     network_output_shape: tuple[int, ...] = (1,)
     learn_I_weights: bool = False
 
-    # Reward model
-    reward_prediction_model: type[AbstractRewardPredictor] = (
-        MovingAverageRewardPredictor
-    )
+    # Reward model (default: no reward prediction)
+    reward_prediction_model: type[AbstractRewardPredictor] = NullRewardPredictor
     reward_predictor_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
     reward_fn: Callable[..., Any] | None = None
 

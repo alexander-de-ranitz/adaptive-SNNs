@@ -8,8 +8,8 @@ from diffrax import SaveAt
 from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit
 
-from adaptive_snn.simulation_configs.single_synapse_learning_AC import (
-    create_single_synapse_learning_config,
+from adaptive_snn.simulation_configs.single_synapse_config import (
+    create_single_synapse_config,
 )
 from adaptive_snn.utils.runner import run_simulation
 from adaptive_snn.utils.save_helper import save_part_of_state
@@ -22,12 +22,9 @@ def plot_noise_level_STA():
     min_noises = [1e-10, 1e-9, 10e-9]
     for i, noise_level in enumerate(min_noises):
         key = jr.fold_in(key, i)
-        config = create_single_synapse_learning_config(
-            key=key, initial_synapse_weight=1.0
+        config = create_single_synapse_config(
+            key, learned_weight=1.0, noise_floor=noise_level, balance=0.01, t1=510
         )
-        config.balance = 0.01
-        config.noise_floor = noise_level
-        config.t1 = 510
 
         save_at = SaveAt(
             ts=jnp.linspace(10, config.t1, int((config.t1 - 10) / config.dt)),
@@ -65,10 +62,10 @@ def plot_STA_voltage_trace():
 
     key = jr.PRNGKey(26358)
 
-    config = create_single_synapse_learning_config(key=key, initial_synapse_weight=1.0)
-    config.noise_floor = 0.0
+    config = create_single_synapse_config(
+        key, learned_weight=1.0, noise_floor=0.0, t1=100
+    )
     config.save_at = save_at
-    config.t1 = 100
     config.save_file = "results/STA_voltage_trace.npz"
     sol, model = run_simulation(config, save_results=True)
 

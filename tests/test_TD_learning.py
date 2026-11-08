@@ -10,7 +10,10 @@ from adaptive_snn.models.reward_prediction.critic import (
     CriticPrediction,
     LinearReadoutCritic,
 )
-from adaptive_snn.simulation_configs.pendulum_AC_config import create_pendulum_AC_config
+from adaptive_snn.simulation_configs.pendulum_AC_config import (
+    TAU_DISCOUNT,
+    create_pendulum_AC_config,
+)
 from adaptive_snn.solver import solve_ODE
 from adaptive_snn.utils.runner import setup_simulation
 
@@ -57,10 +60,9 @@ def test_TD_error():
     )
 
     # Check that the TD error is computed correctly
+    gamma = 1 - cfg.dt / TAU_DISCOUNT
     # this is the Euler discretization of the TD error: RPE = reward - predicted_reward + gamma * new_value - previous_value
-    expected_RPE = (
-        (-0.2 - 0.15) + args["gamma"] * expected_new_value - expected_previous_value
-    )
+    expected_RPE = (-0.2 - 0.15) + gamma * expected_new_value - expected_previous_value
     assert jnp.allclose(
         new_state.agent_state.RPE, jnp.array([expected_RPE]), atol=1e-10, rtol=1e-10
     )

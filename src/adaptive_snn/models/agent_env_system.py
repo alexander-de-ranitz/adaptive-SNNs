@@ -28,7 +28,6 @@ class AnalyticsState(eqx.Module):
         mean_reward: Running mean of the reward signal (1,)
     """
 
-    integrals: Array
     episode_count: Array
     episode_length_sum: Array
     time_since_reset: Array
@@ -72,7 +71,6 @@ class AgentEnvSystem(eqx.Module):
             new_env_state = self.environment.reset(t, x.environment_state, args)
             new_agent_state = self.agent.reset(t, x.agent_state, args)
             analytics = AnalyticsState(
-                integrals=x.analytics.integrals,
                 episode_count=x.analytics.episode_count + 1.0,
                 episode_length_sum=x.analytics.episode_length_sum
                 + x.analytics.time_since_reset,
@@ -125,7 +123,6 @@ class AgentEnvSystem(eqx.Module):
             environment_state=environment_state,
             agent_output=agent_output,
             reward_signal=x.reward_signal,
-            mean_reward=x.mean_reward,
             analytics=x.analytics,
         )
 
@@ -172,7 +169,6 @@ class AgentEnvSystem(eqx.Module):
             env_drift,
             agent_output_drift,
             reward_signal_drift,
-            mean_reward_drift,
             analytics_drift,
         )
 
@@ -194,12 +190,6 @@ class AgentEnvSystem(eqx.Module):
             else_do=ElementWiseMul(jnp.zeros_like(x.agent_output, dtype=default_float)),
         )
 
-        # mean_reward is not subject to noise
-        mean_reward_diffusion = DefaultIfNone(
-            default=jnp.zeros_like(x.mean_reward),
-            else_do=ElementWiseMul(jnp.zeros_like(x.mean_reward, dtype=default_float)),
-        )
-
         # Analytics are not subject to noise
         analytics_diffusion = jax.tree.map(
             lambda arr: DefaultIfNone(
@@ -215,7 +205,6 @@ class AgentEnvSystem(eqx.Module):
                 env_diffusion,
                 agent_output_diffusion,
                 reward_diffusion,
-                mean_reward_diffusion,
                 analytics_diffusion,
             )
         )
@@ -227,9 +216,7 @@ class AgentEnvSystem(eqx.Module):
             environment_state=self.environment.noise_shape,
             agent_output=None,
             reward_signal=None,
-            mean_reward=None,
             analytics=AnalyticsState(
-                integrals=None,
                 episode_count=None,
                 episode_length_sum=None,
                 time_since_reset=None,

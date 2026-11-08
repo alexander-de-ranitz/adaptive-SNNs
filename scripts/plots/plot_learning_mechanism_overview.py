@@ -28,7 +28,7 @@ from adaptive_snn.models import (
 )
 from adaptive_snn.models.environments import SpikeRateEnvironment
 from adaptive_snn.models.networks import Agent, GatedLIFNetwork
-from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
+from adaptive_snn.models.reward_prediction import NullRewardPredictor
 from adaptive_snn.solver import solve_ODE
 from adaptive_snn.utils.save_helper import save_part_of_state
 
@@ -71,7 +71,7 @@ def main():
 
         agent = Agent(
             neuron_model=neuron_model,
-            reward_prediction_model=MovingAverageRewardPredictor(rate=0.0),
+            reward_prediction_model=NullRewardPredictor(),
         )
 
         model = AgentEnvSystem(
@@ -106,7 +106,6 @@ def main():
             args,
             env_state: agent_state.network_state.S[0].reshape((1,)),
             "use_noise": jnp.array([True]),
-            "feature_fn": lambda t, x, args: jnp.zeros(1),
         }
 
         # Define what to save

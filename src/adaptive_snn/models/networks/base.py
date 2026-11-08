@@ -217,7 +217,7 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         )
 
         # Set synaptic delays
-        # TODO: Tune this properly
+        # We draw from a uniform distriution from [0, 2*mean (=3)]. This range is chosen arbitrarily.
         key, subkey = jr.split(key)
         self.synaptic_delay_matrix = jr.uniform(
             subkey,
@@ -887,8 +887,8 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         weights = jnp.concatenate([rec_weights, input_weights], axis=1)
 
         weights = jnp.where(
-            self.inhibitory_mask[None, :], weights * 5.0, weights
-        )  # TODO: temporary fix
+            self.inhibitory_mask[None, :], weights * 8.0, weights
+        )  # 8.0 gives roughly a good E/I balance for most inits, but can be tuned if needed
 
         return weights
 
@@ -919,23 +919,5 @@ class AbstractLIFNetwork(AbstractNeuronModel):
         return desired_noise_std
 
     def reset(self, t, state: LIFState, args):
-        """Reset the network state to the initial state."""
+        """Resets the network: no-op"""
         return state
-        # current_mean_V = state.mean_V
-        # current_weights = state.W
-        # current_charge_in = state.charge_in
-        # current_charge_out = state.charge_out
-
-        # reset_state = self.initial
-        # # We want to keep the same weights but reset all other state variables to their initial values, so we replace the weights in the initial state with the current weights
-        # reset_state = eqx.tree_at(lambda s: s.W, reset_state, current_weights)
-
-        # # We also want to keep the current mean voltage to prevent large transients after reset
-        # # Otherwise, there will be a large influx in charge before the network starts spiking and producing recurrent inhibition
-        # reset_state = eqx.tree_at(lambda s: s.mean_V, reset_state, current_mean_V)
-
-        # reset_state = eqx.tree_at(lambda s: s.charge_in, reset_state, current_charge_in)
-        # reset_state = eqx.tree_at(
-        #     lambda s: s.charge_out, reset_state, current_charge_out
-        # )
-        # return reset_state

@@ -24,7 +24,6 @@ DEFAULT_ARGS = {
         )  # shape = (n_neurons, n_inputs)
     ),
     "get_desired_balance": lambda t, x, args: 0.0,
-    "RPE": jnp.array(0.0),
 }
 
 
@@ -105,8 +104,10 @@ def solve_ODE(
     )
 
 
-def _stack_pytree(pytrees):
+def stack_pytrees(pytrees):
     """Stack array leaves across a sequence of pytrees with identical structure.
+
+    If `pytrees` is not a list or tuple, it is assumed to be stacked already and returned as is.
 
     Non-array leaves (callables, Python ints/floats, etc.) cannot be stacked, so they
     are only valid if identical across all pytrees (the value from the first element
@@ -158,25 +159,27 @@ def solve_ODE_batched(
     """
     Batched version of solve_ODE, which runs multiple simulations in parallel.
 
-    `args` is broadcast to every batch element (all simulations must share the same
-    args). Models, initial states, and keys are stacked along a leading batch dimension.
+    Models, initial states, args, and keys are stacked along a leading batch dimension.
+    Each of them can also be passed already stacked (see `stack_pytrees`), which avoids re-stacking
+    on every call. When calling this repeatedly (e.g. per chunk of a long simulation), stacking once
+    before the first call is more efficient than stacking on every call.
 
     Args:
-        models: Sequence of models
+        models: Sequence of models, or stacked models.
         solver: A diffrax solver implementing `.step(...)`.
         t0, t1: Simulation interval.
         dt0: step size.
-        y0s: Initial PyTree states, one per simulation.
+        y0s: Initial PyTree states, one per simulation, or stacked states.
         save_at: SaveAt object specifying when to save states. Shared across all simulations.
-        args: List of args dicts, one per simulation (PyTree or None).
-        keys: Sequence of PRNG keys, one per simulation.
+        args: List of args dicts, one per simulation (PyTree or None), or stacked args.
+        keys: Sequence of PRNG keys, one per simulation, or a stacked key array.
     Returns:
         diffrax.Solution with (ts, ys) carrying a leading batch dimension.
     """
-    stacked_models = _stack_pytree(models)
-    stacked_y0s = _stack_pytree(y0s)
-    stacked_keys = jnp.stack(keys)
-    stacked_args = _stack_pytree(args) if args is not None else None
+    stacked_models = stack_pytrees(models)
+    stacked_y0s = stack_pytrees(y0s)
+    stacked_keys = keys if eqx.is_array(keys) else jnp.stack(keys)
+    stacked_args = stack_pytrees(args) if args is not None else None
 
     @eqx.filter_vmap
     def run_in_parallel(model, y0, key, args):

@@ -13,6 +13,7 @@ from adaptive_snn.utils.config import SimulationConfig
 from adaptive_snn.utils.encoding import poisson_grid_encoding
 
 default_float = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+TAU_DISCOUNT = 0.1  # Time constant of the TD discount: gamma = 1 - dt / TAU_DISCOUNT
 
 
 def create_pendulum_AC_config(
@@ -27,8 +28,7 @@ def create_pendulum_AC_config(
     dt = 1e-4
     lr = 0.0
     noise_scaling_factor = 0.0
-    tau_discount = 0.1
-    gamma = 1 - dt / tau_discount
+    gamma = 1 - dt / TAU_DISCOUNT
     noise_floor = 5e-9
     balance = 0.01
     N_inputs = encoding_grid_shape[0] * encoding_grid_shape[1]
@@ -84,12 +84,10 @@ def create_pendulum_AC_config(
         return env.reward_fn(t, x.environment_state, args, x.agent_output)
 
     def save(t, x: SystemState, args):
-        # return (x.environment_state, x.reward_signal, x.agent_state.reward_predictor_state.value, x.agent_state.network_state.filtered_spike_trains)
         return x.agent_state.network_state.S.astype(jnp.bool_)
 
     save_at = SaveAt(steps=True, fn=save)
 
-    model_cls = model_cls
     cfg = SimulationConfig(
         network_cls=model_cls,
         base_network_kwargs={"tau_spike_filter": 50e-3},
@@ -128,8 +126,7 @@ def create_pendulum_AC_config(
             "pre_trained_weights": None,
         },
         delta_V=jnp.power(jnp.float64(2), jnp.float64(-13)),
-        critic_input_fn=critic_input_fn,  # lambda t, x, args, input_spikes, env_state: input_spikes,
-        gamma=gamma,
+        critic_input_fn=critic_input_fn,
         get_balance_rate=lambda t, state, args: jnp.max(
             jnp.array([10 - t * 9.0 / 100, 1.0])
         ),
@@ -150,7 +147,3 @@ def create_pendulum_AC_config(
         ),
     )
     return cfg
-
-
-if __name__ == "__main__":
-    cfg = create_pendulum_AC_config()

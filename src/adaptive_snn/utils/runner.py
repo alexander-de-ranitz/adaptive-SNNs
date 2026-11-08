@@ -163,19 +163,21 @@ def setup_simulation(
         "balance": jnp.asarray(config.balance),
         "noise_scale_hyperparam": jnp.asarray(config.noise_scaling_factor),
     }
+    if config.balance_rate is not None:
+        # Kept in args as an array (not baked into the lambda), so that batched runs can use a different rate per run.
+        # A get_balance_rate set in the config overrides this constant rate below, and can read args["balance_rate"].
+        args["balance_rate"] = jnp.asarray(config.balance_rate)
+        args["get_balance_rate"] = lambda t, state, args: args["balance_rate"]
     args.update(config.additional_args)
 
     for field_name in (
         "use_noise",
         "delta_V",
-        "gamma",
         "critic_input_fn",
         "get_balance_rate",
         "env_warmup_fn",
         "episode_end_fn",
         "RPE_fn",
-        "feature_fn",
-        "balance_rate",
         "tau_charge",
     ):
         value = getattr(config, field_name, None)

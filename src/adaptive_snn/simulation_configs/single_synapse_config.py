@@ -7,104 +7,108 @@ jax.config.update(
 import jax.random as jr
 from diffrax import SaveAt
 from jax import numpy as jnp
+from jaxtyping import Array
 
 from adaptive_snn.models.environments import SingleSynapseLearningEnv
-from adaptive_snn.models.networks import EligibilityLIFNetwork, GatedLIFNetwork
-from adaptive_snn.models.noise import PoissonJumpProcess
-from adaptive_snn.models.reward_prediction import MovingAverageRewardPredictor
+from adaptive_snn.models.networks import AbstractNeuronModel, GatedLIFNetwork
 from adaptive_snn.utils.config import SimulationConfig
-from adaptive_snn.utils.save_helper import save_part_of_state
+
+# Poisson input rates (Hz): background E input, background I input, and the input to the synapse to be learned
+RATES = jnp.array([4990.0, 1250.0, 10.0])
+I_TO_E_RATIO = 8.0  # Background I weight relative to the background E weight
+DT = 1e-4
 
 
-def create_single_synapse_learning_config(
-    lr=0.0,
-    noise_level=0.0,
-    reward_noise_jump_rate=0.0,
-    initial_synapse_weight=0.0,
-    key=jr.PRNGKey(0),
-    network_cls: GatedLIFNetwork | EligibilityLIFNetwork = GatedLIFNetwork,
+def create_single_synapse_config(
+    key: Array,
+    *,
+    network_cls: type[AbstractNeuronModel] = GatedLIFNetwork,
+    N_neurons: int | None = None,
+    twin: bool = False,
+    background_weight: float = 1.0,
+    learned_weight: float = 0.0,
+    noise_floor: float = 1e-9,
+    balance: float = jnp.nan,
+    balance_rate: float | None = None,
+    t1: float = 100.0,
 ) -> SimulationConfig:
-    t0 = 0
-    t1 = 100
-    dt = 1e-4
-    N_neurons = 2
-    N_inputs = 3
-    min_noise_std = 1e-9
-    balance = jnp.nan
-    rates = jnp.array(
-        [5000, 1250, 10]
-    )  # High frequency background input and one moderate frequency input
-    initial_weights = jnp.tile(
-        jnp.array([jnp.nan] * N_neurons + [1.0, 8.0, initial_synapse_weight]),
-        (N_neurons, 1),
-    )
+    """Unconnected neurons that all receive the same three Poisson inputs: background E and I inputs, and a low-rate
+    input to the synapse to be learned. Weights are frozen (lr = 0) and there is no reward prediction (RPE = reward).
 
-    key, spike_key = jr.split(key, 2)
+    Every spike of the network output increments the reward, which decays exponentially. The input spike trains are
+    drawn from args["input_key"], such that batched runs can each receive their own inputs.
 
-    network_output_fn = lambda t, agent_state, args, env_state: (
-        agent_state.network_state.S[0] - agent_state.network_state.S[1]
-    ).reshape((1,))
+    Args:
+        key: PRNG key, split into the simulation key and the input key.
+        network_cls: Network class to simulate.
+        N_neurons: Number of neurons (default 1). Not to be set when twin=True.
+        twin: If True, simulate two neurons with identical inputs, weights and initial state, of which only neuron 0
+            is perturbed. The network output (and thus the reward) is the spike train of neuron 0 minus that of its
+            unperturbed twin, such that the RPE equals the causal effect of the perturbations on the reward.
+            Balancing should then remain disabled, as it would make the twin drift away from neuron 0.
+        background_weight: Weight of the background E synapse. The background I weight is I_TO_E_RATIO times larger.
+        learned_weight: Weight of the synapse to be learned.
+        noise_floor: Std of the perturbations (the noise is not scaled with the input variance).
+        balance: Target E/I balance; NaN disables balancing.
+        balance_rate: Rate at which the I weights are adjusted to reach the target balance (None: network default).
+        t1: End time of the simulation.
+    """
+    if twin and N_neurons not in (None, 2):
+        raise ValueError(
+            f"twin=True simulates exactly 2 neurons, got N_neurons={N_neurons}"
+        )
+    N_neurons = 2 if twin else (1 if N_neurons is None else N_neurons)
+    N_inputs = len(RATES)
+    key, input_key = jr.split(key)
 
     def input_spike_fn(t, x, args):
-        step_idx = jnp.asarray(jnp.rint((t - t0) / dt), dtype=jnp.int64)
-        spikes_1d = jr.poisson(
-            jr.fold_in(spike_key, step_idx),
-            rates * dt,
-            shape=(1, N_inputs),
+        step_idx = jnp.asarray(jnp.rint(t / DT), dtype=jnp.int64)
+        spikes = jr.poisson(
+            jr.fold_in(args["input_key"], step_idx), RATES * DT, shape=(1, N_inputs)
         )
-        return jnp.tile(spikes_1d, (N_neurons, 1))
+        return jnp.tile(spikes, (N_neurons, 1))
 
-    save_at = SaveAt(
-        ts=jnp.linspace(t0, t1, 50000),
-        fn=lambda t, x, args: save_part_of_state(
-            x,
-            environment_state=True,
-            W=True,
-            G=True,
-            RPE=True,
-            reward_noise=True,
-            eligibility=True,
-            V=True,
-            perturbations=True,
-        ),
-    )
+    if twin:
+        network_output_fn = lambda t, agent_state, args, env_state: jnp.atleast_1d(
+            agent_state.network_state.S[0] - agent_state.network_state.S[1]
+        )
+        use_noise = jnp.array([True, False])
+    else:
+        network_output_fn = lambda t, agent_state, args, env_state: jnp.atleast_1d(
+            agent_state.network_state.S[0]
+        )
+        use_noise = jnp.array([True] * N_neurons)
 
-    cfg = SimulationConfig(
+    return SimulationConfig(
         network_cls=network_cls,
         N_neurons=N_neurons,
         N_inputs=N_inputs,
-        balance=balance,
         input_types=jnp.array([1, 0, 1]),
-        t0=t0,
-        t1=t1,
-        dt=dt,
-        initial_weight_matrix=initial_weights,
+        initial_weight_matrix=jnp.tile(
+            jnp.array(
+                [jnp.nan] * N_neurons
+                + [background_weight, I_TO_E_RATIO * background_weight, learned_weight]
+            ),
+            (N_neurons, 1),
+        ),
         mean_synaptic_delay=0.0,
-        lr=jnp.zeros_like(initial_weights),
-        noise_scaling_factor=jnp.array([noise_level] * N_neurons),
-        noise_floor=min_noise_std,
-        actor_warmup_time=0,
+        t0=0.0,
+        t1=t1,
+        dt=DT,
+        actor_warmup_time=0.0,
+        lr=0.0,
+        balance=balance,
+        balance_rate=balance_rate,
+        noise_floor=noise_floor,
+        noise_scaling_factor=0.0,
+        use_noise=use_noise,
         key=key,
-        save_at=save_at,
-        save_file=f"results/ssl_{network_cls.__name__}_lr{lr:.2f}_nl{noise_level:.2f}_rnl{reward_noise_jump_rate:.2f}.npz",
+        save_at=SaveAt(t1=True),
         network_output_fn=network_output_fn,
         input_spike_fn=input_spike_fn,
-        reward_fn=lambda t, x, args: x.environment_state.reward
-        + x.environment_state.reward_noise,  # The reward is determined by the environment, so we just return it here.
+        additional_args={"input_key": input_key},
         environment_model=SingleSynapseLearningEnv,
-        environment_kwargs={
-            "tau_reward": 0.1,
-            "reward_dim": 1,
-            "reward_noise_process": PoissonJumpProcess(
-                jump_rate=reward_noise_jump_rate, jump_std=1.0, jump_mean=0.0
-            ),
-        },
-        reward_prediction_model=MovingAverageRewardPredictor,  # Not used here, but required by the runner. Rate = 0 -> always predicts 0 reward.
-        reward_predictor_kwargs={"rate": 0.0, "dim": 1},
-        use_noise=jnp.array([True, False]),  # Only the first neuron has noise
-        RPE_fn=lambda t,
-        x,
-        args,
-        reward: reward,  # RPE is just the reward here since we have no reward prediction. Everything is handled inside the environment.
+        environment_kwargs={"tau_reward": 0.01, "reward_dim": 1},
+        reward_fn=lambda t, x, args: x.environment_state.reward,
+        RPE_fn=lambda t, x, args, reward: reward,
     )
-    return cfg
