@@ -1,3 +1,5 @@
+# TODO: this is outdated. Update if useful for thesis or remove otherwise.
+
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -8,24 +10,24 @@ import jax.random as jr
 import matplotlib.pyplot as plt
 from diffrax import SaveAt
 
-from adaptive_SNN.models.agent_env_system import SystemState
-from adaptive_SNN.models.networks import (
-    ElibilityState,
+from adaptive_snn.models.agent_env_system import SystemState
+from adaptive_snn.models.networks import (
     Eligibility,
     EligibilityLIFNetwork,
+    EligibilityLIFState,
     GatedLIFNetwork,
 )
-from adaptive_SNN.simulation_configs.single_synapse_config import (
-    create_single_synapse_learning_config,
+from adaptive_snn.simulation_configs.single_synapse_config import (
+    create_single_synapse_config,
 )
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.utils.runner import run_simulation
 
 MAX_TIME_DIFF = 0.1
 WINDOW_BUFFER = 10e-3
 
 
 class NoDecayGatedLIFNetwork(GatedLIFNetwork):
-    def compute_feature_drift(self, t, state: ElibilityState, args) -> Eligibility:
+    def compute_feature_drift(self, t, state: EligibilityLIFState, args) -> Eligibility:
         noise_std = self.compute_desired_noise_std(t, state, args)
         perturbations = state.perturbations
 
@@ -121,15 +123,17 @@ def compute_eligibility_changes_around_spikes(sol) -> list[tuple[float, float]]:
 
 
 def run_sim(id, key):
-    config = create_single_synapse_learning_config(key=key, initial_synapse_weight=5.0)
-    config.t1 = 30
-    config.network_cls = NoDecayGatedLIFNetwork
-    config.min_noise_std = 1e-9
-    config.noise_level = 0.0
-    config.args.update({"delta_V": 0.5**13})
+    config = create_single_synapse_config(
+        key,
+        network_cls=NoDecayGatedLIFNetwork,
+        learned_weight=5.0,
+        noise_floor=1e-9,
+        t1=30,
+    )
+    config.delta_V = 0.5**13
 
     def save_fn(t, x: SystemState, args):
-        pre_synaptic_spikes = args["input_spike_fn"](t, None, None)[
+        pre_synaptic_spikes = args["input_spike_fn"](t, None, args)[
             0, 2
         ].squeeze()  # Get the spikes from the third input
         post_synaptic_spikes = x.agent_state.network_state.S[0].squeeze()

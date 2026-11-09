@@ -12,12 +12,12 @@ from helpers import (
     make_default_args,
 )
 
-from adaptive_SNN.models import AgentEnvSystem, SystemState
-from adaptive_SNN.models.networks import LIFNetwork
-from adaptive_SNN.models.networks.agent import Agent
-from adaptive_SNN.models.noise import OUP
-from adaptive_SNN.models.reward_prediction import MovingAverageRewardPredictor
-from adaptive_SNN.solver import solve_ODE
+from adaptive_snn.models import AgentEnvSystem, SystemState
+from adaptive_snn.models.networks import LIFNetwork
+from adaptive_snn.models.networks.agent import Agent
+from adaptive_snn.models.noise import OUP
+from adaptive_snn.models.reward_prediction import NullRewardPredictor
+from adaptive_snn.solver import solve_ODE
 
 
 def test_solver_timesteps():
@@ -89,9 +89,7 @@ def test_solver_output():
         N_neurons=N_neurons, N_inputs=N_inputs, dt=dt0, key=key, noise_model=noise_model
     )
 
-    agent = Agent(
-        neuron_model=network, reward_prediction_model=MovingAverageRewardPredictor()
-    )
+    agent = Agent(neuron_model=network, reward_prediction_model=NullRewardPredictor())
 
     model = AgentEnvSystem(
         agent=agent,
@@ -99,9 +97,7 @@ def test_solver_output():
         agent_output_shape=(N_neurons,),
     )
 
-    agent = Agent(
-        neuron_model=network, reward_prediction_model=MovingAverageRewardPredictor()
-    )
+    agent = Agent(neuron_model=network, reward_prediction_model=NullRewardPredictor())
 
     model = AgentEnvSystem(
         agent=agent,

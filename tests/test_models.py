@@ -14,7 +14,7 @@ from helpers import (
     make_poisson_jump_model,
 )
 
-from adaptive_SNN.models.networks import LIFState
+from adaptive_snn.models.networks import LIFState
 
 
 def test_initial_state():
@@ -122,7 +122,9 @@ def test_recurrent_current():
         weights = weights.at[0, 1].set(1).at[0, 2].set(2).at[1, 0].set(1)
 
         conductances = jnp.zeros((N, N))
-        conductances = conductances.at[0, 1].set(1).at[0, 2].set(4).at[1, 0].set(0.5)
+        conductances = (
+            conductances.at[0, 1].set(1).at[0, 2].set(4).at[1, 0].set(0.5) * 1e-9
+        )
 
         state = make_baseline_state(model, W=weights, G=conductances)
         derivs = model.drift(0.0, state, args)
@@ -143,8 +145,10 @@ def test_recurrent_current():
             / model.membrane_capacitance
         )
 
-        assert jnp.allclose(dv[0], 9 * quantal_size)  # 1*1 + 2*4 = 9
-        assert jnp.allclose(dv[1], 0.5 * quantal_size)  # 1*0.5 = 0.5
+        # The "true" value here uses a forward Euler approximation of the voltage change
+        # But the model's drift uses an exponential Euler approximation, so we allow for some tolerance
+        assert jnp.allclose(dv[0], 9e-9 * quantal_size, rtol=1e-2)  # 1*1 + 2*4 = 9
+        assert jnp.allclose(dv[1], 0.5e-9 * quantal_size, rtol=1e-2)  # 1*0.5 = 0.5
         assert jnp.all(dv[2:] == 0)
 
 
@@ -174,7 +178,7 @@ def test_input_current():
         .set(4)
         .at[1, N_neurons + 2]
         .set(0.5)
-    )
+    ) * 1e-9
 
     state = make_baseline_state(model, W=weights, G=conductances)
     derivs = model.drift(0.0, state, args)
@@ -187,11 +191,11 @@ def test_input_current():
         model.reversal_potential_E - model.resting_potential
     ) / model.membrane_capacitance
 
-    expected_dv_0 = (1 * 1 + 2 * 4) * quantal_size
-    expected_dv_1 = (3 * 0.5) * quantal_size
+    expected_dv_0 = 1e-9 * (1 * 1 + 2 * 4) * quantal_size
+    expected_dv_1 = 1e-9 * (3 * 0.5) * quantal_size
 
-    assert jnp.isclose(dv[0], expected_dv_0)
-    assert jnp.isclose(dv[1], expected_dv_1)
+    assert jnp.isclose(dv[0], expected_dv_0, rtol=1e-2)
+    assert jnp.isclose(dv[1], expected_dv_1, rtol=1e-2)
     assert jnp.all(dv[2:] == 0)
 
 
@@ -388,7 +392,7 @@ def test_weight_plasticity():
 def test_excitatory_noise_only_affects_voltage_correctly():
     N = 7
     model = make_LIF_model(N_neurons=N, N_inputs=0)
-    state = make_baseline_state(model, perturbations=jnp.arange(N))
+    state = make_baseline_state(model, perturbations=jnp.arange(N) * 1e-9)
 
     args = make_default_args(
         N,
@@ -402,7 +406,7 @@ def test_excitatory_noise_only_affects_voltage_correctly():
         state.perturbations * (model.reversal_potential_E - state.V)
     ) / model.membrane_capacitance
 
-    assert jnp.allclose(dv, expected)
+    assert jnp.allclose(dv, expected, rtol=1e-2)
     assert jnp.all(dG == 0)
 
 
@@ -437,14 +441,14 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
     N = 5
     key = jr.PRNGKey(4)
     model = make_Noisy_LIF_model(
-        N_neurons=N, N_inputs=0, noise_std=0.5, tau=1.0, key=key
+        N_neurons=N, N_inputs=0, noise_std=1e-9, tau=1.0, key=key
     )
 
     network = model
     network_state = make_baseline_state(network)
     args = make_default_args(N, 0)
 
-    perturbations = jnp.arange(N, dtype=network_state.V.dtype)
+    perturbations = jnp.arange(N, dtype=network_state.V.dtype) * 1e-9
     x = make_noisy_state(network_state, perturbations)
 
     network_drift = model.drift(0.0, x, args)
@@ -455,7 +459,7 @@ def test_NoisyNeuronModel_forwards_noise_into_network_drift():
         perturbations * (network.reversal_potential_E - V_now)
     ) / network.membrane_capacitance
 
-    assert jnp.allclose(dV, expected_dv)
+    assert jnp.allclose(dV, expected_dv, rtol=1e-2)
     assert jnp.all(dG == 0)
     assert jnp.all(dS == 0)
     assert jnp.all(dW == 0)
@@ -801,7 +805,7 @@ def test_noise_scaling():
 
 def test_noise_variance():
     args = {"noise_std": jnp.array(0.314)}
-    oup = make_OUP_model(dim=1, tau=6e-3)
+    oup = make_OUP_model(dim=1, tau=6e-3, noise_std=0.314)
     sol = dfx.diffeqsolve(
         terms=oup.terms(jr.PRNGKey(0)),
         solver=dfx.EulerHeun(),
@@ -836,3 +840,26 @@ def test_noise_scaling_min_clip():
     # Compute desired noise std. Since synaptic variance is zero at init, should be clipped to min_noise_std
     desired_noise_std = model.compute_desired_noise_std(0.0, state, args)
     assert jnp.isclose(desired_noise_std, model.min_noise_std)
+
+
+def test_exponential_euler_integration():
+    N = 2
+    model = make_LIF_model(N_neurons=2, N_inputs=0, dt=1)
+    args = make_default_args(N, 0)
+
+    weights = jnp.zeros((N, N))
+    weights = weights.at[0, 1].set(1)
+
+    conductances = jnp.zeros((N, N))
+    # Set huge conductance that would lead to V >> 0  with forward Euler
+    conductances = conductances.at[0, 1].set(1) * 1e3
+
+    state = make_baseline_state(model, W=weights, G=conductances)
+    derivs = model.drift(0.0, state, args)
+    dv = derivs.V
+
+    new_V = state.V + dv * model.dt
+
+    assert jnp.all(
+        new_V < 0.0
+    )  # Check that voltage does not blow up with exponential Euler

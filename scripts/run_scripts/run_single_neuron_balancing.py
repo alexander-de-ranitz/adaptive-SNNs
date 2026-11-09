@@ -7,21 +7,18 @@ from diffrax import SaveAt
 from jax import numpy as jnp
 from matplotlib import pyplot as plt
 
-from adaptive_SNN.simulation_configs.single_synapse_config import (
-    create_single_synapse_learning_config,
+from adaptive_snn.simulation_configs.single_synapse_config import (
+    create_single_synapse_config,
 )
-from adaptive_SNN.utils.runner import run_simulation
+from adaptive_snn.utils.runner import run_simulation
 
 
 def main():
-    cfg = create_single_synapse_learning_config(key=jr.PRNGKey(0))
+    cfg = create_single_synapse_config(
+        jr.PRNGKey(0), balance=0.01, balance_rate=5.0, noise_floor=1e-9, t1=200
+    )
     cfg.save_file = "results/single_neuron_balancing.npz"
-
-    cfg.dt = 1e-4
-    cfg.balance = 0.01
-    cfg.base_network_kwargs["balance_rate"] = 5.0
     cfg.base_network_kwargs["tau_spike_filter"] = 1.0
-    cfg.min_noise_std = 1e-9
 
     def save_fn(t, x, args):
         return (
@@ -35,13 +32,8 @@ def main():
             x.agent_state.network_state.perturbations[0],
         )
 
-    cfg.t1 = 200
     cfg.save_at = SaveAt(
         ts=jnp.linspace(cfg.t0, cfg.t1, int(1000 * cfg.t1)), fn=save_fn
-    )
-    cfg.initial_weight_matrix = jnp.tile(
-        jnp.array([jnp.nan] * cfg.N_neurons + [1.0, 8, 0.0]),
-        (cfg.N_neurons, 1),
     )
     sol, model = run_simulation(cfg, overwrite=True)
 

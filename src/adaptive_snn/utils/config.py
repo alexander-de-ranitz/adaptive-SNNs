@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+import inspect
+from dataclasses import dataclass, fields
+from pathlib import Path
+from typing import Any, Callable
+
+import diffrax as dfx
+import equinox as eqx
+from diffrax import SaveAt
+from jaxtyping import Array
+
+from adaptive_snn.models.agent_env_system import AgentEnvSystem
+from adaptive_snn.models.environments import AbstractEnvironment, SpikeRateEnvironment
+from adaptive_snn.models.networks import AbstractNeuronModel, Agent, LIFNetwork
+from adaptive_snn.models.reward_prediction import (
+    AbstractRewardPredictor,
+    NullRewardPredictor,
+)
+
+
+@dataclass
+class SimulationConfig:
+    # Time parameters
+    t0: float = 0.0
+    t1: float = 100.0
+    dt: float = 1e-4
+    actor_warmup_time: float = 10.0
+    critic_warmup_time: float = 0.0
+    save_at: SaveAt = dfx.SaveAt()
+
+    # Model classes
+    network_cls: type[AbstractNeuronModel] = LIFNetwork
+    agent_cls: type[AbstractNeuronModel] = Agent
+    agent_env_system_cls: type[AbstractNeuronModel] = AgentEnvSystem
+
+    # Model hyperparameters
+    N_neurons: int = 1
+    N_inputs: int = 2
+    connection_prob_E: float = 0.0
+    connection_prob_I: float = 0.0
+    lr: float | Array = 0.0
+    critic_lr: float | Array = 0.0
+    initial_rec_weight: float = 0.0
+    rec_weight_std: float = 0.0
+    balance: float = 0.0
+    noise_floor: float | Array = 0.0
+    noise_scaling_factor: float | Array = 0.0
+    fraction_excitatory_recurrent: float = 0.8
+    fraction_excitatory_input: float = 0.8
+    initial_weight_matrix: Array | None = None
+    mean_synaptic_delay: float = 0.0
+    base_network_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
+    use_noise: Array | None = None
+    delta_V: Array | None = None
+    critic_input_fn: Callable[..., Any] | None = None
+    get_balance_rate: Callable[..., Any] | None = None
+    env_warmup_fn: Callable[..., Any] | None = None
+    episode_end_fn: Callable[..., Any] | None = None
+    RPE_fn: Callable[..., Any] | None = None
+    get_critic_lr: Callable[..., Any] | None = None
+    tau_charge: Array | None = None
+    network_output_fn: Callable[..., Any] | None = None
+    network_output_shape: tuple[int, ...] = (1,)
+    learn_I_weights: bool = False
+
+    # Reward model (default: no reward prediction)
+    reward_prediction_model: type[AbstractRewardPredictor] = NullRewardPredictor
+    reward_predictor_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
+    reward_fn: Callable[..., Any] | None = None
+
+    # Environment parameters
+    environment_model: type[AbstractEnvironment] = SpikeRateEnvironment
+    environment_kwargs: dict[str, Any] = eqx.field(default_factory=lambda: {})
+
+    # Input parameters
+    input_spike_fn: Callable[..., Any] | None = None
+    input_types: Array | None = None
+    fully_connected_input: bool = True
+    initial_input_weight: float = 0.0
+    input_weight_std: float = 0.0
+
+    # Other
+    key: int | Array = 0
+    save_file: str | None = None
+    additional_args: dict[str, Any] = eqx.field(default_factory=lambda: {})
+
+    def __post_init__(self) -> None:
+        self._validate_scalars()
+        self._validate_probabilities()
+        self._validate_arrays()
+        self._validate_callables()
+
+    def _validate_scalars(self) -> None:
+        if self.t1 <= self.t0:
+            raise ValueError(f"Expected t1 > t0, got t0={self.t0}, t1={self.t1}")
+        if self.dt <= 0.0:
+            raise ValueError(f"Expected dt > 0, got dt={self.dt}")
+        if self.actor_warmup_time < 0.0:
+            raise ValueError(
+                f"Expected actor_warmup_time >= 0, got {self.actor_warmup_time}"
+            )
+        if self.N_neurons <= 0:
+            raise ValueError(f"Expected N_neurons > 0, got {self.N_neurons}")
+        if self.N_inputs < 0:
+            raise ValueError(f"Expected N_inputs >= 0, got {self.N_inputs}")
+
+    def _validate_probabilities(self) -> None:
+        for name in (
+            "connection_prob_E",
+            "connection_prob_I",
+            "fraction_excitatory_recurrent",
+            "fraction_excitatory_input",
+        ):
+            value = getattr(self, name)
+            if not (0.0 <= value <= 1.0):
+                raise ValueError(f"Expected {name} in [0, 1], got {value}")
+
+    def _validate_arrays(self) -> None:
+        if self.initial_weight_matrix is not None:
+            expected_shape = (self.N_neurons, self.N_neurons + self.N_inputs)
+            if self.initial_weight_matrix.shape != expected_shape:
+                raise ValueError(
+                    "Expected initial_weight_matrix shape "
+                    f"{expected_shape}, got {self.initial_weight_matrix.shape}"
+                )
+
+        if self.input_types is not None:
+            if self.input_types.shape != (self.N_inputs,):
+                raise ValueError(
+                    f"Expected input_types shape {(self.N_inputs,)}, got {self.input_types.shape}"
+                )
+
+    def _validate_callables(self) -> None:
+        for name in ("reward_fn", "input_spike_fn", "network_output_fn"):
+            value = getattr(self, name)
+            if value is not None and not callable(value):
+                raise TypeError(
+                    f"Expected {name} to be callable or None, got {type(value)}"
+                )
+
+        if self.save_file is not None and not isinstance(self.save_file, str):
+            raise TypeError(
+                f"Expected save_file to be a string or None, got {type(self.save_file)}"
+            )
+
+    def normalized_save_file(self) -> str:
+        if self.save_file is None:
+            self.save_file = "default_simulation_result.npz"
+        if self.save_file.endswith(".npz"):
+            return self.save_file
+        return f"{self.save_file}.npz"
+
+    def ensure_output_directory(self) -> None:
+        path = Path(self.normalized_save_file())
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _format_callable_source(fn: Callable[..., Any]) -> str:
+        """Return the source of a callable, falling back to its repr."""
+        try:
+            return inspect.getsource(fn).strip() + "\n"
+        except (OSError, TypeError) as e:
+            return f"{fn!r} (source unavailable: {e})\n"
+
+    def _format_save_at(self, value: Any) -> str:
+        """Return the source of the save function(s) attached to a SaveAt."""
+        try:
+            subs = getattr(value, "subs", None)
+            if subs is None:
+                return "None\n"
+            subs_list = list(subs) if isinstance(subs, (list, tuple)) else [subs]
+            lines = []
+            for sub in subs_list:
+                save_fn = getattr(sub, "fn", None)
+                if save_fn is None:
+                    continue
+                lines.append(self._format_callable_source(save_fn).rstrip("\n"))
+            if not lines:
+                return f"{value!r}\n"
+            return "\n".join(lines) + "\n"
+        except Exception as e:
+            return f"Could not retrieve save_at function source code: {e}\n"
+
+    def print_to_file(self) -> None:
+        log_path = Path(self.normalized_save_file()).with_suffix("")
+        info_file = f"{log_path}_info.txt"
+
+        with open(info_file, "w", encoding="utf-8") as f:
+            for field in fields(self):
+                value = getattr(self, field.name)
+
+                if field.name == "save_at":
+                    f.write(f"{field.name}:\n")
+                    f.write(self._format_save_at(value))
+                    continue
+
+                # Print the source for any callable field (plain functions and
+                # lambdas alike); classes fall through to their repr.
+                if callable(value) and not isinstance(value, type):
+                    f.write(f"{field.name}:\n")
+                    f.write(self._format_callable_source(value))
+                    continue
+
+                f.write(f"{field.name}: {value}\n")
