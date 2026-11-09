@@ -360,7 +360,7 @@ def _minimal_sim_config():
     )
 
 
-def _I_weight_drift(balance_rate, get_balance_rate=None):
+def _I_weight_drift(balance_rate=None, get_balance_rate=None, additional_args=None):
     """I weight drift of the single synapse setup for a fixed, unbalanced charge state."""
     import jax.random as jr
 
@@ -373,7 +373,9 @@ def _I_weight_drift(balance_rate, get_balance_rate=None):
     config = create_single_synapse_config(
         jr.PRNGKey(0), network_cls=LIFNetwork, balance=0.01, balance_rate=balance_rate
     )
-    config.get_balance_rate = get_balance_rate
+    if get_balance_rate is not None:
+        config.get_balance_rate = get_balance_rate
+    config.additional_args.update(additional_args or {})
     model, args, _ = setup_simulation(config)
     state = model.initial.agent_state.network_state
     state = eqx.tree_at(
@@ -393,12 +395,12 @@ def test_balance_rate_scales_I_weight_drift():
     assert jnp.allclose(drift, 0.3 * default_drift)
 
 
-def test_get_balance_rate_overrides_and_reads_balance_rate():
-    # As in the pendulum runs: get_balance_rate is a schedule that uses balance_rate as a (batchable) parameter
-    default_drift = _I_weight_drift(balance_rate=None)
+def test_get_balance_rate_reads_additional_args():
+    # As in the pendulum runs: get_balance_rate is a schedule with a (batchable) parameter from additional_args
+    default_drift = _I_weight_drift()
     drift = _I_weight_drift(
-        balance_rate=0.3,
-        get_balance_rate=lambda t, state, args: 2.0 * args["balance_rate"],
+        get_balance_rate=lambda t, state, args: 2.0 * args["final_balance_rate"],
+        additional_args={"final_balance_rate": jnp.asarray(0.3)},
     )
     assert jnp.allclose(drift, 0.6 * default_drift)
 

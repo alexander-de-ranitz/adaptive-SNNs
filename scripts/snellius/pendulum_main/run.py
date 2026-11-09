@@ -197,7 +197,8 @@ def main():
         cfg.lr = jnp.asarray(p["lr"])
         cfg.noise_floor = jnp.asarray(p["noise_floor"])
         cfg.base_network_kwargs["tau_spike_filter"] = jnp.asarray(100e-3)
-        cfg.balance_rate = jnp.asarray(0.1)
+        # The final balance rate is read from args (rather than fixed in the schedule), such that it is batchable
+        cfg.additional_args["balance_rate"] = jnp.asarray(0.1)
         cfg.get_balance_rate = lambda t, state, args: jnp.max(
             jnp.array([15 - t * 15 / 100, args["balance_rate"]])
         )

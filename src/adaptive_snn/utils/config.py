@@ -59,10 +59,6 @@ class SimulationConfig:
     episode_end_fn: Callable[..., Any] | None = None
     RPE_fn: Callable[..., Any] | None = None
     get_critic_lr: Callable[..., Any] | None = None
-    # Rate at which I weights are adjusted to maintain balance (None: the network's default). It is available to
-    # get_balance_rate as args["balance_rate"]. If get_balance_rate is set, it takes precedence: it can use
-    # balance_rate as a parameter (e.g. the floor of a schedule), which, unlike a lambda, can differ per batched run.
-    balance_rate: float | Array | None = None
     tau_charge: Array | None = None
     network_output_fn: Callable[..., Any] | None = None
     network_output_shape: tuple[int, ...] = (1,)

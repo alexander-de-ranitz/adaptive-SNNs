@@ -79,6 +79,13 @@ def create_single_synapse_config(
         )
         use_noise = jnp.array([True] * N_neurons)
 
+    additional_args = {"input_key": input_key}
+    get_balance_rate = None  # Network default
+    if balance_rate is not None:
+        # The rate is read from args (rather than fixed in the function), such that batched runs can differ in rate
+        additional_args["balance_rate"] = jnp.asarray(balance_rate)
+        get_balance_rate = lambda t, state, args: args["balance_rate"]
+
     return SimulationConfig(
         network_cls=network_cls,
         N_neurons=N_neurons,
@@ -98,7 +105,7 @@ def create_single_synapse_config(
         actor_warmup_time=0.0,
         lr=0.0,
         balance=balance,
-        balance_rate=balance_rate,
+        get_balance_rate=get_balance_rate,
         noise_floor=noise_floor,
         noise_scaling_factor=0.0,
         use_noise=use_noise,
@@ -106,7 +113,7 @@ def create_single_synapse_config(
         save_at=SaveAt(t1=True),
         network_output_fn=network_output_fn,
         input_spike_fn=input_spike_fn,
-        additional_args={"input_key": input_key},
+        additional_args=additional_args,
         environment_model=SingleSynapseLearningEnv,
         environment_kwargs={"tau_reward": 0.01, "reward_dim": 1},
         reward_fn=lambda t, x, args: x.environment_state.reward,
